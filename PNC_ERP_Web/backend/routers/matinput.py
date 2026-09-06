@@ -63,19 +63,33 @@ def matinput_list(base_ymd: str = Query(""), days: int = Query(4),
                   gubun: str = Query("all"), cust: str = Query(""),
                   line: str = Query(""), wo: str = Query(""),
                   doban: str = Query(""), jadoban: str = Query(""),
+                  inout: str = Query("INPUT"),
                   limit: int = Query(4000)):
-    """gubun: all=전체 / sum=집계 / wo=제번 / doban=도번별."""
+    """gubun: all=전체 / sum=집계 / wo=제번 / doban=도번별.
+
+    ★inout (2026-09-06 신설) — 일자칸을 무슨 날짜로 놓을지.
+        INPUT  = part_plan_ymd / part_output_hm  … **당김 계산이 반영된** 소요일(종전 동작)
+        OUTPUT = plan_ymd      / output_hm       … **엑셀 업로드 원본** 계획일·시각
+      두 컬럼 모두 nx.plan_part_mat 에 있다. 수량·재고·필터는 그대로이고 축만 바뀐다.
+      ※nx.plan_dtl 은 PLAN_YMD=ORG_PLAN_YMD 로 업로드 원본을 그대로 담는다(실측 차이 0건).
+        당김은 그 아래 plan_part_* 단계에서 일어나므로, 원본 축은 plan_ymd 가 맞다.
+    """
     b6 = _d6(base_ymd)
     if len(b6) != 6:
         raise HTTPException(400, "기준일자가 필요합니다.")
     if gubun not in ("all", "sum", "wo", "doban"):
         raise HTTPException(400, "구분이 올바르지 않습니다.")
+    _io = (inout or "INPUT").strip().upper()
+    if _io not in ("INPUT", "OUTPUT"):
+        raise HTTPException(400, "IN/OUT 은 INPUT 또는 OUTPUT 입니다.")
+    _DCOL = "m.part_plan_ymd" if _io == "INPUT" else "m.plan_ymd"
+    _HCOL = "m.part_output_hm" if _io == "INPUT" else "m.output_hm"
     nx = _nx(); cur = nx.cursor()
     try:
         cal = _workdays(cur, b6, days)          # [{ymd, work}] — 휴무일 칸 포함
         dl = [x["ymd"] for x in cal]
         d_from, d_to = dl[0], dl[-1]
-        w = ["m.part_plan_ymd BETWEEN ? AND ?"]; p = [d_from, d_to]
+        w = [f"{_DCOL} BETWEEN ? AND ?"]; p = [d_from, d_to]
         # ★자도번작업처 = 코드 정확일치 우선(레거시 동일).
         #   이름 LIKE 로 받으면 '산업' 같은 부분일치로 다른 업체가 섞인다(사용자 지적).
         #   코드가 아닌 값이 들어오면 그때만 이름 정확일치로 폴백.
@@ -106,7 +120,7 @@ def matinput_list(base_ymd: str = Query(""), days: int = Query(4),
         cur.execute(f"""SELECT TOP {max(1, min(int(limit), 20000))}
               m.work_order, m.split_work_order, m.assy_item_code, m.item_code,
               m.mat_code, RTRIM(ISNULL(m.mat_work_center_code,'')) cc,
-              m.part_plan_ymd, ISNULL(m.part_output_hm,'') hm,
+              {_DCOL} AS part_plan_ymd, ISNULL({_HCOL},'') hm,
               ISNULL(m.plan_ymd,'') plan_ymd,
               CAST(ISNULL(m.part_plan_qty,0) AS float) qty,
               -- ★라인·LG시각·LOT = 일자 일치행 우선, 없으면 같은 (제번·도번·품목)의 다른 일자행.
@@ -151,7 +165,7 @@ def matinput_list(base_ymd: str = Query(""), days: int = Query(4),
                             WHERE pi.item_code=m.mat_code
                               AND pi.vendor_code=RTRIM(m.mat_work_center_code)
                               AND pi.price_type=N'매입'
-                              AND pi.apply_ymd<=m.part_plan_ymd
+                              AND pi.apply_ymd<={_DCOL}
                             ORDER BY pi.apply_ymd DESC),0) AS float) cost
             FROM nx.plan_part_mat m WITH(NOLOCK)
             -- ★nx.plan_dtl 은 JOIN 하지 않는다(모델은 위 스칼라 서브쿼리로 뽑음).
@@ -165,7 +179,7 @@ def matinput_list(base_ymd: str = Query(""), days: int = Query(4),
             LEFT JOIN nx.item i2 WITH(NOLOCK) ON i2.item_code=m.mat_code
             LEFT JOIN nx.CM_M_CUST c WITH(NOLOCK) ON c.CUST_CODE=RTRIM(m.mat_work_center_code)
            WHERE {' AND '.join(w)}
-           ORDER BY m.mat_code, m.assy_item_code, m.part_plan_ymd, m.work_order""", *p)
+           ORDER BY m.mat_code, m.assy_item_code, {_DCOL}, m.work_order""", *p)
         raw = []
         for r in cur.fetchall():
             g = lambda i: str(r[i] if r[i] is not None else "").strip()

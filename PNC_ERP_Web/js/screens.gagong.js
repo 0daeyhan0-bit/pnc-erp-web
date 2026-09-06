@@ -66,12 +66,49 @@ SCREEN.gagongplan4w=(c)=>{
   const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
   const dcol=s=>(s&&(''+s).length===6)?`${(''+s).slice(2,4)}/${(''+s).slice(4,6)}`:s;
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
+  // 배경이 어두우면 흰 글자(키팅완료 #669900 이 그 경우). 임계값 150 = 420·580 과 동일.
+  const fgOn4=bg=>{const m=/^#([0-9a-f]{6})$/i.exec(bg||'');if(!m)return 'color:#222';
+    const n=parseInt(m[1],16), L=(((n>>16)&255)*0.299+((n>>8)&255)*0.587+(n&255)*0.114);
+    return L<150?'color:#fff':'color:#222';};
   const T=new Date();
   // ★기준일 = 마지막 계획업로드의 일자축 첫날(planBaseIso, 2026-08-28 사용자 확정).
   //   당일 기준이면 업로드 전날이 잡혀 미출하 재편성분과 재고 충당이 어긋난다.
   const _b0=planBaseIso(), _bT=new Date(_b0+'T00:00:00');
   const st={from:_b0,to:iso(new Date(_bT.getTime()+30*864e5)),wc:'P2',item:'',part:'',gigan:31,
             dates:[],rows:[],cnt:0,plan_sum:0,done_sum:0,note:'',loading:false,msg:'',exp:new Set()};
+  /* ★컬럼 정의 — 항목보기(숨김·순서)를 쓰려면 <th>·<td> 를 하드코딩하지 않고
+       정의에서 만들어야 한다(2026-09-06, 420·580 과 같은 구조).
+       이 화면은 일자칸이 **맨 뒤**라 그룹이 하나뿐이다(앞그룹만). */
+  const P4DEF={
+    seq:{t:'SEQ',cls:'num', h:(r,i)=>`<td class="num">${i+1}</td>`, x:{w:40,al:'center',v:(r,i)=>i+1}},
+    awc:{t:'자도번작업처',   h:r=>`<td class="center">${esc(r.awcnm||r.awc)}</td>`, x:{w:86,al:'center',v:r=>r.awcnm||r.awc||''}},
+    line:{t:'라인',          h:r=>`<td class="center">${esc(r.line)}</td>`,        x:{w:48,al:'center',v:r=>r.line||''}},
+    mwc:{t:'작업처',         h:r=>`<td>${esc(r.mwcnm)}</td>`,                       x:{w:96,al:'left',  v:r=>r.mwcnm||''}},
+    assy:{t:'도번',          h:r=>`<td><b>${esc(r.assy)}</b></td>`,                 x:{w:118,al:'center',v:r=>r.assy||''}},
+    jado:{t:'자도번LIST',    h:(r,i)=>{const js=(r.jado||'').length>44?(r.jado.slice(0,44)+'…'):(r.jado||'');
+      return `<td class="jado-cell" data-i="${i}" title="${esc(r.jado)}&#10;클릭=자도번 펼치기" style="max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;color:#1c66c9">${esc(js)} <span style="color:#8aa">(${r.matcnt})</span></td>`;},
+      x:{w:230,al:'left',v:r=>r.jado||''}},
+    lot:{t:'LOT수량',cls:'num',  h:r=>`<td class="num">${nf(r.lot)}</td>`,          x:{w:62,al:'right',v:r=>+r.lot||0}},
+    matq:{t:'자재수량',cls:'num', h:r=>`<td class="num">${nf(r.matq)}</td>`,        x:{w:62,al:'right',v:r=>+r.matq||0}},
+    finish:{t:'완료수량',cls:'num',h:r=>`<td class="num"${r.finish?'':' style="color:#dfe6ef"'}>${r.finish?nf(r.finish):'·'}</td>`,
+      x:{w:62,al:'right',v:r=>(+r.finish||0)||''}},
+    plan_qty:{t:'요청수량',cls:'num',h:r=>`<td class="num">${nf(r.plan_qty)}</td>`, x:{w:62,al:'right',v:r=>+r.plan_qty||0}},
+    nm:{t:'품목정보',        h:r=>`<td class="bcap" title="${esc(r.nm)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}</td>`,
+      x:{w:150,al:'left',v:r=>r.nm||''}},
+  };
+  const P4_DEF=['seq','awc','line','mwc','assy','jado','lot','matq','finish','plan_qty','nm'];
+  const P4_LS='p4w_colorder', P4_HIDE='p4w_hidecols';
+  /* ★가변 배열로 둔다 — 항목보기 적용 시 제자리에서 고쳐야 draw() 한 번으로 새 순서가 보인다. */
+  const P4_ORD=(()=>{try{const v=JSON.parse(localStorage.getItem(P4_LS)||'null');
+    if(Array.isArray(v)&&v.length){const o=v.filter(k=>P4DEF[k]);
+      P4_DEF.forEach(k=>{if(!o.includes(k))o.push(k);});return o;}}catch(_){}
+    return P4_DEF.slice();})();
+  const p4LoadHide=()=>{try{const v=JSON.parse(localStorage.getItem(P4_HIDE)||'[]');
+    return new Set(Array.isArray(v)?v:[]);}catch(_){return new Set();}};
+  let p4Hid=p4LoadHide();
+  const p4Vis=()=>P4_ORD.filter(k=>!p4Hid.has(k));
+  const p4Th=()=>p4Vis().map(k=>`<th class="${P4DEF[k].cls||''}" data-tk="${k}" title="우클릭 = 항목보기(순서·숨김)">${P4DEF[k].t}</th>`).join('');
+  const p4Td=(r,i)=>p4Vis().map(k=>P4DEF[k].h(r,i)).join('');
   const load=async()=>{st.loading=true;draw();
     const qs=new URLSearchParams({from_ymd:st.from,to_ymd:st.to,wc:st.wc,item:st.item,part:st.part,limit:2500});
     try{const r=await fetch(`${API}/api/gagong/plan4w?${qs}`);const d=await r.json();
@@ -91,9 +128,10 @@ SCREEN.gagongplan4w=(c)=>{
     let tLot=0,tMat=0,tFin=0,tReq=0;const dSum={};dates.forEach(d=>dSum[d]={dn:0,pl:0});
     st.rows.forEach(r=>{tLot+=+r.lot||0;tMat+=+r.matq||0;tFin+=+r.finish||0;tReq+=+r.plan_qty||0;
       dates.forEach(d=>{dSum[d].dn+=(r.done&&r.done[d])||0;dSum[d].pl+=(r.days&&r.days[d])||0;});});
-    const NC=8; // 고정컬럼수(SEQ~품목정보)
+    // ★colspan 은 실제 보이는 컬럼 수로 — 고정값(8)을 쓰면 항목 숨김 시 어긋난다(420·580 과 동일).
+    const NC=p4Vis().length;
     const frac=(dn,pl,bg)=>{if(!pl&&!dn)return '<td class="num" style="color:#dfe6ef">·</td>';
-      return `<td class="num" style="white-space:nowrap${bg?';background:'+bg:''}">${nf(dn)}/${nf(pl)}</td>`;};   // 날짜셀 색=완료상태(서버)
+      return `<td class="num" style="white-space:nowrap${bg?';background:'+bg+';'+fgOn4(bg):''}">${nf(dn)}/${nf(pl)}</td>`;};   // 날짜셀 색=완료상태(서버)
     c.innerHTML=`
      <div class="page-title">📋 4주간 가공계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">도번×라인×작업처 · 자도번LIST 묶음</span></div>
      <div class="page-sub">레거시 4주간 원천(<code>PR_T_PLAN_PART_DTL_FOR_CUST</code>·당일생성 스냅샷) 직독. <b>도번=부품</b>·<b>자도번LIST=이 부품을 쓰는 부모 자도번들</b>. 첫 일자컬럼=당일이전 누적. 🔴 라이브
@@ -103,40 +141,287 @@ SCREEN.gagongplan4w=(c)=>{
        <label class="tl">기간</label><select class="inp" id="p4-gigan" style="max-width:78px">${[7,14,21,31,42,60].map(d=>`<option value="${d}"${st.gigan===d?' selected':''}>${d}일</option>`).join('')}</select>
        <label class="tl">자도번작업처</label><select class="inp" id="p4-wc" style="max-width:110px"><option value="P2"${st.wc==='P2'?' selected':''}>P2 가공</option><option value="P1"${st.wc==='P1'?' selected':''}>P1 용접</option></select>
        <button class="btn" id="p4-search">🔍 조회</button>
+       <button class="btn" id="p4-col" title="컬럼 숨김·순서 (헤더 우클릭으로도 열림)">항목보기</button>
+       <button class="btn xls" id="p4-xls" title="조회 결과를 화면과 같은 색상으로 엑셀 저장">엑셀</button>
      </div>
      <div class="toolbar" style="margin-top:2px">
        <label class="tl">도번</label><input class="inp" id="p4-item" list="p4-iteml" value="${esc(st.item)}" style="width:130px" placeholder="도번/품명" autocomplete="off"><datalist id="p4-iteml">${itOpts}</datalist>
        <label class="tl">자도번</label><input class="inp" id="p4-part" list="p4-partl" value="${esc(st.part)}" style="width:130px" placeholder="자도번" autocomplete="off"><datalist id="p4-partl">${ptOpts}</datalist>
-       <div class="spacer"></div><span class="rowcount">행 <b>${nf(st.cnt)}</b> · 계획합 <b>${nf(st.plan_sum)}</b> · 완료합 <b>${nf(st.done_sum)}</b> · 일자 ${dates.length}개</span>
+       <div class="spacer"></div><span class="rowcount" id="p4-cnt">행 <b>${nf(st.cnt)}</b> · 계획합 <b>${nf(st.plan_sum)}</b> · 완료합 <b>${nf(st.done_sum)}</b> · 일자 ${dates.length}개</span>
      </div>
      ${st.note?`<div class="page-sub" style="color:#c0392b">${esc(st.note)}</div>`:''}
      ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 340px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-      <table class="tbl fit" style="font-size:11px"><thead><tr>
-       <th>SEQ</th><th>자도번작업처</th><th>라인</th><th>작업처</th><th>도번</th><th>자도번LIST</th>
-       <th class="num">LOT수량</th><th class="num">자재수량</th><th class="num">완료수량</th><th class="num">요청수량</th><th>품목정보</th>
+      <table class="tbl fit p4tbl" style="font-size:11px;user-select:none"><thead><tr>
+       ${p4Th()}
        ${dates.map(d=>`<th class="num">${dcol(d)}</th>`).join('')}</tr></thead>
       <tbody>${st.loading?spinRow(NC+dates.length):(st.rows.length?st.rows.map((r,i)=>{
-        const jshort=(r.jado||'').length>44?(r.jado.slice(0,44)+'…'):(r.jado||'');
         const ex=st.exp.has(i);
         return `<tr>
-        <td class="num">${i+1}</td><td class="center">${esc(r.awcnm||r.awc)}</td><td class="center">${esc(r.line)}</td>
-        <td>${esc(r.mwcnm)}</td><td><b>${esc(r.assy)}</b></td>
-        <td class="jado-cell" data-i="${i}" title="${esc(r.jado)}" style="max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;color:#1c66c9">${esc(jshort)} <span style="color:#8aa">(${r.matcnt})</span></td>
-        <td class="num">${nf(r.lot)}</td><td class="num">${nf(r.matq)}</td><td class="num"${r.finish?'':' style="color:#dfe6ef"'}>${r.finish?nf(r.finish):'·'}</td><td class="num">${nf(r.plan_qty)}</td>
-        <td class="bcap" title="${esc(r.nm)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}</td>
+        ${p4Td(r,i)}
         ${dates.map(d=>frac((r.done&&r.done[d])||0,(r.days&&r.days[d])||0,(r.colors&&r.colors[d])||'')).join('')}</tr>
         ${ex?`<tr class="jado-exp"><td></td><td colspan="${NC-1+dates.length}" style="background:#f2f7ff;white-space:normal;padding:4px 8px;font-size:11px;color:#334">📦 자도번 ${r.matcnt}종: ${esc(r.jado).replace(/,/g,'&nbsp;· ')}</td></tr>`:''}`;
       }).join(''):`<tr><td colspan="${NC+dates.length}" class="empty">조회 결과 없음</td></tr>`)}</tbody>
-      ${st.rows.length?`<tfoot><tr class="grandtot"><td colspan="6">합계 (${nf(st.cnt)}행)</td>
-        <td class="num">${nf(tLot)}</td><td class="num">${nf(tMat)}</td><td class="num">${nf(tFin)}</td><td class="num">${nf(tReq)}</td><td></td>
-        ${dates.map(d=>`<td class="num" style="white-space:nowrap">${nf(dSum[d].dn)}/${nf(dSum[d].pl)}</td>`).join('')}</tr></tfoot>`:''}
+      ${(()=>{if(!st.rows.length)return '';
+        /* ★합계행도 정의 기반으로 — 종전엔 colspan="6" + 위치 하드코딩이라
+             컬럼을 숨기거나 옮기면 합계가 엉뚱한 칸에 붙었다(580 과 같은 교정). */
+        const TOT={lot:tLot,matq:tMat,finish:tFin,plan_qty:tReq};
+        const vs=p4Vis();
+        let lead=0; while(lead<vs.length && TOT[vs[lead]]===undefined) lead++;
+        return `<tfoot><tr class="grandtot">${lead?`<td colspan="${lead}">합계 (${nf(st.cnt)}행)</td>`:''}
+        ${vs.slice(lead).map(k=>`<td class="num">${TOT[k]===undefined?'':nf(TOT[k])}</td>`).join('')}
+        ${dates.map(d=>`<td class="num" style="white-space:nowrap">${nf(dSum[d].dn)}/${nf(dSum[d].pl)}</td>`).join('')}</tr></tfoot>`;})()}
       </table></div>`;
     const g=id=>c.querySelector(id);
     g('#p4-search').onclick=()=>{st.from=g('#p4-from').value;st.gigan=+g('#p4-gigan').value;st.to=iso(new Date(new Date(st.from).getTime()+st.gigan*864e5));st.wc=g('#p4-wc').value.trim();st.item=g('#p4-item').value.trim();st.part=g('#p4-part').value.trim();load();};
     g('#p4-gigan').onchange=()=>{st.gigan=+g('#p4-gigan').value;st.to=iso(new Date(new Date(st.from).getTime()+st.gigan*864e5));g('#p4-search').click();};
     ['#p4-wc','#p4-item','#p4-part'].forEach(id=>g(id).onkeyup=e=>{if(e.key==='Enter')g('#p4-search').click();});
     c.querySelectorAll('.jado-cell').forEach(el=>el.onclick=()=>{const i=+el.dataset.i;st.exp.has(i)?st.exp.delete(i):st.exp.add(i);draw();});
+    {const cb=g('#p4-col');
+     if(cb)cb.onclick=e=>{e.preventDefault();e.stopPropagation();
+       try{openColPick();}
+       catch(err){console.error('[4주 항목보기]',err);
+                  alert('항목보기를 열지 못했습니다: '+(err&&err.message||err));}};}
+    {const xb=g('#p4-xls'); if(xb)xb.onclick=exportXls;}
+
+    /* == 드래그 복사 (2026-09-06 — 410·420·580 과 같은 동작) ==================
+         표를 끌어 사각영역을 고르고 Ctrl+C 로 클립보드에 넣는다(엑셀에 TSV 로 붙는다).
+         ★이 화면은 전표발행 같은 셀 선택 로직이 없어 **모든 셀**이 복사 대상이다.
+         ★HTML5 텍스트 선택과 부딪히므로 mousedown 에서 preventDefault +
+           표에 user-select:none — 안 그러면 파란 블록만 생기고 영역이 안 잡힌다. */
+    const tbl=c.querySelector('.p4tbl');
+    const tb=tbl&&tbl.tBodies[0];
+    if(tb&&!c.dataset.p4cp){
+      c.dataset.p4cp='1';
+      if(!document.getElementById('p4cp-css')){
+        const stl=document.createElement('style'); stl.id='p4cp-css';
+        stl.textContent='.p4tbl td.p4cp{outline:1px solid #93b4e6;outline-offset:-1px;'
+          +'background-image:linear-gradient(rgba(219,234,254,.55),rgba(219,234,254,.55))}';
+        document.head.appendChild(stl);
+      }
+    }
+    if(tb){
+      const rcOf=td=>({r:td.parentElement.rowIndex, c:td.cellIndex});
+      let cdrag=false,_ca=null,_cells=null,_clast=null;
+      const cpClear=()=>tb.querySelectorAll('td.p4cp').forEach(td=>td.classList.remove('p4cp'));
+      const cpSnap=()=>{_cells=[...tb.querySelectorAll('td')].map(x=>{const q=rcOf(x);return {td:x,r:q.r,c:q.c};});};
+      const cpRect=td=>{if(!_ca||!_cells)return;
+        const b=rcOf(td);
+        const r1=Math.min(_ca.r,b.r),r2=Math.max(_ca.r,b.r);
+        const c1=Math.min(_ca.c,b.c),c2=Math.max(_ca.c,b.c);
+        for(const it of _cells) it.td.classList.toggle('p4cp', it.r>=r1&&it.r<=r2&&it.c>=c1&&it.c<=c2);
+        const n=tb.querySelectorAll('td.p4cp').length;
+        const el=c.querySelector('#p4-cnt');
+        if(el&&n&&!el.dataset.o){el.dataset.o=el.innerHTML;}
+        if(el&&n)el.innerHTML=`복사선택 <b>${nf(n)}</b>칸 <span style="color:#7b8aa0">(Ctrl+C)</span>`;};
+      tb.addEventListener('mousedown',e=>{
+        if(e.button!==0)return;
+        if(e.target.closest('.jado-cell'))return;        // 자도번 펼치기 클릭은 살린다
+        const start=e.target.closest('td'); if(!start||!start.closest('tr'))return;
+        e.preventDefault();
+        if(!e.ctrlKey&&!e.metaKey)cpClear();
+        cdrag=true;cpSnap();_ca=rcOf(start);_clast=start;cpRect(start);});
+      tb.addEventListener('mousemove',e=>{if(!cdrag)return;
+        if(!(e.buttons&1)){cdrag=false;_ca=null;_cells=null;_clast=null;return;}
+        const el=document.elementFromPoint(e.clientX,e.clientY);
+        const td=(el&&el.closest('td'))||_clast;
+        if(td){_clast=td;cpRect(td);}});
+      document.addEventListener('mouseup',()=>{cdrag=false;_ca=null;_cells=null;_clast=null;});
+    }
+    const selText=()=>{
+      const map=new Map();
+      c.querySelectorAll('td.p4cp').forEach(td=>{
+        const tr=td.parentElement; if(!tr)return;
+        if(!map.has(tr.rowIndex))map.set(tr.rowIndex,[]);
+        map.get(tr.rowIndex).push([td.cellIndex,(td.innerText||'').trim()]);});
+      return [...map.keys()].sort((x,y)=>x-y)
+        .map(r=>map.get(r).sort((x,y)=>x[0]-y[0]).map(x=>x[1]).join('\t')).join('\n');
+    };
+    const toClip=(txt,what)=>{
+      if(!txt){alert('복사할 영역을 먼저 끌어서 선택하세요.');return;}
+      const done=()=>{const el=c.querySelector('#p4-cnt');
+        if(el){const o=el.innerHTML;el.innerHTML=`<b style="color:#1c7c3a">${what} 복사됨</b>`;
+               setTimeout(()=>{el.innerHTML=o;},1400);}};
+      if(navigator.clipboard&&navigator.clipboard.writeText)
+        navigator.clipboard.writeText(txt).then(done,()=>fb()); else fb();
+      function fb(){   // 비보안 컨텍스트(http)는 clipboard API 가 막힌다
+        const ta=document.createElement('textarea'); ta.value=txt;
+        ta.style.cssText='position:fixed;left:-9999px;top:0';
+        document.body.appendChild(ta); ta.select();
+        try{document.execCommand('copy');done();}catch(_){alert('복사에 실패했습니다.');}
+        ta.remove();}
+    };
+    const copySel=()=>toClip(selText(),'선택영역');
+    const copyAll=()=>{
+      if(!tbl)return; const out=[];
+      const hr=tbl.tHead&&tbl.tHead.rows[0];
+      if(hr)out.push([...hr.cells].map(th=>(th.innerText||'').trim()).join('\t'));
+      [...tbl.tBodies].forEach(b=>{for(const tr of b.rows)
+        out.push([...tr.cells].map(td=>(td.innerText||'').trim()).join('\t'));});
+      toClip(out.join('\n'),`전체 ${nf(out.length-1)}행`);
+    };
+    if(!c.dataset.cpkey){
+      c.dataset.cpkey='1';
+      c.addEventListener('keydown',ev=>{
+        if((ev.ctrlKey||ev.metaKey)&&(ev.key==='c'||ev.key==='C')){
+          if(!c.querySelector('td.p4cp'))return;
+          ev.preventDefault(); copySel();}});
+      c.setAttribute('tabindex','-1'); c.style.outline='none';
+    }
+    /* 우클릭 메뉴 — ★실행도 mousedown 에서(410·420·580 과 같은 함정 회피:
+       바깥클릭 닫기가 mousedown 이라 click 은 죽은 노드에 떨어진다). */
+    c.querySelectorAll('.p4tbl thead th,.p4tbl tbody').forEach(el=>{
+      el.oncontextmenu=e=>{
+        e.preventDefault();
+        const old2=document.getElementById('p4-ctx'); if(old2)old2.remove();
+        const m=document.createElement('div'); m.id='p4-ctx';
+        m.style.cssText=`position:fixed;left:${Math.min(e.clientX,innerWidth-170)}px;
+          top:${Math.min(e.clientY,innerHeight-110)}px;z-index:1400;background:#fff;
+          border:1px solid #cfd8e6;border-radius:6px;box-shadow:0 6px 20px rgba(20,40,80,.22);
+          font-size:12.5px;min-width:150px;overflow:hidden`;
+        m.innerHTML=['항목보기','선택영역 복사','전체 복사']
+          .map((t,i)=>`<div data-i="${i}" style="padding:7px 12px;cursor:pointer">${t}</div>`).join('');
+        document.body.appendChild(m);
+        m.querySelectorAll('div[data-i]').forEach(d=>{
+          d.onmouseenter=()=>d.style.background='#eef4ff';
+          d.onmouseleave=()=>d.style.background='';});
+        const kill=()=>{m.remove();document.removeEventListener('mousedown',outside,true);};
+        const outside=ev2=>{if(!m.contains(ev2.target))kill();};
+        setTimeout(()=>document.addEventListener('mousedown',outside,true),0);
+        m.addEventListener('mousedown',ev2=>{
+          ev2.preventDefault(); ev2.stopPropagation();
+          const t=ev2.target.closest&&ev2.target.closest('[data-i]'); if(!t)return;
+          const i=+t.dataset.i; kill();
+          try{ if(i===0)openColPick(); else if(i===1)copySel(); else copyAll(); }
+          catch(err){console.error('[4주 메뉴]',err);alert('실행 실패: '+(err&&err.message||err));}});
+      };
+    });
+  };
+  /* == 항목보기 (2026-09-06 — 420·580 과 같은 방식) ========================
+       체크 해제 = 그 컬럼 숨김 · 행을 끌거나 ▲▼ 로 순서 변경.
+       ★이 화면은 일자칸이 맨 뒤라 그룹이 하나다(앞쪽 컬럼만 다룬다). */
+  const openColPick=()=>{
+    const old=document.getElementById('p4-colpick'); if(old)old.remove();
+    const hid=p4LoadHide();
+    const ov=document.createElement('div');
+    ov.id='p4-colpick';
+    ov.style.cssText='position:fixed;inset:0;z-index:1300;background:rgba(20,32,54,.34);'
+                    +'display:flex;align-items:center;justify-content:center';
+    const item=k=>`<div class="p4cp-r" data-k="${k}"
+         style="display:flex;align-items:center;gap:7px;padding:4px 8px;border-bottom:1px solid #eef1f6;
+                cursor:grab;user-select:none;-webkit-user-select:none">
+        <span style="color:#b6c2d4;font-size:11px" title="끌어서 순서 변경">⠿</span>
+        <input type="checkbox" ${hid.has(k)?'':'checked'} data-ck="${k}">
+        <span style="flex:1;font-size:12.5px">${P4DEF[k].t}</span>
+        <button class="btn ghost p4cp-up" data-k="${k}" style="padding:0 6px;font-size:11px">▲</button>
+        <button class="btn ghost p4cp-dn" data-k="${k}" style="padding:0 6px;font-size:11px">▼</button>
+      </div>`;
+    ov.innerHTML=`<div style="background:#fff;border-radius:10px;width:420px;max-height:78vh;
+           display:flex;flex-direction:column;box-shadow:0 8px 30px rgba(20,40,80,.28)">
+        <div style="padding:10px 12px;border-bottom:1px solid #e3e9f2;font-weight:700;color:#16305c">
+          항목보기 <span style="font-weight:400;font-size:11px;color:#7b8aa0">체크 해제 = 숨김 · 행을 끌거나 ▲▼ 로 순서 변경</span></div>
+        <div style="flex:1;overflow:auto;padding:4px 0">
+          <div id="p4cp-l">${P4_ORD.map(item).join('')}</div>
+          <div style="padding:6px 10px;font-size:11px;color:#7b8aa0">일자 컬럼은 항상 맨 뒤에 붙습니다.</div>
+        </div>
+        <div style="padding:9px 12px;border-top:1px solid #e3e9f2;display:flex;gap:6px;justify-content:flex-end">
+          <button class="btn ghost" id="p4cp-reset">초기화</button>
+          <div style="flex:1"></div>
+          <button class="btn ghost" id="p4cp-x">닫기</button>
+          <button class="btn" id="p4cp-ok" style="background:#1c47a0;color:#fff">적용</button>
+        </div></div>`;
+    document.body.appendChild(ov);
+    const q=sel=>ov.querySelector(sel);
+    /* ★모달 mousedown 은 **버블 단계에서만** 막는다(캡처 아님) — 캡처로 끊으면
+         아래 행 드래그 핸들러까지 못 받는다(420 에서 실측한 원인). */
+    ov.addEventListener('mousedown',e=>e.stopPropagation());
+    ov.onclick=e=>{if(e.target===ov)ov.remove();};
+    q('#p4cp-x').onclick=()=>ov.remove();
+    const move=(k,dir)=>{const row=ov.querySelector(`.p4cp-r[data-k="${k}"]`); if(!row)return;
+      const box=row.parentElement;
+      const sib=dir<0?row.previousElementSibling:row.nextElementSibling;
+      if(!sib)return;
+      if(dir<0)box.insertBefore(row,sib); else box.insertBefore(sib,row);};
+    ov.querySelectorAll('.p4cp-up').forEach(b=>b.onclick=()=>move(b.dataset.k,-1));
+    ov.querySelectorAll('.p4cp-dn').forEach(b=>b.onclick=()=>move(b.dataset.k, 1));
+    /* 행 끌어서 순서 변경 — ★HTML5 draggable 은 쓰지 않는다(텍스트 선택이 먼저 잡혀
+         파란 블록만 생기고 드래그가 시작되지 않는다). 5px 이상 움직여야 '이동'이라
+         같은 행에서 "클릭=체크토글 / 끌면=이동"이 공존한다. */
+    let dK=null,dY=0,dMoved=false;
+    const rowsOf=()=>[...ov.querySelectorAll('.p4cp-r')];
+    const rowAtY=y=>{const rs=rowsOf(); if(!rs.length)return null;
+      let best=rs[0],bd=1e9;
+      for(const r of rs){const b=r.getBoundingClientRect();
+        const d=(y<b.top)?(b.top-y):((y>b.bottom)?(y-b.bottom):0);
+        if(d<bd){bd=d;best=r;}}
+      return best;};
+    ov.addEventListener('mousedown',e=>{
+      const row=e.target.closest&&e.target.closest('.p4cp-r'); if(!row)return;
+      if(e.target.tagName==='INPUT')return;
+      if(e.target.closest('.p4cp-up,.p4cp-dn'))return;
+      e.preventDefault();
+      dK=row.dataset.k; dY=e.clientY; dMoved=false;
+      row.style.opacity='.55';});
+    const onMove=e=>{
+      if(!dK)return;
+      if(!ov.isConnected){dK=null;document.removeEventListener('mousemove',onMove);return;}
+      if(!dMoved&&Math.abs(e.clientY-dY)<5)return;
+      dMoved=true;
+      const over=rowAtY(e.clientY);
+      rowsOf().forEach(x=>{if(x!==over)x.style.borderTop='';});
+      if(over&&over.dataset.k!==dK)over.style.borderTop='2px solid #2563eb';};
+    const onUp=e=>{
+      if(!dK)return;
+      if(!ov.isConnected){dK=null;document.removeEventListener('mouseup',onUp);return;}
+      const k=dK; dK=null;
+      rowsOf().forEach(x=>{x.style.opacity='';x.style.borderTop='';});
+      if(!dMoved)return;
+      const over=rowAtY(e.clientY);
+      if(!over||over.dataset.k===k)return;
+      const src=rowsOf().find(r=>r.dataset.k===k); if(!src)return;
+      const box=over.parentElement, sb=over.getBoundingClientRect();
+      if(e.clientY < sb.top+sb.height/2) box.insertBefore(src,over);
+      else box.insertBefore(src,over.nextSibling);};
+    document.addEventListener('mousemove',onMove);
+    document.addEventListener('mouseup',onUp);
+    q('#p4cp-reset').onclick=()=>{
+      try{localStorage.removeItem(P4_LS);localStorage.removeItem(P4_HIDE);}catch(_){}
+      P4_ORD.length=0; P4_DEF.forEach(k=>P4_ORD.push(k));
+      p4Hid=new Set();
+      ov.remove(); draw();};
+    q('#p4cp-ok').onclick=()=>{
+      const no=[...ov.querySelectorAll('#p4cp-l .p4cp-r')].map(r=>r.dataset.k);
+      const nhid=[...ov.querySelectorAll('input[data-ck]')].filter(x=>!x.checked).map(x=>x.dataset.ck);
+      try{localStorage.setItem(P4_LS,JSON.stringify(no));
+          localStorage.setItem(P4_HIDE,JSON.stringify(nhid));}catch(_){}
+      P4_ORD.length=0; no.forEach(k=>P4_ORD.push(k));
+      p4Hid=new Set(nhid);
+      ov.remove(); draw();};
+  };
+  /* == 엑셀 (화면 색상 그대로) ============================================
+       ★진짜 xlsx 로 내보낸다(core.js downloadXLS). HTML→.xls 는 엑셀이 서식(색)을 버린다.
+       ★항목보기의 숨김·순서를 그대로 따른다 — "보이는 대로" 받는 것이 기대 동작이다.
+       ★'10/10' 이 날짜로 바뀌던 문제는 downloadXLS 의 x:str 로 차단(core.js). */
+  const _fgx=bg=>{const m=/^#([0-9a-f]{6})$/i.exec(bg||'');if(!m)return '';
+    const n=parseInt(m[1],16), L=(((n>>16)&255)*0.299+((n>>8)&255)*0.587+(n&255)*0.114);
+    return L<150?'#ffffff':'#222222';};
+  const exportXls=()=>{
+    if(!st.rows.length)return alert('조회 결과가 없습니다.');
+    const dates=st.dates, vs=p4Vis(), HB='#ffffff';
+    const cols=vs.map(k=>({h:P4DEF[k].t,w:P4DEF[k].x.w,bg:HB}))
+      .concat(dates.map(d=>({h:dcol(d),w:56,bg:HB})));
+    const rows=st.rows.map((r,i)=>{
+      const out=vs.map(k=>({v:P4DEF[k].x.v(r,i), al:P4DEF[k].x.al}));
+      dates.forEach(d=>{
+        const pl=(r.days&&r.days[d])||0, dn=(r.done&&r.done[d])||0;
+        if(!pl&&!dn){out.push({v:'',al:'center'});return;}
+        const bg=(r.colors&&r.colors[d])||'';
+        out.push({v:`${dn}/${pl}`,al:'center',bg,fg:_fgx(bg)});});
+      return out;});
+    const T2=new Date(), p2=n=>String(n).padStart(2,'0');
+    const stamp=`${String(T2.getFullYear()).slice(2)}${p2(T2.getMonth()+1)}${p2(T2.getDate())}`
+      +`${p2(T2.getHours())}${p2(T2.getMinutes())}${p2(T2.getSeconds())}`;
+    downloadXLS(`4주간가공계획현황_${stamp}`, cols, rows, {sheet:`4주간가공계획_${st.wc||'전체'}`});
   };
   // ★계획 기준일 반영 후 조회(첫 진입 시 캐시 미로드 대비) — 2026-08-28
   planBase().then(b=>{if(b&&b.iso){st.from=b.iso;
@@ -176,7 +461,7 @@ SCREEN.gagongprog420=(c)=>{
     try{const r=await fetch(`${API}/api/gagong/${ep}?${qs}`);const d=await r.json();
       st.dates=d.dates||[];st.allrows=d.rows||[];st.parts=d.parts||st.parts;st.note=d.note||'';st.msg='';}
     catch(e){st.msg='백엔드 연결 실패';st.dates=[];st.allrows=[];}
-    st.loading=false;draw();};
+    st.loading=false;st.loaded=true;draw();};   // loaded=한 번이라도 조회했나(빈 표 문구 구분)
   const draw=()=>{
     const dates=st.dates;
     // ★미생산/미키팅 토글 = 캐시(allrows)에서 클라 즉시필터(재조회 없음)
@@ -270,8 +555,16 @@ SCREEN.gagongprog420=(c)=>{
       }catch(e){}
       return def.slice();};
     const hOrd=loadOrd(H_LS,H_DEF,HDEF), tOrd=loadOrd(T_LS,T_DEF,TDEF);
-    const mkTh=(ks,defs,grp)=>ks.map(k=>`<th class="${defs[k].cls||'center'}" draggable="true" data-tk="${k}" data-grp="${grp}" title="드래그해서 순서 변경(내 브라우저에 저장)" style="cursor:grab">${defs[k].t}</th>`).join('');
-    const mkTd=(ks,defs,r)=>ks.map(k=>defs[k].h(r)).join('');
+    /* ★헤더 드래그 제거(2026-09-06 사용자 요청 "버벅거린다") — 410 과 같은 방식으로 전환.
+         표를 직접 끌면 매 이동마다 레이아웃이 무효화돼 저사양 PC 에서 멈춘다.
+         순서·숨김은 **항목보기**(버튼 또는 헤더 우클릭)에서 한다 — 목록 행만 움직이므로 가볍다. */
+    /* ★숨김 컬럼(항목보기에서 체크 해제한 것) — 헤더·본문·소계에서 **함께** 빠져야
+         열 수가 어긋나지 않는다. 그리기 직전에 한 번 읽어 vis() 로 거른다. */
+    const _hid=(()=>{try{const s=JSON.parse(localStorage.getItem('g420_hidecols')||'[]');
+      return new Set(Array.isArray(s)?s:[]);}catch(_){return new Set();}})();
+    const vis=ks=>ks.filter(k=>!_hid.has(k));
+    const mkTh=(ks,defs,grp)=>vis(ks).map(k=>`<th class="${defs[k].cls||'center'}" data-tk="${k}" data-grp="${grp}" title="우클릭 = 항목보기(순서·숨김)">${defs[k].t}</th>`).join('');
+    const mkTd=(ks,defs,r)=>vis(ks).map(k=>defs[k].h(r)).join('');
     const rowHtml=(r)=>`<tr class="g4row">
         ${mkTd(hOrd,HDEF,r)}
         ${dates.map(d=>frac((r.done&&r.done[d])||0,(r.days&&r.days[d])||0,(r.colors&&r.colors[d])||'',r,d)).join('')}
@@ -299,12 +592,15 @@ SCREEN.gagongprog420=(c)=>{
                 prior:`<td class="num"${sPrBg?` style="${sPrBg}"`:''}>${sPrP?nf(sPrF)+'/'+nf(sPrP):''}</td>`};
       const ST={finish:`<td class="num">${nf(sFn)}</td>`};
       return `<tr style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8">
-        ${hOrd.map(k=>SH[k]||'<td></td>').join('')}
+        ${vis(hOrd).map(k=>SH[k]||'<td></td>').join('')}
         ${dates.map(d=>{const pl=blk.reduce((s,r)=>s+((r.days&&r.days[d])||0),0),dn=blk.reduce((s,r)=>s+((r.done&&r.done[d])||0),0);
           const bg=rollBg(blk.filter(r=>((r.days&&r.days[d])||0)>0).map(r=>(r.colors&&r.colors[d])||''));
           return `<td class="num"${bg?` style="${bg}"`:''}>${pl?nf(dn)+'/'+nf(pl):''}</td>`;}).join('')}
-        ${tOrd.map(k=>ST[k]||'<td></td>').join('')}</tr>`;};
-    const bodyHtml=()=>{if(!disp.length)return `<tr><td colspan="${NC+dates.length}" class="empty">조회 결과 없음</td></tr>`;
+        ${vis(tOrd).map(k=>ST[k]||'<td></td>').join('')}</tr>`;};
+    // ★colspan 은 실제 보이는 컬럼 수로 — NC 고정값(23)을 쓰면 숨김 시 어긋난다.
+    const NCV=()=>vis(hOrd).length+vis(tOrd).length;
+    const bodyHtml=()=>{if(!disp.length)return `<tr><td colspan="${NCV()+dates.length}" class="empty">${
+      st.loaded?'조회 결과 없음':'조건을 지정하고 <b>조회</b>를 누르세요.'}</td></tr>`;
       let h='',i=0;
       while(i<disp.length){const a=disp[i].assy;let j=i;const blk=[];while(j<disp.length&&disp[j].assy===a){blk.push(disp[j]);j++;}
         // 구분: 상세=명세행+소계행 / 제번=명세행만 / 집계=소계행만(레거시 w_pr_input_420_new 구분토글)
@@ -320,6 +616,10 @@ SCREEN.gagongprog420=(c)=>{
        .g4c.g4sel{background-image:linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72));
                   outline:2px solid #4a86e8;outline-offset:-2px;font-weight:700}
        .g4c.g4lock{cursor:default}
+       /* ★복사 전용 선택(2026-09-06) — 일자칸 선택(.g4sel 파랑)과 **다른 색**이어야
+            무엇이 전표발행 대상이고 무엇이 복사 대상인지 구분된다. */
+       .g4tbl td.g4cp{background-image:linear-gradient(rgba(255,236,179,.55),rgba(255,236,179,.55));
+                      outline:1px solid #e0b84c;outline-offset:-1px}
        /* ★주말 헤더(2026-08-20): 토=파랑, 일=빨강 */
        .g4tbl th.g4sat{color:#1558d6}
        .g4tbl th.g4sun{color:#c0392b}
@@ -338,6 +638,10 @@ SCREEN.gagongprog420=(c)=>{
       <button class="btn" id="g4-search">🔍 조회</button>
       <div class="spacer"></div>
       <span class="rowcount" id="g4-selinfo" style="margin-right:8px"></span>
+      <!-- ★항목보기·엑셀(2026-09-06) — 파트별 생산계획 410 과 같은 기능 -->
+      <button class="btn" id="g4-col" title="컬럼 숨김·순서 (헤더 우클릭으로도 열림)">항목보기</button>
+      <button class="btn" id="g4-xls" style="background:#1c7c3a;color:#fff"
+              title="화면과 같은 색상으로 엑셀 저장">엑셀</button>
       <button class="btn" id="g4-issue" style="background:#1c47a0;color:#fff">🧾 전표발행</button>
       <button class="btn" id="g4-bc" style="background:#1c7c3a;color:#fff">📷 가공바코드실적처리</button>
     </div>
@@ -358,7 +662,7 @@ SCREEN.gagongprog420=(c)=>{
        ${mkTh(hOrd,HDEF,'head')}
        ${dates.map(d=>`<th class="num${dcls(d)}">${dcol(d)}</th>`).join('')}
        ${mkTh(tOrd,TDEF,'tail')}</tr></thead>
-      <tbody>${st.loading?spinRow(NC+dates.length):bodyHtml()}</tbody>
+      <tbody>${st.loading?spinRow(NCV()+dates.length):bodyHtml()}</tbody>
       ${disp.length?(()=>{   // 합계행도 컬럼순서를 따른다(드래그 이동시 어긋남 방지)
         const FH={assy:`<td>합계 (${nf(disp.length)}행)</td>`,
                   st:`<td class="num">${nf2(disp.reduce((s,r)=>s+(+r.st||0),0))}</td>`,
@@ -451,52 +755,299 @@ SCREEN.gagongprog420=(c)=>{
         const td=cellAt(e.clientX,e.clientY)||_last;
         if(td){_last=td;applyRect(td);}});
       document.addEventListener('mouseup',()=>{drag=false;_a=null;_cells=null;_last=null;});
+
+      /* ══ 복사 전용 드래그 (2026-09-06 사용자 요청 "도번 등 여러 항목도 드래그해서 복사")
+           위의 선택(.g4sel)은 **일자칸 전용**이다 — 전표발행 대상을 고르는 기능이라
+           도번·자도번 같은 텍스트칸까지 넣으면 발행 로직이 깨진다.
+           그래서 **모든 셀을 덮는 복사 전용 레이어**를 따로 둔다:
+             · 표식 = .g4cp (연회색) — 전표발행과 무관, Ctrl+C 대상
+             · 시작 조건 = 일자칸이 **아닌** 곳에서 mousedown (일자칸은 기존 로직이 가져간다)
+           두 선택은 서로를 지운다 — 화면에 두 색이 동시에 뜨면 무엇이 복사될지 헷갈린다. */
+      let cdrag=false,_ca=null,_ccells=null,_clast=null;
+      const cpClear=()=>tb.querySelectorAll('td.g4cp').forEach(td=>td.classList.remove('g4cp'));
+      const cpSnap=()=>{_ccells=[...tb.querySelectorAll('td')]
+        .map(x=>{const p=rcOf(x);return {td:x,r:p.r,c:p.c};});};
+      const cpRect=(td)=>{if(!_ca||!_ccells)return;
+        const b=rcOf(td);
+        const r1=Math.min(_ca.r,b.r),r2=Math.max(_ca.r,b.r);
+        const c1=Math.min(_ca.c,b.c),c2=Math.max(_ca.c,b.c);
+        for(const it of _ccells){
+          const inR=it.r>=r1&&it.r<=r2&&it.c>=c1&&it.c<=c2;
+          it.td.classList.toggle('g4cp',inR);}
+        const n=tb.querySelectorAll('td.g4cp').length;
+        const el=g('#g4-selinfo');
+        if(el&&n)el.innerHTML=`복사선택 <b>${nf(n)}</b>칸 <span style="color:#7b8aa0">(Ctrl+C)</span>`;};
+      tb.addEventListener('mousedown',e=>{
+        if(e.button!==0)return;
+        if(e.target.closest('td.g4c[data-k]'))return;    // 일자칸 = 위 선택이 처리
+        const start=e.target.closest('td'); if(!start||!start.closest('tr'))return;
+        e.preventDefault();
+        clearAll();                                      // 일자칸 선택은 지운다(혼동 방지)
+        if(!e.ctrlKey&&!e.metaKey)cpClear();
+        cdrag=true;cpSnap();_ca=rcOf(start);_clast=start;cpRect(start);});
+      tb.addEventListener('mousemove',e=>{if(!cdrag)return;
+        if(!(e.buttons&1)){cdrag=false;_ca=null;_ccells=null;_clast=null;return;}
+        const el=document.elementFromPoint(e.clientX,e.clientY);
+        const td=(el&&el.closest('td'))||_clast;
+        if(td){_clast=td;cpRect(td);}});
+      document.addEventListener('mouseup',()=>{cdrag=false;_ca=null;_ccells=null;_clast=null;});
+      // 일자칸 드래그가 시작되면 복사선택은 지운다(반대 방향도 위에서 처리)
+      tb.addEventListener('mousedown',e=>{
+        if(e.button===0&&e.target.closest('td.g4c[data-k]'))cpClear();});
     }
     selInfo();
-    // ★컬럼 드래그 이동(2026-08-20) — 410과 동일: 재렌더 없이 DOM 열만 이동(버벅임 없음) + localStorage 저장
-    let _dtk=null,_dgr=null;
-    c.querySelectorAll('th[data-tk]').forEach(th=>{
-      th.ondragstart=e=>{_dtk=th.getAttribute('data-tk');_dgr=th.getAttribute('data-grp');th.style.opacity='.4';
-        try{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',_dtk);}catch(_){}};
-      th.ondragend=()=>{th.style.opacity='';c.querySelectorAll('th[data-tk]').forEach(x=>x.style.borderLeft='');};
-      th.ondragover=e=>{if(th.getAttribute('data-grp')!==_dgr)return;
-        e.preventDefault();if(_dtk&&_dtk!==th.getAttribute('data-tk'))th.style.borderLeft='3px solid #2563eb';};
-      th.ondragleave=()=>{th.style.borderLeft='';};
-      th.ondrop=e=>{th.style.borderLeft='';
-        if(th.getAttribute('data-grp')!==_dgr)return;
+    /* ★헤더 드래그 이동은 제거했다(2026-09-06 사용자 요청 "버벅거린다").
+         표를 직접 끌면 이동마다 레이아웃이 무효화돼 저사양 PC 에서 멈춘다.
+         순서·숨김은 아래 openColPick(항목보기)에서 처리한다 — 목록 행만 움직이므로 가볍고,
+         적용은 draw() 한 번으로 끝난다(410 과 같은 방식). */
+
+    /* ══ 선택영역 복사 (2026-09-06 — 파트별 생산계획 410 과 같은 동작) ══════════
+         드래그로 고른 칸을 Ctrl+C 로 클립보드에 넣는다. 엑셀에 그대로 붙는다(TSV).
+         ★DOM 에서 읽는다 — 화면에 보이는 그대로가 사용자가 기대하는 복사 결과다.
+         ★선택은 .g4sel 클래스로 판정(이 화면의 선택 표시). 410 은 .pp-sel 이다. */
+    const _selText=()=>{
+      const map=new Map();
+      // ★복사선택(.g4cp)이 있으면 그것을, 없으면 일자칸 선택(.g4sel)을 복사한다.
+      const pick=c.querySelector('td.g4cp')?'td.g4cp':'td.g4sel';
+      c.querySelectorAll(pick).forEach(td=>{
+        const tr=td.parentElement; if(!tr)return;
+        const r=tr.rowIndex;
+        if(!map.has(r))map.set(r,[]);
+        map.get(r).push([td.cellIndex,(td.innerText||'').trim()]);});
+      return [...map.keys()].sort((x,y)=>x-y)
+        .map(r=>map.get(r).sort((x,y)=>x[0]-y[0]).map(x=>x[1]).join('\t')).join('\n');
+    };
+    const _toClip=(txt,what)=>{
+      if(!txt){alert('복사할 영역을 먼저 끌어서 선택하세요.');return;}
+      const done=()=>{const el=c.querySelector('#g4-selinfo');
+        if(el){const o=el.innerHTML;el.innerHTML=`<b style="color:#1c7c3a">${what} 복사됨</b>`;
+               setTimeout(()=>{el.innerHTML=o;},1400);}};
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(txt).then(done,()=>fb());
+      }else fb();
+      function fb(){   // 비보안 컨텍스트(http)는 clipboard API 가 막힌다
+        const ta=document.createElement('textarea'); ta.value=txt;
+        ta.style.cssText='position:fixed;left:-9999px;top:0';
+        document.body.appendChild(ta); ta.select();
+        try{document.execCommand('copy');done();}catch(_){alert('복사에 실패했습니다.');}
+        ta.remove();}
+    };
+    const _copySel=()=>_toClip(_selText(),'선택영역');
+    const _copyAll=()=>{
+      const tbl=c.querySelector('.g4tbl'); if(!tbl)return;
+      const out=[];
+      const hr=tbl.tHead&&tbl.tHead.rows[0];
+      if(hr)out.push([...hr.cells].map(th=>(th.innerText||'').trim()).join('\t'));
+      [...tbl.tBodies].forEach(tb=>{const rs=tb.rows;
+        for(let i=0;i<rs.length;i++)out.push([...rs[i].cells].map(td=>(td.innerText||'').trim()).join('\t'));});
+      _toClip(out.join('\n'),`전체 ${nf(out.length-1)}행`);
+    };
+    // Ctrl+C — 선택영역이 있을 때만 가로챈다(없으면 브라우저 기본 동작).
+    if(!c.dataset.cpkey){
+      c.dataset.cpkey='1';
+      c.addEventListener('keydown',ev=>{
+        if((ev.ctrlKey||ev.metaKey)&&(ev.key==='c'||ev.key==='C')){
+          if(!c.querySelector('td.g4cp,td.g4sel'))return;
+          ev.preventDefault(); _copySel();}
+      });
+      c.setAttribute('tabindex','-1');    // keydown 을 받으려면 포커스 가능해야 한다
+      c.style.outline='none';
+    }
+
+
+    /* ══ 항목보기 (2026-09-06 — 410 과 같은 방식) ═══════════════════════════
+         체크 해제 = 그 컬럼 숨김 · ▲▼ 로 순서 변경. 앞(head)/뒤(tail) 그룹은 서로 안 섞인다
+         (일자칸이 가운데 있어 그룹을 넘나들면 표가 깨진다).
+         저장 = localStorage(H_LS/T_LS) — 헤더 드래그가 쓰던 키를 그대로 쓴다. */
+    const HIDE_LS='g420_hidecols';
+    const loadHide=()=>{try{const s=JSON.parse(localStorage.getItem(HIDE_LS)||'[]');
+      return new Set(Array.isArray(s)?s:[]);}catch(_){return new Set();}};
+    const openColPick=()=>{
+      const old=document.getElementById('g4-colpick'); if(old)old.remove();
+      const hid=loadHide();
+      const ov=document.createElement('div');
+      ov.id='g4-colpick';
+      ov.style.cssText='position:fixed;inset:0;z-index:1300;background:rgba(20,32,54,.34);'
+                      +'display:flex;align-items:center;justify-content:center';
+      const item=(k,defs,grp)=>`<div class="g4cp-r" data-k="${k}" data-grp="${grp}"
+           style="display:flex;align-items:center;gap:7px;padding:4px 8px;border-bottom:1px solid #eef1f6;
+                  cursor:grab;user-select:none;-webkit-user-select:none">
+          <span style="color:#b6c2d4;font-size:11px" title="끌어서 순서 변경">⠿</span>
+          <input type="checkbox" ${hid.has(k)?'':'checked'} data-ck="${k}">
+          <span style="flex:1;font-size:12.5px">${defs[k].t}</span>
+          <button class="btn ghost g4cp-up" data-k="${k}" style="padding:0 6px;font-size:11px">▲</button>
+          <button class="btn ghost g4cp-dn" data-k="${k}" style="padding:0 6px;font-size:11px">▼</button>
+        </div>`;
+      ov.innerHTML=`<div style="background:#fff;border-radius:10px;width:420px;max-height:78vh;
+             display:flex;flex-direction:column;box-shadow:0 8px 30px rgba(20,40,80,.28)">
+          <div style="padding:10px 12px;border-bottom:1px solid #e3e9f2;font-weight:700;color:#16305c">
+            항목보기 <span style="font-weight:400;font-size:11px;color:#7b8aa0">체크 해제 = 숨김 · 행을 끌거나 ▲▼ 로 순서 변경</span></div>
+          <div style="flex:1;overflow:auto;padding:4px 0">
+            <div style="padding:4px 10px;font-size:11px;color:#7b8aa0;font-weight:700">앞쪽 컬럼</div>
+            <div id="g4cp-h">${hOrd.map(k=>item(k,HDEF,'head')).join('')}</div>
+            <div style="padding:6px 10px 4px;font-size:11px;color:#7b8aa0;font-weight:700">일자칸 뒤 컬럼</div>
+            <div id="g4cp-t">${tOrd.map(k=>item(k,TDEF,'tail')).join('')}</div>
+          </div>
+          <div style="padding:9px 12px;border-top:1px solid #e3e9f2;display:flex;gap:6px;justify-content:flex-end">
+            <button class="btn ghost" id="g4cp-reset">초기화</button>
+            <div style="flex:1"></div>
+            <button class="btn ghost" id="g4cp-x">닫기</button>
+            <button class="btn" id="g4cp-ok" style="background:#1c47a0;color:#fff">적용</button>
+          </div></div>`;
+      document.body.appendChild(ov);
+      const q=s=>ov.querySelector(s);
+      /* ★모달 mousedown 은 **버블 단계에서만** 막는다(캡처 아님).
+           캡처로 stopPropagation 하면 아래에 붙인 행 드래그 핸들러까지 못 받는다
+           (2026-09-06 실측 — 드래그가 안 먹던 원인). 표는 모달 바깥이라
+           버블만 끊어도 범위선택으로 새지 않는다. */
+      ov.addEventListener('mousedown',e=>e.stopPropagation());
+      ov.onclick=e=>{if(e.target===ov)ov.remove();};
+      q('#g4cp-x').onclick=()=>ov.remove();
+      const move=(k,dir)=>{const row=ov.querySelector(`.g4cp-r[data-k="${k}"]`); if(!row)return;
+        const box=row.parentElement;
+        const sib=dir<0?row.previousElementSibling:row.nextElementSibling;
+        if(!sib)return;
+        if(dir<0)box.insertBefore(row,sib); else box.insertBefore(sib,row);};
+      ov.querySelectorAll('.g4cp-up').forEach(b=>b.onclick=()=>move(b.dataset.k,-1));
+      ov.querySelectorAll('.g4cp-dn').forEach(b=>b.onclick=()=>move(b.dataset.k, 1));
+
+      /* ══ 행 끌어서 순서 변경 (2026-09-06) ═══════════════════════════════
+           ★HTML5 draggable 은 쓰지 않는다 — 텍스트 선택이 먼저 잡혀 드래그가 시작되지
+             않고 파란 블록만 생긴다(410 에서 밟은 함정). mousedown/mousemove/mouseup +
+             preventDefault + user-select:none 으로 직접 구현한다.
+           ★5px 이상 움직여야 '이동'으로 판정 → 같은 행에서 "클릭=체크토글 / 끌면=이동"이
+             공존한다. 체크박스·▲▼ 버튼 위에서는 시작하지 않는다.
+           ★그룹(앞/뒤) 경계를 넘으면 놓은 자리의 그룹을 물려받는다 — 일자칸 기준
+             어느 편에 설지가 그렇게 정해진다. */
+      let dK=null,dY=0,dMoved=false;
+      const rowsOf=()=>[...ov.querySelectorAll('.g4cp-r')];
+      const rowAtY=(y)=>{const rs=rowsOf(); if(!rs.length)return null;
+        let best=rs[0],bd=1e9;
+        for(const r of rs){const b=r.getBoundingClientRect();
+          const d=(y<b.top)?(b.top-y):((y>b.bottom)?(y-b.bottom):0);
+          if(d<bd){bd=d;best=r;}}
+        return best;};
+      ov.addEventListener('mousedown',e=>{
+        const row=e.target.closest&&e.target.closest('.g4cp-r'); if(!row)return;
+        if(e.target.tagName==='INPUT')return;              // 체크박스는 브라우저가 처리
+        if(e.target.closest('.g4cp-up,.g4cp-dn'))return;   // ▲▼ 는 클릭으로
+        e.preventDefault();                                 // 텍스트 선택 차단(파란 블록 방지)
+        dK=row.dataset.k; dY=e.clientY; dMoved=false;
+        row.style.opacity='.55';
+      });
+      const onMove=e=>{
+        if(!dK)return;
+        if(!ov.isConnected){dK=null;document.removeEventListener('mousemove',onMove);return;}
+        if(!dMoved&&Math.abs(e.clientY-dY)<5)return;        // 5px 미만 = 아직 클릭
+        dMoved=true;
+        const over=rowAtY(e.clientY);
+        rowsOf().forEach(x=>{if(x!==over)x.style.borderTop='';});
+        if(over&&over.dataset.k!==dK)over.style.borderTop='2px solid #2563eb';
+      };
+      const onUp=e=>{
+        if(!dK)return;
+        if(!ov.isConnected){dK=null;document.removeEventListener('mouseup',onUp);return;}
+        const k=dK; dK=null;
+        rowsOf().forEach(x=>{x.style.opacity='';x.style.borderTop='';});
+        if(!dMoved)return;                                  // 안 움직였으면 클릭 = 체크 토글(기본동작)
+        const over=rowAtY(e.clientY);
+        if(!over||over.dataset.k===k)return;
+        const src=rowsOf().find(r=>r.dataset.k===k); if(!src)return;
+        const box=over.parentElement;                       // 놓은 자리의 그룹을 물려받는다
+        const sb=over.getBoundingClientRect();
+        if(e.clientY < sb.top+sb.height/2) box.insertBefore(src,over);
+        else box.insertBefore(src,over.nextSibling);
+        src.dataset.grp = box.id==='g4cp-h' ? 'head' : 'tail';
+      };
+      document.addEventListener('mousemove',onMove);
+      document.addEventListener('mouseup',onUp);
+      q('#g4cp-reset').onclick=()=>{
+        try{localStorage.removeItem(H_LS);localStorage.removeItem(T_LS);
+            localStorage.removeItem(HIDE_LS);}catch(_){}
+        ov.remove(); draw();};
+      q('#g4cp-ok').onclick=()=>{
+        const ord=(sel)=>[...ov.querySelectorAll(sel+' .g4cp-r')].map(r=>r.dataset.k);
+        const nh=ord('#g4cp-h'), nt=ord('#g4cp-t');
+        const nhid=[...ov.querySelectorAll('input[data-ck]')]
+          .filter(x=>!x.checked).map(x=>x.dataset.ck);
+        try{localStorage.setItem(H_LS,JSON.stringify(nh));
+            localStorage.setItem(T_LS,JSON.stringify(nt));
+            localStorage.setItem(HIDE_LS,JSON.stringify(nhid));}catch(_){}
+        hOrd.length=0; nh.forEach(k=>hOrd.push(k));
+        tOrd.length=0; nt.forEach(k=>tOrd.push(k));
+        ov.remove(); draw();
+      };
+    };
+    /* ★버튼 배선 — 실패를 삼키지 않는다(2026-09-06).
+         종전엔 openColPick 안에서 예외가 나면 창이 조용히 안 뜨고 원인을 알 수 없었다.
+         오류를 콘솔+알림으로 드러내야 무엇이 문제인지 바로 보인다. */
+    {const cb=g('#g4-col');
+     if(cb)cb.onclick=(e)=>{
+       e.preventDefault(); e.stopPropagation();
+       try{openColPick();}
+       catch(err){console.error('[420 항목보기]',err);
+                  alert('항목보기를 열지 못했습니다: '+(err&&err.message||err));}
+     };}
+    // 헤더 우클릭 = 항목보기 + 복사 메뉴(410 과 같은 진입)
+    c.querySelectorAll('.g4tbl thead th,.g4tbl tbody').forEach(el=>{
+      el.oncontextmenu=e=>{
         e.preventDefault();
-        const to=th.getAttribute('data-tk'),from=_dtk,grp=_dgr;_dtk=null;_dgr=null;
-        if(!from||from===to)return;
-        const cur=(grp==='head')?hOrd:tOrd, lskey=(grp==='head')?H_LS:T_LS;
-        const arr=cur.filter(k=>k!==from);
-        const at=arr.indexOf(to); arr.splice(at<0?arr.length:at,0,from);
-        try{localStorage.setItem(lskey,JSON.stringify(arr));}catch(_){}
-        cur.length=0; arr.forEach(k=>cur.push(k));
-        const tbl=th.closest('table'); if(!tbl)return;
-        const hr=tbl.tHead?tbl.tHead.rows[0]:null; if(!hr)return;
-        const idxOf=(row,k)=>{const cs=row.children;
-          for(let i=0;i<cs.length;i++)if(cs[i].getAttribute&&cs[i].getAttribute('data-tk')===k)return i;
-          return -1;};
-        const fi=idxOf(hr,from), ti=idxOf(hr,to); if(fi<0||ti<0)return;
-        const mv=row=>{const cs=row.children;if(fi>=cs.length||ti>=cs.length)return;row.insertBefore(cs[fi],cs[ti]);};
-        // ★성능(2026-08-21, 410과 동일): 붙어있는 표에 행마다 insertBefore 하면 매번 레이아웃이
-        //   무효화돼 저사양 PC에서 멈춘다. 표를 잠시 떼고 옮긴 뒤 되돌린다(스크롤 직접 보존).
-        const holder=tbl.parentNode, next=tbl.nextSibling;
-        const sy=holder&&holder.scrollTop||0, sx=holder&&holder.scrollLeft||0;
-        const ph=tbl.offsetHeight;
-        if(holder){holder.style.minHeight=ph+'px'; tbl.remove();}
-        try{
-          mv(hr);
-          const n=hr.children.length;
-          [...tbl.tBodies,...(tbl.tFoot?[tbl.tFoot]:[])].forEach(tb=>{const rs=tb.rows;
-            for(let i=0;i<rs.length;i++){const row=rs[i];
-              if(row.children.length===n)mv(row);}});   // colspan 행(소계·합계)은 제외
-        }finally{
-          if(holder){holder.insertBefore(tbl,next); holder.style.minHeight='';
-            holder.scrollTop=sy; holder.scrollLeft=sx;}
-        }
+        const old=document.getElementById('g4-ctx'); if(old)old.remove();
+        const m=document.createElement('div'); m.id='g4-ctx';
+        m.style.cssText=`position:fixed;left:${e.clientX}px;top:${e.clientY}px;z-index:1400;
+          background:#fff;border:1px solid #cfd8e6;border-radius:6px;box-shadow:0 6px 20px rgba(20,40,80,.22);
+          font-size:12.5px;min-width:150px;overflow:hidden`;
+        m.innerHTML=['항목보기','선택영역 복사','전체 복사']
+          .map((t,i)=>`<div data-i="${i}" style="padding:7px 12px;cursor:pointer">${t}</div>`).join('');
+        document.body.appendChild(m);
+        m.querySelectorAll('div[data-i]').forEach(d=>{
+          d.onmouseenter=()=>d.style.background='#eef4ff';
+          d.onmouseleave=()=>d.style.background='';});
+        /* ★바깥클릭 닫기와 항목실행의 순서 문제 — 410 에서 이미 겪은 그대로다
+             (screens.prod.js:1762 주석). mousedown 이 click 보다 **먼저** 오므로
+             바깥클릭 핸들러가 메뉴를 remove 한 뒤 click 이 죽은 노드에서 발생 →
+             "항목보기를 눌러도 아무 일도 안 일어난다".
+           ⟹ 메뉴 실행도 mousedown 에서 처리하고, 바깥클릭 닫기는 메뉴 안을 제외한다. */
+        const kill=()=>{m.remove();document.removeEventListener('mousedown',outside,true);};
+        const outside=ev2=>{if(!m.contains(ev2.target))kill();};
+        setTimeout(()=>document.addEventListener('mousedown',outside,true),0);
+        m.addEventListener('mousedown',ev2=>{
+          ev2.preventDefault(); ev2.stopPropagation();   // 표의 범위선택으로 새지 않게
+          const t=ev2.target.closest&&ev2.target.closest('[data-i]'); if(!t)return;
+          const i=+t.dataset.i; kill();
+          try{ if(i===0)openColPick(); else if(i===1)_copySel(); else _copyAll(); }
+          catch(err){console.error('[420 메뉴]',err);alert('실행 실패: '+(err&&err.message||err));}
+        });
       };
     });
+
+    /* ══ 엑셀 (화면 색상 그대로) ══════════════════════════════════════════
+         ★DOM 에서 읽는다 — 항목보기(숨김·순서)·집계/상세 전환이 화면에 이미 반영돼 있어
+           "보이는 대로" 받는 것이 사용자가 기대하는 동작이다.
+         ★진짜 xlsx 로 내보낸다(core.js downloadXLS). HTML→.xls 는 엑셀이 서식(색)을 버린다. */
+    {const xb=g('#g4-xls'); if(xb)xb.onclick=()=>{
+      const tbl=c.querySelector('.g4tbl');
+      if(!tbl||!tbl.tBodies.length||!tbl.tBodies[0].rows.length){alert('조회 결과가 없습니다.');return;}
+      const hr=tbl.tHead&&tbl.tHead.rows[0];
+      const cols=hr?[...hr.cells].map(th=>({t:(th.innerText||'').trim(),
+                                            w:Math.max(6,Math.min(28,(th.innerText||'').trim().length*2+4))})):[];
+      const bgOf=td=>{const m=/background:\s*(#[0-9a-fA-F]{6})/.exec(td.getAttribute('style')||'');
+        return m?m[1]:'';};
+      const rows=[];
+      [...tbl.tBodies].forEach(tb=>{
+        for(const tr of tb.rows){
+          if(tr.cells.length!==cols.length)continue;       // 소계·합계(colspan) 행은 건너뜀
+          rows.push([...tr.cells].map(td=>{
+            const v=(td.innerText||'').trim(), bg=bgOf(td)||bgOf(tr);
+            const o={v:v};
+            if(bg)o.bg=bg;
+            if(/^-?[\d,]+(\.\d+)?$/.test(v)&&v!=='')o.v=v;   // '10/10' 등은 문자로 남긴다
+            return o;}));
+        }});
+      const stamp=(st.from||'').replace(/-/g,'').slice(2);
+      downloadXLS(`가공생산진척_${stamp}`, cols, rows, {sheet:'가공생산진척'});
+    };}
+
     // 선택 없이 눌러도 열린다 → 빈 50행 수기입력(레거시 동일)
     //   선택셀은 (자도번)별로 합산 — 같은 자도번의 여러 일자를 고르면 수량이 더해진다.
     g('#g4-issue').onclick=()=>{
@@ -760,9 +1311,13 @@ SCREEN.gagongprog420=(c)=>{
     render(); document.body.appendChild(ov); requestAnimationFrame(()=>{
       const el=ov.querySelector('#bc-scan1');if(el){el.focus();el.select();}});
   };
-  // ★계획 기준일(마지막 업로드 일자축 첫날) 반영 후 조회 — 2026-08-28
+  /* ★계획 기준일(마지막 업로드 일자축 첫날)만 반영하고 **조회는 하지 않는다**
+       (2026-09-06 사용자 요청 "메뉴 오니 바로 조회된다").
+       이 화면은 응답이 5~6초라 진입할 때마다 기다리게 된다.
+       조건을 정한 뒤 [조회]를 누르면 그때 가져온다. 종전엔 .then(load) 로 자동 실행했다. */
   planBase().then(b=>{if(b&&b.iso){st.from=b.iso;
-      st.to=iso(new Date(new Date(b.iso+'T00:00:00').getTime()+(st.gigan-1)*864e5));}}).catch(()=>{}).then(load);
+      st.to=iso(new Date(new Date(b.iso+'T00:00:00').getTime()+(st.gigan-1)*864e5));}})
+    .catch(()=>{}).then(()=>{st.rows=[];st.loading=false;draw();});
 };
 
 /* ===== 생산: 가공창고 이동계획 (w_pr_input_580) — 도번×라인, 자도번LIST + 이동필요/완료 =====
@@ -897,6 +1452,169 @@ SCREEN.gagongmove580=(c)=>{
     //   HTML→.xls 방식은 엑셀이 "형식·확장명 불일치" 경고를 띄우고 **서식(색)을 버려서** 폐기.
     downloadXLS(`가공창고이동계획_${stamp}`, cols, rows, {sheet:`가공창고이동계획_${wcnm}`});
   };
+  /* ★컬럼 정의 — 항목보기(숨김·순서)를 쓰려면 <th>·<td> 를 하드코딩하지 않고
+       정의에서 만들어야 한다(2026-09-06, 420 과 같은 구조).
+       앞그룹(head) 11 · 일자칸 · 뒷그룹(tail) 5. */
+  const rowsel=(i,extra)=>`class="center mv-rowsel" data-i="${i}" style="cursor:pointer${extra||''}"`;
+  const dim=v=>v?'':';color:#dfe6ef';
+  const MHDEF={
+    seq:{t:'SEQ',      h:(r,i)=>`<td ${rowsel(i)}>${i+1}</td>`},
+    dest:{t:'최종납품처', h:(r,i)=>`<td ${rowsel(i)}>${esc(r.dest)}</td>`},
+    assy:{t:'ASSY도번', h:(r,i)=>`<td ${rowsel(i)} title="${esc(r.assy)}">${esc(r.assy)}</td>`},
+    item:{t:'도번',     h:(r,i)=>{const on=st.itemSel===i;
+      const sty=on?'background:#dbeafe;color:#123a6b;font-weight:700;outline:2px solid #4a86e8;outline-offset:-2px':'';
+      const dno=r.item||r.assy;
+      return `<td class="center mv-item" data-i="${i}" style="cursor:pointer;${sty}" title="${esc(dno)}&#10;ASSY: ${esc(r.assy)}&#10;클릭=이 도번 선택/해제 · Ctrl+클릭=여러 행 추가선택"><b>${esc(dno)}</b></td>`;}},
+    jado:{t:'자도번LIST', h:(r,i)=>{const js=(r.jado||'').length>40?(r.jado.slice(0,40)+'…'):(r.jado||'');
+      return `<td class="center jado-cell" data-i="${i}" title="${esc(r.jado)}&#10;더블클릭=자도번 펼치기" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;color:#1c66c9">${esc(js)} <span style="color:#8aa">(${r.matcnt})</span></td>`;}},
+    part_ymd:{t:'PART일자', h:(r,i)=>`<td ${rowsel(i)}>${dcol(r.part_ymd)}</td>`},
+    hm:{t:'INPUT',    h:(r,i)=>`<td ${rowsel(i)}>${esc(r.hm)}</td>`},
+    line:{t:'Line',    h:(r,i)=>`<td ${rowsel(i)}>${esc(r.line)}</td>`},
+    jp_print:{t:'이동전표발행', h:(r,i)=>`<td ${rowsel(i,dim(r.jp_print))}>${r.jp_print?nf(r.jp_print):'·'}</td>`},
+    need:{t:'이동필요', h:(r,i)=>`<td ${rowsel(i,r.need>0?';color:#c0392b;font-weight:600':';color:#dfe6ef')}>${r.need>0?nf(r.need):'·'}</td>`},
+    prior:{t:'당일이전', h:(r,i)=>{const on=st.sel.has(`${i}:P`);
+      if(!r.prior)return `<td class="center" style="color:#dfe6ef">·</td>`;
+      const bg=r.prior_color||'';
+      return `<td class="center mv-cell" data-i="${i}" data-d="P" data-key="${i}:P" style="cursor:pointer;background:${bg};${fgOn(bg)};font-weight:700${on?';outline:2px solid #4a86e8;outline-offset:-2px;background-image:linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72))':''}">${nf(r.prior_done||0)}/${nf(r.prior)}</td>`;}},
+  };
+  const MTDEF={
+    sale:{t:'출하',        h:(r,i)=>`<td ${rowsel(i,dim(r.sale))}>${r.sale?nf(r.sale):'·'}</td>`},
+    assy_stock:{t:'ASSY재고', h:(r,i)=>`<td ${rowsel(i,dim(r.assy_stock))}>${r.assy_stock?nf(r.assy_stock):'·'}</td>`},
+    stock:{t:'자재재고',    h:(r,i)=>`<td ${rowsel(i,dim(r.stock))}>${r.stock?nf(r.stock):'·'}</td>`},
+    pr_stock:{t:'생산재고',  h:(r,i)=>`<td ${rowsel(i,dim(r.pr_stock))}>${r.pr_stock?nf(r.pr_stock):'·'}</td>`},
+    fix_stock:{t:'도번고정', h:(r,i)=>`<td ${rowsel(i,dim(r.fix_stock))}>${r.fix_stock?nf(r.fix_stock):'·'}</td>`},
+  };
+  const MH_DEF=['seq','dest','assy','item','jado','part_ymd','hm','line','jp_print','need','prior'];
+  const MT_DEF=['sale','assy_stock','stock','pr_stock','fix_stock'];
+  const MH_LS='mv580_headorder', MT_LS='mv580_tailorder', MV_HIDE='mv580_hidecols';
+  const mvOrd=(key,def,defs)=>{try{const s=JSON.parse(localStorage.getItem(key)||'null');
+    if(Array.isArray(s)&&s.length){const v=s.filter(k=>defs[k]);def.forEach(k=>{if(!v.includes(k))v.push(k);});return v;}
+    }catch(e){} return def.slice();};
+  /* ★hOrd/tOrd 처럼 **가변 배열**로 둔다 — 항목보기 적용 시 제자리에서 고쳐야
+       화면 재렌더가 새 순서를 바로 본다(다시 진입하지 않아도 된다). */
+  const MH_ORD=mvOrd(MH_LS,MH_DEF,MHDEF), MT_ORD=mvOrd(MT_LS,MT_DEF,MTDEF);
+  const mvLoadHide=()=>{try{const s=JSON.parse(localStorage.getItem(MV_HIDE)||'[]');
+    return new Set(Array.isArray(s)?s:[]);}catch(_){return new Set();}};
+  let mvHid=mvLoadHide();
+  const mvVis=ks=>ks.filter(k=>!mvHid.has(k));
+  const mvTh=(ks,defs,grp)=>mvVis(ks).map(k=>`<th data-tk="${k}" data-grp="${grp}" title="우클릭 = 항목보기(순서·숨김)">${defs[k].t}</th>`).join('');
+  const mvTd=(ks,defs,r,i)=>mvVis(ks).map(k=>defs[k].h(r,i)).join('');
+
+  /* == 항목보기 (2026-09-06 — 420·410 과 같은 방식) ========================
+       체크 해제 = 그 컬럼 숨김 · 행을 끌거나 ▲▼ 로 순서 변경.
+       앞(head)/뒤(tail) 그룹은 일자칸을 사이에 두고 나뉜다 — 놓은 자리의 그룹을 물려받는다. */
+  const openColPick=()=>{
+    const old=document.getElementById('mv-colpick'); if(old)old.remove();
+    const hid=mvLoadHide();
+    const ov=document.createElement('div');
+    ov.id='mv-colpick';
+    ov.style.cssText='position:fixed;inset:0;z-index:1300;background:rgba(20,32,54,.34);'
+                    +'display:flex;align-items:center;justify-content:center';
+    const item=(k,defs,grp)=>`<div class="mvcp-r" data-k="${k}" data-grp="${grp}"
+         style="display:flex;align-items:center;gap:7px;padding:4px 8px;border-bottom:1px solid #eef1f6;
+                cursor:grab;user-select:none;-webkit-user-select:none">
+        <span style="color:#b6c2d4;font-size:11px" title="끌어서 순서 변경">⠿</span>
+        <input type="checkbox" ${hid.has(k)?'':'checked'} data-ck="${k}">
+        <span style="flex:1;font-size:12.5px">${defs[k].t}</span>
+        <button class="btn ghost mvcp-up" data-k="${k}" style="padding:0 6px;font-size:11px">▲</button>
+        <button class="btn ghost mvcp-dn" data-k="${k}" style="padding:0 6px;font-size:11px">▼</button>
+      </div>`;
+    ov.innerHTML=`<div style="background:#fff;border-radius:10px;width:420px;max-height:78vh;
+           display:flex;flex-direction:column;box-shadow:0 8px 30px rgba(20,40,80,.28)">
+        <div style="padding:10px 12px;border-bottom:1px solid #e3e9f2;font-weight:700;color:#16305c">
+          항목보기 <span style="font-weight:400;font-size:11px;color:#7b8aa0">체크 해제 = 숨김 · 행을 끌거나 ▲▼ 로 순서 변경</span></div>
+        <div style="flex:1;overflow:auto;padding:4px 0">
+          <div style="padding:4px 10px;font-size:11px;color:#7b8aa0;font-weight:700">앞쪽 컬럼</div>
+          <div id="mvcp-h">${MH_ORD.map(k=>item(k,MHDEF,'head')).join('')}</div>
+          <div style="padding:6px 10px 4px;font-size:11px;color:#7b8aa0;font-weight:700">일자칸 뒤 컬럼</div>
+          <div id="mvcp-t">${MT_ORD.map(k=>item(k,MTDEF,'tail')).join('')}</div>
+        </div>
+        <div style="padding:9px 12px;border-top:1px solid #e3e9f2;display:flex;gap:6px;justify-content:flex-end">
+          <button class="btn ghost" id="mvcp-reset">초기화</button>
+          <div style="flex:1"></div>
+          <button class="btn ghost" id="mvcp-x">닫기</button>
+          <button class="btn" id="mvcp-ok" style="background:#1c47a0;color:#fff">적용</button>
+        </div></div>`;
+    document.body.appendChild(ov);
+    const q=sel=>ov.querySelector(sel);
+    /* ★모달 mousedown 은 **버블 단계에서만** 막는다(캡처 아님).
+         캡처로 stopPropagation 하면 아래 행 드래그 핸들러까지 못 받는다(420 실측). */
+    ov.addEventListener('mousedown',e=>e.stopPropagation());
+    ov.onclick=e=>{if(e.target===ov)ov.remove();};
+    q('#mvcp-x').onclick=()=>ov.remove();
+    const move=(k,dir)=>{const row=ov.querySelector(`.mvcp-r[data-k="${k}"]`); if(!row)return;
+      const box=row.parentElement;
+      const sib=dir<0?row.previousElementSibling:row.nextElementSibling;
+      if(!sib)return;
+      if(dir<0)box.insertBefore(row,sib); else box.insertBefore(sib,row);};
+    ov.querySelectorAll('.mvcp-up').forEach(b=>b.onclick=()=>move(b.dataset.k,-1));
+    ov.querySelectorAll('.mvcp-dn').forEach(b=>b.onclick=()=>move(b.dataset.k, 1));
+    /* 행 끌어서 순서 변경 — ★HTML5 draggable 은 쓰지 않는다(텍스트 선택이 먼저 잡혀
+         파란 블록만 생기고 드래그가 시작되지 않는다). 5px 이상 움직여야 '이동'이라
+         같은 행에서 "클릭=체크토글 / 끌면=이동"이 공존한다. */
+    let dK=null,dY=0,dMoved=false;
+    const rowsOf=()=>[...ov.querySelectorAll('.mvcp-r')];
+    const rowAtY=y=>{const rs=rowsOf(); if(!rs.length)return null;
+      let best=rs[0],bd=1e9;
+      for(const r of rs){const b=r.getBoundingClientRect();
+        const d=(y<b.top)?(b.top-y):((y>b.bottom)?(y-b.bottom):0);
+        if(d<bd){bd=d;best=r;}}
+      return best;};
+    ov.addEventListener('mousedown',e=>{
+      const row=e.target.closest&&e.target.closest('.mvcp-r'); if(!row)return;
+      if(e.target.tagName==='INPUT')return;                // 체크박스는 브라우저가 처리
+      if(e.target.closest('.mvcp-up,.mvcp-dn'))return;     // ▲▼ 는 클릭으로
+      e.preventDefault();                                   // 텍스트 선택 차단
+      dK=row.dataset.k; dY=e.clientY; dMoved=false;
+      row.style.opacity='.55';
+    });
+    const onMove=e=>{
+      if(!dK)return;
+      if(!ov.isConnected){dK=null;document.removeEventListener('mousemove',onMove);return;}
+      if(!dMoved&&Math.abs(e.clientY-dY)<5)return;
+      dMoved=true;
+      const over=rowAtY(e.clientY);
+      rowsOf().forEach(x=>{if(x!==over)x.style.borderTop='';});
+      if(over&&over.dataset.k!==dK)over.style.borderTop='2px solid #2563eb';
+    };
+    const onUp=e=>{
+      if(!dK)return;
+      if(!ov.isConnected){dK=null;document.removeEventListener('mouseup',onUp);return;}
+      const k=dK; dK=null;
+      rowsOf().forEach(x=>{x.style.opacity='';x.style.borderTop='';});
+      if(!dMoved)return;                                    // 안 움직였으면 클릭 = 체크 토글
+      const over=rowAtY(e.clientY);
+      if(!over||over.dataset.k===k)return;
+      const src=rowsOf().find(r=>r.dataset.k===k); if(!src)return;
+      const box=over.parentElement;                         // 놓은 자리의 그룹을 물려받는다
+      const sb=over.getBoundingClientRect();
+      if(e.clientY < sb.top+sb.height/2) box.insertBefore(src,over);
+      else box.insertBefore(src,over.nextSibling);
+      src.dataset.grp = box.id==='mvcp-h' ? 'head' : 'tail';
+    };
+    document.addEventListener('mousemove',onMove);
+    document.addEventListener('mouseup',onUp);
+    q('#mvcp-reset').onclick=()=>{
+      try{localStorage.removeItem(MH_LS);localStorage.removeItem(MT_LS);
+          localStorage.removeItem(MV_HIDE);}catch(_){}
+      MH_ORD.length=0; MH_DEF.forEach(k=>MH_ORD.push(k));
+      MT_ORD.length=0; MT_DEF.forEach(k=>MT_ORD.push(k));
+      mvHid=new Set();
+      ov.remove(); draw();};
+    q('#mvcp-ok').onclick=()=>{
+      const ord=sel=>[...ov.querySelectorAll(sel+' .mvcp-r')].map(r=>r.dataset.k);
+      const nh=ord('#mvcp-h'), nt=ord('#mvcp-t');
+      const nhid=[...ov.querySelectorAll('input[data-ck]')]
+        .filter(x=>!x.checked).map(x=>x.dataset.ck);
+      try{localStorage.setItem(MH_LS,JSON.stringify(nh));
+          localStorage.setItem(MT_LS,JSON.stringify(nt));
+          localStorage.setItem(MV_HIDE,JSON.stringify(nhid));}catch(_){}
+      MH_ORD.length=0; nh.forEach(k=>MH_ORD.push(k));
+      MT_ORD.length=0; nt.forEach(k=>MT_ORD.push(k));
+      mvHid=new Set(nhid);
+      ov.remove(); draw();
+    };
+  };
   const planGridHtml=()=>{
     const dates=st.dates;
     let tNeed=0,tMoved=0,tSale=0,tAssy=0,tPrint=0,tPrior=0;const dSum={};dates.forEach(d=>dSum[d]=0);
@@ -904,60 +1622,43 @@ SCREEN.gagongmove580=(c)=>{
       dates.forEach(d=>{dSum[d]+=(r.days&&r.days[d])||0;});});
     // 고정컬럼수 = 앞 8(SEQ·최종납품처·ASSY도번·도번·자도번LIST·PART일자·INPUT·Line)
     //            + 3(이동전표발행·이동필요·당일이전) + 뒤 5(출하·ASSY재고·자재재고·생산재고·도번고정)
-    const NC=16;
+    // ★colspan 은 실제 보이는 컬럼 수로 — 고정값(16)을 쓰면 항목 숨김 시 어긋난다(420 과 동일).
+    const NC=mvVis(MH_ORD).length+mvVis(MT_ORD).length;
     return `<div class="grid-wrap" style="max-height:calc(100vh - 340px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit mv-tbl" style="font-size:11px;user-select:none;text-align:center"><thead><tr>
        <!-- ★ASSY도번 추가(2026-09-01 요청) — 레거시 580 에 있는 컬럼.
             '도번'은 가공품번(예 AJR74942626-고압)이라 ASSY 원본과 다르다. 둘 다 보여야 추적된다. -->
-       <th>SEQ</th><th>최종납품처</th><th>ASSY도번</th><th>도번</th><th>자도번LIST</th><th>PART일자</th><th>INPUT</th><th>Line</th>
-       <th>이동전표발행</th><th>이동필요</th><th>당일이전</th>
+       ${mvTh(MH_ORD,MHDEF,'head')}
        ${dates.map(d=>`<th style="${wke(d)};${wkbg(d)}">${wlab(d)}</th>`).join('')}
        <!-- ★재고류 5종을 일자 뒤로(2026-09-01 요청) — 계획·일자를 먼저 보고 재고는 참고로 -->
-       <th>출하</th><th>ASSY재고</th><th>자재재고</th><th>생산재고</th><th>도번고정</th></tr></thead>
+       ${mvTh(MT_ORD,MTDEF,'tail')}</tr></thead>
       <tbody>${st.loading?spinRow(NC+dates.length):(st.rows.length?st.rows.map((r,i)=>{
         const jshort=(r.jado||'').length>40?(r.jado.slice(0,40)+'…'):(r.jado||'');const ex=st.exp.has(i);
         return `<tr>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${i+1}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${esc(r.dest)}</td>
-        <!-- ★ASSY도번(2026-09-01) — 가공품번(도번)과 달리 ASSY 원본. 레거시 580 동일 -->
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer" title="${esc(r.assy)}">${esc(r.assy)}</td>
-        ${(()=>{const on=st.itemSel===i;   // ★도번칸 = 별도 선택상태(키팅 itemSel 패턴). 재클릭=해제
-          const sty=on?'background:#dbeafe;color:#123a6b;font-weight:700;outline:2px solid #4a86e8;outline-offset:-2px':'';
-          // ★도번 = 가공품번(item, 예 AJR74942626-고압) — 레거시 580 도번컬럼과 동일(2026-08-28).
-          //   ASSY 도번(r.assy)만 쓰면 고압/저압 등이 같은 값으로 보여 중복행처럼 읽힌다.
-          const dno=r.item||r.assy;
-          return `<td class="center mv-item" data-i="${i}" style="cursor:pointer;${sty}" title="${esc(dno)}&#10;ASSY: ${esc(r.assy)}&#10;클릭=이 도번 선택/해제 · Ctrl+클릭=여러 행 추가선택"><b>${esc(dno)}</b></td>`;})()}
-        <td class="center jado-cell" data-i="${i}" title="${esc(r.jado)}&#10;더블클릭=자도번 펼치기" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;color:#1c66c9">${esc(jshort)} <span style="color:#8aa">(${r.matcnt})</span></td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${dcol(r.part_ymd)}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${esc(r.hm)}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${esc(r.line)}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.jp_print?'':';color:#dfe6ef'}">${r.jp_print?nf(r.jp_print):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.need>0?';color:#c0392b;font-weight:600':';color:#dfe6ef'}">${r.need>0?nf(r.need):'·'}</td>
-        ${(()=>{const on=st.sel.has(`${i}:P`);   // 당일이전(plan_qty_00)도 선택 대상 — 키는 '행:P'
-          if(!r.prior)return `<td class="center" style="color:#dfe6ef">·</td>`;
-          const bg=r.prior_color||'';
-          return `<td class="center mv-cell" data-i="${i}" data-d="P" data-key="${i}:P" style="cursor:pointer;background:${bg};${fgOn(bg)};font-weight:700${on?';outline:2px solid #4a86e8;outline-offset:-2px;background-image:linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72))':''}">${nf(r.prior_done||0)}/${nf(r.prior)}</td>`;})()}
+        ${mvTd(MH_ORD,MHDEF,r,i)}
         ${dates.map(d=>{const plan=(r.days&&r.days[d])||0,done=(r.doneday&&r.doneday[d])||0,bg=(r.colorday&&r.colorday[d])||'';
           if(!plan)return `<td class="center mv-cell" data-i="${i}" data-d="${d}" style="color:#dfe6ef;${wkbg(d)}">·</td>`;
           const key=`${i}:${d}`, on=st.sel.has(key);
           return `<td class="center mv-cell" data-i="${i}" data-d="${d}" data-key="${key}" style="cursor:pointer;${bg?`background:${bg};${fgOn(bg)}`:wkbg(d)};font-weight:700${on?';outline:2px solid #4a86e8;outline-offset:-2px;background-image:linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72))':''}">${nf(done)}/${nf(plan)}</td>`;}).join('')}
         <!-- ★재고류 5종 — 일자 뒤(2026-09-01 요청) -->
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.sale?'':';color:#dfe6ef'}">${r.sale?nf(r.sale):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.assy_stock?'':';color:#dfe6ef'}">${r.assy_stock?nf(r.assy_stock):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.stock?'':';color:#dfe6ef'}">${r.stock?nf(r.stock):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.pr_stock?'':';color:#dfe6ef'}">${r.pr_stock?nf(r.pr_stock):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.fix_stock?'':';color:#dfe6ef'}">${r.fix_stock?nf(r.fix_stock):'·'}</td></tr>
+        ${mvTd(MT_ORD,MTDEF,r,i)}</tr>
         ${ex?`<tr class="jado-exp"><td></td><td colspan="${NC-1+dates.length}" style="background:#f2f7ff;white-space:normal;padding:4px 8px;font-size:11px;color:#334;text-align:left">📦 자도번 ${r.matcnt}종: ${esc(r.jado).replace(/,/g,'&nbsp;· ')}</td></tr>`:''}`;
       }).join(''):`<tr><td colspan="${NC+dates.length}" class="empty">${st.loaded?'조회 결과 없음':'조건을 지정한 뒤 <b>🔍 조회</b> 버튼을 누르세요.'}</td></tr>`)}</tbody>
       ${(()=>{if(!st.rows.length)return '';
         // ★재고류를 일자 뒤로 옮겼으므로 합계행도 같은 순서로(2026-09-01).
         let tStock=0,tPr=0,tFix=0;
         st.rows.forEach(r=>{tStock+=+r.stock||0;tPr+=+r.pr_stock||0;tFix+=+r.fix_stock||0;});
-        return `<tfoot><tr class="grandtot"><td colspan="8">합계 (${nf(st.cnt)}행)</td>
-        <td class="center">${nf(tPrint)}</td><td class="center" style="color:#c0392b">${nf(tNeed)}</td><td class="center">${nf(tPrior)}</td>
+        // ★합계행도 정의 기반으로 — 컬럼을 숨기거나 순서를 바꿔도 값이 제 칸에 붙는다.
+        const TOT={jp_print:tPrint, need:`<span style="color:#c0392b">${nf(tNeed)}</span>`, prior:nf(tPrior),
+                   sale:tSale, assy_stock:tAssy, stock:tStock, pr_stock:tPr, fix_stock:tFix};
+        const tcell=k=>{const v=TOT[k];
+          return `<td class="center">${v===undefined?'':(typeof v==='number'?nf(v):v)}</td>`;};
+        const hv=mvVis(MH_ORD);
+        let lead=0; while(lead<hv.length && TOT[hv[lead]]===undefined) lead++;   // 합계 라벨이 먹을 앞칸 수
+        return `<tfoot><tr class="grandtot">${lead?`<td colspan="${lead}">합계 (${nf(st.cnt)}행)</td>`:''}
+        ${hv.slice(lead).map(tcell).join('')}
         ${dates.map(d=>`<td class="center">${nf(dSum[d])}</td>`).join('')}
-        <td class="center">${nf(tSale)}</td><td class="center">${nf(tAssy)}</td>
-        <td class="center">${nf(tStock)}</td><td class="center">${nf(tPr)}</td><td class="center">${nf(tFix)}</td></tr></tfoot>`;})()}
+        ${mvVis(MT_ORD).map(tcell).join('')}</tr></tfoot>`;})()}
       </table></div>`;
   };
   // ★"이동전표" 모드 — MAINT_GROUP_SEQ(전표) 단위 발행목록. 확정여부(입고확인)와 각 전표 재출력 버튼.
@@ -997,6 +1698,12 @@ SCREEN.gagongmove580=(c)=>{
        /* ★.tbl th 가 전역 text-align:left 라 헤더가 좌측정렬됨 → 이 화면 표는 전부 가운데 */
        .mv-tbl th,.mv-tbl td,.mvs-tbl th,.mvs-tbl td{text-align:center!important}
        .mv-tbl tr.jado-exp td{text-align:left!important}
+       /* ★복사 전용 선택(2026-09-06) — 이동처리 선택(파랑)과 **다른 색**이어야
+            무엇이 이동 대상이고 무엇이 복사 대상인지 구분된다.
+          ★셀에 인라인 background 가 걸려 있어(SP 색상) outline 으로 표시한다 —
+            background-image 는 인라인 background 에 덮인다. */
+       .mv-tbl td.mvcp{outline:2px solid #e0a800;outline-offset:-2px;
+                       box-shadow:inset 0 0 0 999px rgba(255,236,179,.38)}
      </style>
      <div class="page-title">🚚 가공창고 이동계획 <span style="font-size:12px;color:var(--muted);font-weight:400">가공창고→자재창고 이동필요 · 자도번LIST 묶음</span></div>
      <div class="page-sub">${st.src==='new'
@@ -1028,8 +1735,9 @@ SCREEN.gagongmove580=(c)=>{
        <label class="rl"><input type="radio" name="mv-gubun" value="이동전표"${st.gubun==='이동전표'?' checked':''}> 이동전표</label>
        <label class="tl">소스</label><select class="inp src-new" id="mv-src" data-src="${esc(st.src)}" style="width:auto;min-width:150px" title="신규DB(웹계획)=복제 SP(계획원천만 웹편성 nx.plan_part_dtl, 나머지 로직은 레거시 그대로) / 우리(nx)=레거시 SP 직접호출"><option value="new"${st.src==='new'?' selected':''}>🟣 신규DB(웹계획)</option><option value="nx"${st.src!=='new'?' selected':''}>🟢 우리(nx)</option></select>
        <button class="btn" id="mv-search">🔍 조회</button>
+       ${isSheet?'':'<button class="btn" id="mv-col" title="컬럼 숨김·순서 (헤더 우클릭으로도 열림)">항목보기</button>'}
        ${isSheet?'':'<button class="btn xls" id="mv-xls" title="조회 결과를 화면과 같은 색상으로 엑셀 저장">엑셀</button>'}
-       <div class="spacer"></div><span class="rowcount">${isSheet?`전표 <b>${nf(st.sheetCnt)}</b>건`:`행 <b>${nf(st.cnt)}</b> · 선택 <b id="mv-selcnt">${st.sel.size}</b>셀 <span id="mv-selqty" style="color:#1c47a0"></span> · 이동필요합 <b style="color:#c0392b">${nf(st.need_sum)}</b> · 이동완료합 <b>${nf(st.moved_sum)}</b>`}</span>
+       <div class="spacer"></div><span class="rowcount" id="mv-cnt">${isSheet?`전표 <b>${nf(st.sheetCnt)}</b>건`:`행 <b>${nf(st.cnt)}</b> · 선택 <b id="mv-selcnt">${st.sel.size}</b>셀 <span id="mv-selqty" style="color:#1c47a0"></span> · 이동필요합 <b style="color:#c0392b">${nf(st.need_sum)}</b> · 이동완료합 <b>${nf(st.moved_sum)}</b>`}</span>
      </div>
      ${st.note?`<div class="page-sub" style="color:#c0392b">${esc(st.note)}</div>`:''}
      ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
@@ -1044,6 +1752,13 @@ SCREEN.gagongmove580=(c)=>{
     // 소스는 고르는 즉시 색을 바꾼다(실제 반영은 [조회]).
     {const sv=g('#mv-src');if(sv)sv.onchange=e=>{e.target.dataset.src=e.target.value;};}
     {const xb=g('#mv-xls');if(xb)xb.onclick=exportXls;}   // ★엑셀(색상 유지)
+    /* ★항목보기 버튼 — 실패를 삼키지 않는다(420 과 같은 이유:
+         예외가 나면 창이 조용히 안 떠서 원인을 알 수 없다). */
+    {const cb=g('#mv-col');
+     if(cb)cb.onclick=e=>{e.preventDefault();e.stopPropagation();
+       try{openColPick();}
+       catch(err){console.error('[580 항목보기]',err);
+                  alert('항목보기를 열지 못했습니다: '+(err&&err.message||err));}};}
     // ★기간 N일 = 기준일 포함 N일치 → to = from + (N-1). (기존 +N 이라 11·15일치가 나왔음)
     //   ★2026-08-25 st.to 만 고치고 조회를 누르면 #mv-search 핸들러가 첫 줄에서
     //     st.to = 입력칸값 으로 되돌려버려(입력칸은 아직 옛 날짜) 항상 2일치만 나왔다.
@@ -1152,6 +1867,112 @@ SCREEN.gagongmove580=(c)=>{
           applySel(startCell.i,+el.dataset.i,startCell.d,el.dataset.d,startCell.add);paint();}});
     });
     if(!c._mvUp){c._mvUp=true;document.addEventListener('mouseup',()=>{dragging=false;});}
+
+    /* ══ 복사 (2026-09-06 — 420·410 과 같은 동작) ═══════════════════════════
+         위의 셀 선택(.mv-cell)은 **이동처리 대상**을 고르는 기능이라 건드리지 않는다.
+         도번·자도번LIST 같은 텍스트칸까지 넣으면 이동처리 로직이 깨진다.
+         ⟹ 전 셀을 덮는 **복사 전용 레이어**(.mvcp, 노랑)를 따로 둔다. */
+    {
+      const tbl=c.querySelector('.mv-tbl');
+      const tb=tbl&&tbl.tBodies[0];
+      if(tb&&!tb.dataset.cpsel){
+        tb.dataset.cpsel='1';
+        const rcOf=td=>{const tr=td.parentElement;return {r:tr?tr.rowIndex:-1,c:td.cellIndex};};
+        let cdrag=false,_ca=null,_cc=null,_cl=null;
+        const cpClear=()=>tbl.querySelectorAll('td.mvcp').forEach(td=>td.classList.remove('mvcp'));
+        const cpSnap=()=>{_cc=[...tb.querySelectorAll('td')]
+          .map(x=>{const p=rcOf(x);return {td:x,r:p.r,c:p.c};});};
+        const cpRect=(td)=>{if(!_ca||!_cc)return;
+          const b=rcOf(td);
+          const r1=Math.min(_ca.r,b.r),r2=Math.max(_ca.r,b.r);
+          const c1=Math.min(_ca.c,b.c),c2=Math.max(_ca.c,b.c);
+          for(const it of _cc)it.td.classList.toggle('mvcp',
+            it.r>=r1&&it.r<=r2&&it.c>=c1&&it.c<=c2);};
+        tb.addEventListener('mousedown',e=>{
+          if(e.button!==0)return;
+          if(e.target.closest('.mv-cell[data-key],.mv-item'))return;  // 일자칸·도번칸은 기존 선택이 처리
+          const start=e.target.closest('td'); if(!start||!start.closest('tr'))return;
+          e.preventDefault();
+          if(!e.ctrlKey&&!e.metaKey)cpClear();
+          cdrag=true;cpSnap();_ca=rcOf(start);_cl=start;cpRect(start);});
+        tb.addEventListener('mousemove',e=>{if(!cdrag)return;
+          if(!(e.buttons&1)){cdrag=false;_ca=null;_cc=null;_cl=null;return;}
+          const el=document.elementFromPoint(e.clientX,e.clientY);
+          const td=(el&&el.closest('td'))||_cl;
+          if(td){_cl=td;cpRect(td);}});
+        document.addEventListener('mouseup',()=>{cdrag=false;_ca=null;_cc=null;_cl=null;});
+        tb.addEventListener('mousedown',e=>{   // 일자칸 드래그 시작 = 복사선택 해제
+          if(e.button===0&&e.target.closest('.mv-cell[data-key]'))cpClear();});
+      }
+      const selText=()=>{
+        const map=new Map();
+        const pick=c.querySelector('td.mvcp')?'td.mvcp':'td.mv-cell.sel';
+        c.querySelectorAll(pick).forEach(td=>{
+          const tr=td.parentElement; if(!tr)return;
+          if(!map.has(tr.rowIndex))map.set(tr.rowIndex,[]);
+          map.get(tr.rowIndex).push([td.cellIndex,(td.innerText||'').trim()]);});
+        return [...map.keys()].sort((x,y)=>x-y)
+          .map(r=>map.get(r).sort((x,y)=>x[0]-y[0]).map(x=>x[1]).join('\t')).join('\n');
+      };
+      const toClip=(txt,what)=>{
+        if(!txt){alert('복사할 영역을 먼저 끌어서 선택하세요.');return;}
+        const done=()=>{const el=c.querySelector('#mv-cnt');
+          if(el){const o=el.innerHTML;el.innerHTML=`<b style="color:#1c7c3a">${what} 복사됨</b>`;
+                 setTimeout(()=>{el.innerHTML=o;},1400);}};
+        if(navigator.clipboard&&navigator.clipboard.writeText)
+          navigator.clipboard.writeText(txt).then(done,()=>fb()); else fb();
+        function fb(){const ta=document.createElement('textarea'); ta.value=txt;
+          ta.style.cssText='position:fixed;left:-9999px;top:0';
+          document.body.appendChild(ta); ta.select();
+          try{document.execCommand('copy');done();}catch(_){alert('복사에 실패했습니다.');}
+          ta.remove();}
+      };
+      const copySel=()=>toClip(selText(),'선택영역');
+      const copyAll=()=>{
+        if(!tbl)return; const out=[];
+        const hr=tbl.tHead&&tbl.tHead.rows[0];
+        if(hr)out.push([...hr.cells].map(th=>(th.innerText||'').trim()).join('\t'));
+        [...tbl.tBodies].forEach(b=>{for(const tr of b.rows)
+          out.push([...tr.cells].map(td=>(td.innerText||'').trim()).join('\t'));});
+        toClip(out.join('\n'),`전체 ${out.length-1}행`);
+      };
+      if(!c.dataset.cpkey){
+        c.dataset.cpkey='1';
+        c.addEventListener('keydown',ev=>{
+          if((ev.ctrlKey||ev.metaKey)&&(ev.key==='c'||ev.key==='C')){
+            if(!c.querySelector('td.mvcp,td.mv-cell.sel'))return;
+            ev.preventDefault(); copySel();}});
+        c.setAttribute('tabindex','-1'); c.style.outline='none';
+      }
+      /* 우클릭 메뉴 — ★실행도 mousedown 에서(410·420 과 같은 함정 회피:
+         바깥클릭 닫기가 mousedown 이라 click 은 죽은 노드에 떨어진다). */
+      c.querySelectorAll('.mv-tbl thead th,.mv-tbl tbody').forEach(el=>{
+        el.oncontextmenu=e=>{
+          e.preventDefault();
+          const old=document.getElementById('mv-ctx'); if(old)old.remove();
+          const m=document.createElement('div'); m.id='mv-ctx';
+          m.style.cssText=`position:fixed;left:${Math.min(e.clientX,innerWidth-170)}px;
+            top:${Math.min(e.clientY,innerHeight-90)}px;z-index:1400;background:#fff;
+            border:1px solid #cfd8e6;border-radius:6px;box-shadow:0 6px 20px rgba(20,40,80,.22);
+            font-size:12.5px;min-width:150px;overflow:hidden`;
+          m.innerHTML=['항목보기','선택영역 복사','전체 복사']
+            .map((t,i)=>`<div data-i="${i}" style="padding:7px 12px;cursor:pointer">${t}</div>`).join('');
+          document.body.appendChild(m);
+          m.querySelectorAll('div[data-i]').forEach(d=>{
+            d.onmouseenter=()=>d.style.background='#eef4ff';
+            d.onmouseleave=()=>d.style.background='';});
+          const kill=()=>{m.remove();document.removeEventListener('mousedown',outside,true);};
+          const outside=ev2=>{if(!m.contains(ev2.target))kill();};
+          setTimeout(()=>document.addEventListener('mousedown',outside,true),0);
+          m.addEventListener('mousedown',ev2=>{
+            ev2.preventDefault(); ev2.stopPropagation();
+            const t=ev2.target.closest&&ev2.target.closest('[data-i]'); if(!t)return;
+            const i=+t.dataset.i; kill();
+            try{ if(i===0)openColPick(); else if(i===1)copySel(); else copyAll(); }
+            catch(err){console.error('[580 메뉴]',err);alert('실행 실패: '+(err&&err.message||err));}});
+        };
+      });
+    }
     paint();   // ★재렌더 후 선택표시·선택수량 복원(도번칸 Ctrl+클릭 누적분 포함)
     // ★발행 직후 화면 반영 — 서버 재조회 없이 st.all 의 해당 셀을 직접 올린다(사용자요청 2026-08-23).
     //   applied = [{assy, ymd('P'=당일이전), qty}] — 발행한 수량만큼 분자(완료)를 올리고 색을 칠한다.
@@ -1852,6 +2673,64 @@ SCREEN.gagongmatplan070=(c)=>{
   const st={ymd:date2ymd(planBaseIso()),mode:'sum',wc:'P2',line:'',wo:'',asm:'',item:'',
             dates:[],rows:[],cnt:0,qty:0,loading:false,msg:''};
 
+  /* ★컬럼 정의 — 항목보기(숨김·순서)를 쓰려면 <th>·<td> 를 하드코딩하지 않고
+       정의에서 만들어야 한다(2026-09-06, 410·420·580 과 같은 구조).
+       ★이 화면은 보기(집계/상세)에 따라 컬럼이 달라진다 —
+         집계 = LOT수량 / 상세 = 자도번·사용수. 그래서 정의에 only 를 둬서
+         현재 모드에 없는 컬럼은 아예 후보에서 뺀다(순서 저장에는 남겨둔다). */
+  const M7DEF={
+    seq:{t:'SEQ',cls:'num', h:(r,i)=>`<td class="num">${i+1}</td>`, x:{w:40,al:'center',v:(r,i)=>i+1}},
+    wcnm:{t:'작업처',       h:r=>`<td class="center">${esc(r.wcnm||r.wc)}</td>`, x:{w:62,al:'center',v:r=>r.wcnm||r.wc||''}},
+    line:{t:'라인',         h:r=>`<td class="center">${esc(r.line)}</td>`,       x:{w:48,al:'center',v:r=>r.line||''}},
+    wo:{t:'제번',           h:r=>`<td>${esc(r.wo)}</td>`,                        x:{w:88,al:'center',v:r=>r.wo||''}},
+    model:{t:'모델',        h:r=>`<td class="bcap" title="${esc(r.model)}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.model)}</td>`,
+      x:{w:170,al:'left',v:r=>r.model||''}},
+    asm:{t:'ASM도번',       h:r=>`<td><b>${esc(r.asm)}</b></td>`,                x:{w:110,al:'center',v:r=>r.asm||''}},
+    mat:{t:'자도번',only:'dtl', h:r=>`<td>${esc(r.mat)}</td>`,                   x:{w:110,al:'center',v:r=>r.mat||''}},
+    use:{t:'사용수',cls:'num',only:'dtl', h:r=>`<td class="num">${nf3(r.use)}</td>`, x:{w:62,al:'right',v:r=>+r.use||0}},
+    lot:{t:'LOT수량',cls:'num',only:'sum', h:r=>`<td class="num">${nf(r.lot)}</td>`, x:{w:62,al:'right',v:r=>+r.lot||0}},
+    qty:{t:'계획수량',cls:'num', h:r=>`<td class="num"><b>${nf(r.qty)}</b></td>`, x:{w:66,al:'right',v:r=>+r.qty||0}},
+  };
+  const M7_DEF=['seq','wcnm','line','wo','model','asm','mat','use','lot','qty'];
+  const M7_LS='m7_colorder', M7_HIDE='m7_hidecols';
+  /* ★가변 배열 — 항목보기 적용 시 제자리에서 고쳐야 draw() 한 번으로 새 순서가 보인다. */
+  const M7_ORD=(()=>{try{const v=JSON.parse(localStorage.getItem(M7_LS)||'null');
+    if(Array.isArray(v)&&v.length){const o=v.filter(k=>M7DEF[k]);
+      M7_DEF.forEach(k=>{if(!o.includes(k))o.push(k);});return o;}}catch(_){}
+    return M7_DEF.slice();})();
+  const m7LoadHide=()=>{try{const v=JSON.parse(localStorage.getItem(M7_HIDE)||'[]');
+    return new Set(Array.isArray(v)?v:[]);}catch(_){return new Set();}};
+  let m7Hid=m7LoadHide();
+  // 현재 보기(집계/상세)에 해당하는 컬럼만 — only 가 다른 모드면 제외
+  const m7Avail=()=>M7_ORD.filter(k=>!M7DEF[k].only||M7DEF[k].only===st.mode);
+  const m7Vis=()=>m7Avail().filter(k=>!m7Hid.has(k));
+  const m7Th=()=>m7Vis().map(k=>`<th class="${M7DEF[k].cls||''}" data-tk="${k}" title="우클릭 = 항목보기(순서·숨김)">${M7DEF[k].t}</th>`).join('');
+  const m7Td=(r,i)=>m7Vis().map(k=>M7DEF[k].h(r,i)).join('');
+  /* ══ 점진 렌더 상태 ═══════════════════════════════════════════════════════
+       m7Rest = {from, mk} — 아직 안 붙인 행의 시작 인덱스와 행 생성 함수.
+       ★HTML 문자열을 미리 다 만들어 두지 않는다 — 3,240행분 문자열 생성 자체가
+         무거워서 "미리 만들고 나눠 붙이기"는 최초 렌더 지연을 못 줄인다. */
+  const M7_PAGE=300;
+  let m7Rest=null;
+  const m7Append=()=>{
+    if(!m7Rest)return;
+    const tb=c.querySelector('.m7tbl tbody'); if(!tb){m7Rest=null;return;}
+    const to=Math.min(m7Rest.from+M7_PAGE, st.rows.length);
+    const buf=[]; for(let i=m7Rest.from;i<to;i++)buf.push(m7Rest.mk(st.rows[i],i));
+    tb.insertAdjacentHTML('beforeend',buf.join(''));
+    m7Rest = (to<st.rows.length) ? {from:to, mk:m7Rest.mk} : null;
+    const el=c.querySelector('#m7-cnt');
+    if(el&&!el.dataset.busy)el.innerHTML=`행 <b>${nf(st.cnt)}</b>`
+      +(m7Rest?` <span style="color:#7b8aa0">(${nf(to)}행 표시 · 스크롤하면 더)</span>`:'')
+      +` · 수량합 <b>${nf(st.qty)}</b> · 일자 ${st.dates.length}개`;};
+  const m7WireLazy=()=>{
+    const w=c.querySelector('.mp7-grid');
+    if(!w||w.dataset.lazy)return;
+    w.dataset.lazy='1';
+    w.addEventListener('scroll',()=>{
+      if(m7Rest&&w.scrollTop+w.clientHeight>=w.scrollHeight-400)m7Append();
+    },{passive:true});};
+
   const load=async()=>{st.loading=true;draw();
     const qs=new URLSearchParams({ymd:st.ymd,mode:st.mode,wc:st.wc,line:st.line,
                                  wo:st.wo,asm:st.asm,item:st.item,limit:20000});
@@ -1871,10 +2750,19 @@ SCREEN.gagongmatplan070=(c)=>{
     let tLot=0,tQty=0;const dSum=dates.map(()=>0);
     st.rows.forEach(r=>{tLot+=+r.lot||0;tQty+=+r.qty||0;
       (r.d||[]).forEach((v,i)=>{dSum[i]+=+v||0;});});
-    const NC=DTL?8:7;   // 고정컬럼수
+    // ★colspan 은 실제 보이는 컬럼 수로 — 고정값을 쓰면 항목 숨김 시 어긋난다.
+    const NC=m7Vis().length;
     const hbg=i=>{const w=dow(dates[i]);return w===0?'background:#ffe3e3':(w===6?'background:#e3ecff':'');};
     const cell=(v,i)=>v?`<td class="num"${dow(dates[i])===0?' style="background:#fff5f5"':(dow(dates[i])===6?' style="background:#f5f8ff"':'')}>${nf(v)}</td>`
                        :`<td class="num" style="color:#dfe6ef${dow(dates[i])===0?';background:#fff5f5':(dow(dates[i])===6?';background:#f5f8ff':'')}">·</td>`;
+    /* ══ 점진 렌더 (2026-09-06 — "계획 조회하니 버벅거린다") ══════════════════
+         3,240행 × 40컬럼 = 약 13만 셀. 한 번에 그리면 최초 렌더·스크롤이 다 멈춘다.
+         처음 M7_PAGE 행만 DOM 에 올리고 스크롤 끝에서 이어붙인다(410·키팅과 같은 방식).
+         ★일자칸 셀 문자열은 미리 만들지 않는다 — 그 자체가 무거워 의미가 없다.
+           대신 행 HTML 생성을 **필요한 만큼만** 하도록 함수로 미룬다. */
+    const mkRow=(r,i)=>`<tr>${m7Td(r,i)}${(r.d||[]).map((v,j)=>cell(v,j)).join('')}</tr>`;
+    const _head=[]; for(let i=0;i<Math.min(st.rows.length,M7_PAGE);i++)_head.push(mkRow(st.rows[i],i));
+    m7Rest=(st.rows.length>M7_PAGE)?{from:M7_PAGE,mk:mkRow}:null;
 
     c.innerHTML=`
      <style>
@@ -1891,6 +2779,8 @@ SCREEN.gagongmatplan070=(c)=>{
         <span style="font-size:12px;color:var(--muted);font-weight:400">제번×라인×ASM도번 · 기준일부터 31일</span></div>
       <div class="page-sub" style="flex:0 0 auto">생산계획(<code>nx.plan_dtl</code>) → 모델BOM → <b>통일 소요엔진</b> 전개로 가공(${esc(st.wc)}) 자재 소요를 낸다.
         수량 = ceiling(계획수량 × 모델BOM사용수 × 생산율) × BOM누적사용수. 모델BOM 유효기간·BOM 전개제외(except) 반영 = 웹 편성(파트별계획)과 같은 기준.</div>
+      <!-- ★조건이 한 줄에 다 안 들어가 잘리므로 2줄로 나눈다(2026-09-06 요청).
+             §3 "툴바는 한 줄 유지"는 각 줄에 적용 — 줄마다 nowrap 이다. -->
       <div class="toolbar" style="flex:0 0 auto">
         <label class="tl">기준일자</label><input class="inp" type="date" id="m7-ymd" value="${ymd2date(st.ymd)}" style="width:140px">
         <label class="tl">작업처</label><select class="inp" id="m7-wc" style="width:96px">
@@ -1900,42 +2790,39 @@ SCREEN.gagongmatplan070=(c)=>{
           <option value="sum"${!DTL?' selected':''}>집계</option>
           <option value="dtl"${DTL?' selected':''}>상세</option></select>
         <label class="tl">라인</label><input class="inp" id="m7-line" list="m7-linel" value="${esc(st.line)}" style="width:70px" autocomplete="off"><datalist id="m7-linel">${opt(lnS)}</datalist>
+        <button class="btn" id="m7-search">조회</button>
+        <div class="spacer"></div>
+        <span class="rowcount" id="m7-cnt">행 <b>${nf(st.cnt)}</b>${st.rows.length>M7_PAGE?` <span style="color:#7b8aa0">(${nf(M7_PAGE)}행 표시 · 스크롤하면 더)</span>`:''} · 수량합 <b>${nf(st.qty)}</b> · 일자 ${dates.length}개</span>
+      </div>
+      <div class="toolbar" style="flex:0 0 auto;margin-top:2px">
         <label class="tl">제번</label><input class="inp" id="m7-wo" list="m7-wol" value="${esc(st.wo)}" style="width:110px" autocomplete="off"><datalist id="m7-wol">${opt(woS)}</datalist>
         <label class="tl">ASM도번</label><input class="inp" id="m7-asm" list="m7-asml" value="${esc(st.asm)}" style="width:130px" autocomplete="off"><datalist id="m7-asml">${opt(asS)}</datalist>
         <label class="tl">자도번</label><input class="inp" id="m7-item" list="m7-iteml" value="${esc(st.item)}" style="width:130px" autocomplete="off"><datalist id="m7-iteml">${opt(mtS)}</datalist>
-        <button class="btn" id="m7-search">조회</button>
-        <button class="btn" id="m7-xls">엑셀</button>
+        <!-- ★보기설정 버튼은 조회조건과 섞이지 않게 오른쪽 끝에(2026-09-06 요청 "여기에는 왜 있지").
+               조회조건 = 왼쪽 / 결과에 대한 조작(항목보기·엑셀) = 오른쪽. -->
         <div class="spacer"></div>
-        <span class="rowcount">행 <b>${nf(st.cnt)}</b> · 수량합 <b>${nf(st.qty)}</b> · 일자 ${dates.length}개</span>
+        <button class="btn" id="m7-col" title="컬럼 숨김·순서 (헤더 우클릭으로도 열림)">항목보기</button>
+        <button class="btn xls" id="m7-xls" title="조회 결과를 화면과 같은 서식으로 엑셀 저장">엑셀</button>
       </div>
       ${st.msg?`<div class="page-sub" style="color:#c0392b;flex:0 0 auto">${esc(st.msg)}</div>`:''}
       <div class="mp7-grid">
-       <table class="tbl fit" style="font-size:11px"><thead><tr>
-        <th>SEQ</th><th>작업처</th><th>라인</th><th>제번</th><th>모델</th><th>ASM도번</th>
-        ${DTL?'<th>자도번</th><th class="num">사용수</th>':'<th class="num">LOT수량</th>'}
-        <th class="num">계획수량</th>
+       <table class="tbl fit m7tbl" style="font-size:11px;user-select:none"><thead><tr>
+        ${m7Th()}
         ${dates.map((d,i)=>`<th class="num" style="${hbg(i)}">${dcol(d)}</th>`).join('')}</tr></thead>
-       <tbody>${st.loading?spinRow(NC+2+dates.length):(st.rows.length?st.rows.map((r,i)=>`
-        <tr>
-         <td class="num">${i+1}</td>
-         <td class="center">${esc(r.wcnm||r.wc)}</td>
-         <td class="center">${esc(r.line)}</td>
-         <td>${esc(r.wo)}</td>
-         <td class="bcap" title="${esc(r.model)}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.model)}</td>
-         <td><b>${esc(r.asm)}</b></td>
-         ${DTL?`<td>${esc(r.mat)}</td><td class="num">${nf3(r.use)}</td>`
-              :`<td class="num">${nf(r.lot)}</td>`}
-         <td class="num"><b>${nf(r.qty)}</b></td>
-         ${(r.d||[]).map((v,j)=>cell(v,j)).join('')}</tr>`).join('')
-        :`<tr><td colspan="${NC+2+dates.length}" class="empty">조회 결과 없음</td></tr>`)}</tbody>
-       ${st.rows.length?`<tfoot><tr class="grandtot">
-         <td colspan="6">합계 (${nf(st.cnt)}행)</td>
-         ${DTL?'<td></td><td></td>':`<td class="num">${nf(tLot)}</td>`}
-         <td class="num">${nf(tQty)}</td>
-         ${dSum.map(v=>`<td class="num">${nf(v)}</td>`).join('')}</tr></tfoot>`:''}
+       <tbody>${st.loading?spinRow(NC+dates.length):(st.rows.length?_head.join('')
+        :`<tr><td colspan="${NC+dates.length}" class="empty">조회 결과 없음</td></tr>`)}</tbody>
+       ${(()=>{if(!st.rows.length)return '';
+         /* ★합계행도 정의 기반으로 — 종전엔 colspan="6" + 위치 하드코딩이라
+              컬럼을 숨기거나 옮기면 합계가 엉뚱한 칸에 붙었다. */
+         const TOT={lot:tLot,qty:tQty}, vs=m7Vis();
+         let lead=0; while(lead<vs.length && TOT[vs[lead]]===undefined) lead++;
+         return `<tfoot><tr class="grandtot">${lead?`<td colspan="${lead}">합계 (${nf(st.cnt)}행)</td>`:''}
+         ${vs.slice(lead).map(k=>`<td class="num">${TOT[k]===undefined?'':nf(TOT[k])}</td>`).join('')}
+         ${dSum.map(v=>`<td class="num">${nf(v)}</td>`).join('')}</tr></tfoot>`;})()}
        </table></div>
      </div>`;
 
+    m7WireLazy();   // ★점진 렌더 — 스크롤 끝에서 이어붙이기
     const g=id=>c.querySelector(id);
     const apply=()=>{st.ymd=date2ymd(g('#m7-ymd').value)||st.ymd;st.wc=g('#m7-wc').value;
       st.mode=g('#m7-mode').value;st.line=g('#m7-line').value.trim();st.wo=g('#m7-wo').value.trim();
@@ -1943,18 +2830,263 @@ SCREEN.gagongmatplan070=(c)=>{
     g('#m7-search').onclick=apply;
     ['#m7-wc','#m7-mode'].forEach(id=>g(id).onchange=apply);
     ['#m7-line','#m7-wo','#m7-asm','#m7-item'].forEach(id=>g(id).onkeyup=e=>{if(e.key==='Enter')apply();});
-    g('#m7-xls').onclick=()=>{
+    /* ══ 엑셀 (화면 서식 그대로) ══════════════════════════════════════════
+         ★진짜 xlsx 로 내보낸다(core.js downloadXLS). HTML→.xls 는 엑셀이 서식을 버린다.
+         ★항목보기의 숨김·순서를 그대로 따른다 — "보이는 대로" 받는 것이 기대 동작이다.
+         ★주말 일자칸은 화면처럼 음영(일=#ffe3e3 / 토=#e3ecff, 본문은 연하게). */
+    const exportXls=()=>{
       if(!st.rows.length){alert('조회 결과가 없습니다.');return;}
-      const cols=[{k:'wcnm',t:'작업처'},{k:'line',t:'라인'},{k:'wo',t:'제번'},{k:'model',t:'모델'},{k:'asm',t:'ASM도번'}]
-        .concat(DTL?[{k:'mat',t:'자도번'},{k:'use',t:'사용수',n:1}]:[{k:'lot',t:'LOT수량',n:1}])
-        .concat([{k:'qty',t:'계획수량',n:1}])
-        .concat(dates.map((d,i)=>({k:'d'+i,t:dcol(d),n:1})));
-      const rows=st.rows.map(r=>{const o={...r};(r.d||[]).forEach((v,i)=>{o['d'+i]=v;});return o;});
-      downloadXLS(`가공계획현황_${st.ymd}_${DTL?'상세':'집계'}`,cols,rows);};
+      const vs=m7Vis(), HB='#ffffff';
+      const hb=i=>{const w=dow(dates[i]);return w===0?'#ffe3e3':(w===6?'#e3ecff':HB);};
+      const cbg=i=>{const w=dow(dates[i]);return w===0?'#fff5f5':(w===6?'#f5f8ff':'');};
+      const cols=vs.map(k=>({h:M7DEF[k].t,w:M7DEF[k].x.w,bg:HB}))
+        .concat(dates.map((d,i)=>({h:dcol(d),w:52,bg:hb(i)})));
+      const rows=st.rows.map((r,i)=>{
+        const out=vs.map(k=>({v:M7DEF[k].x.v(r,i), al:M7DEF[k].x.al}));
+        (r.d||[]).forEach((v,j)=>{out.push({v:(+v||0)||'', al:'right', bg:cbg(j)});});
+        return out;});
+      downloadXLS(`가공계획현황_${st.ymd}_${DTL?'상세':'집계'}`, cols, rows,
+                  {sheet:`가공계획_${st.wc||''}_${DTL?'상세':'집계'}`});};
+    g('#m7-xls').onclick=exportXls;
+    {const cbn=g('#m7-col');
+     if(cbn)cbn.onclick=e=>{e.preventDefault();e.stopPropagation();
+       try{openColPick();}
+       catch(err){console.error('[070 항목보기]',err);
+                  alert('항목보기를 열지 못했습니다: '+(err&&err.message||err));}};}
 
-    // 헤더 더블클릭 정렬(고정컬럼) — 일자컬럼은 정렬 대상 아님
-    const keys=['','wcnm','line','wo','model','asm'].concat(DTL?['mat','use']:['lot']).concat(['qty']);
+    /* ══ 드래그 복사 (410·420·580 과 같은 동작) ═══════════════════════════
+         표를 끌어 사각영역을 고르고 Ctrl+C 로 클립보드에 넣는다(엑셀에 TSV 로 붙는다).
+         ★HTML 텍스트 선택과 부딪히므로 mousedown 에서 preventDefault +
+           표에 user-select:none — 안 그러면 파란 블록만 생기고 영역이 안 잡힌다. */
+    const tbl=c.querySelector('.m7tbl');
+    const tb=tbl&&tbl.tBodies[0];
+    if(!document.getElementById('m7cp-css')){
+      const stl=document.createElement('style'); stl.id='m7cp-css';
+      stl.textContent='.m7tbl td.m7cp{outline:1px solid #93b4e6;outline-offset:-1px;'
+        +'background-image:linear-gradient(rgba(219,234,254,.55),rgba(219,234,254,.55))}';
+      document.head.appendChild(stl);
+    }
+    if(tb){
+      const rcOf=td=>({r:td.parentElement.rowIndex, c:td.cellIndex});
+      let cdrag=false,_ca=null,_cells=null,_clast=null;
+      const cpClear=()=>tb.querySelectorAll('td.m7cp').forEach(td=>td.classList.remove('m7cp'));
+      const cpSnap=()=>{_cells=[...tb.querySelectorAll('td')].map(x=>{const q=rcOf(x);return {td:x,r:q.r,c:q.c};});};
+      const cpRect=td=>{if(!_ca||!_cells)return;
+        const b=rcOf(td);
+        const r1=Math.min(_ca.r,b.r),r2=Math.max(_ca.r,b.r);
+        const c1=Math.min(_ca.c,b.c),c2=Math.max(_ca.c,b.c);
+        for(const it of _cells) it.td.classList.toggle('m7cp', it.r>=r1&&it.r<=r2&&it.c>=c1&&it.c<=c2);
+        const n=tb.querySelectorAll('td.m7cp').length;
+        const el=c.querySelector('#m7-cnt');
+        // ★busy — 점진렌더의 스크롤 append 가 이 메시지를 덮어쓰지 않게
+        if(el&&n){el.dataset.busy='1';
+          el.innerHTML=`복사선택 <b>${nf(n)}</b>칸 <span style="color:#7b8aa0">(Ctrl+C)</span>`;}
+        else if(el)delete el.dataset.busy;};
+      tb.addEventListener('mousedown',e=>{
+        if(e.button!==0)return;
+        const start=e.target.closest('td'); if(!start||!start.closest('tr'))return;
+        e.preventDefault();
+        if(!e.ctrlKey&&!e.metaKey)cpClear();
+        cdrag=true;cpSnap();_ca=rcOf(start);_clast=start;cpRect(start);});
+      tb.addEventListener('mousemove',e=>{if(!cdrag)return;
+        if(!(e.buttons&1)){cdrag=false;_ca=null;_cells=null;_clast=null;return;}
+        const el=document.elementFromPoint(e.clientX,e.clientY);
+        const td=(el&&el.closest('td'))||_clast;
+        if(td){_clast=td;cpRect(td);}});
+      document.addEventListener('mouseup',()=>{cdrag=false;_ca=null;_cells=null;_clast=null;});
+    }
+    const selText=()=>{
+      const map=new Map();
+      c.querySelectorAll('td.m7cp').forEach(td=>{
+        const tr=td.parentElement; if(!tr)return;
+        if(!map.has(tr.rowIndex))map.set(tr.rowIndex,[]);
+        map.get(tr.rowIndex).push([td.cellIndex,(td.innerText||'').trim()]);});
+      return [...map.keys()].sort((x,y)=>x-y)
+        .map(r=>map.get(r).sort((x,y)=>x[0]-y[0]).map(x=>x[1]).join('\t')).join('\n');
+    };
+    const toClip=(txt,what)=>{
+      if(!txt){alert('복사할 영역을 먼저 끌어서 선택하세요.');return;}
+      const done=()=>{const el=c.querySelector('#m7-cnt');
+        if(el){const o=el.innerHTML;el.dataset.busy='1';
+               el.innerHTML=`<b style="color:#1c7c3a">${what} 복사됨</b>`;
+               setTimeout(()=>{el.innerHTML=o;delete el.dataset.busy;},1400);}};
+      if(navigator.clipboard&&navigator.clipboard.writeText)
+        navigator.clipboard.writeText(txt).then(done,()=>fb()); else fb();
+      function fb(){   // 비보안 컨텍스트(http)는 clipboard API 가 막힌다
+        const ta=document.createElement('textarea'); ta.value=txt;
+        ta.style.cssText='position:fixed;left:-9999px;top:0';
+        document.body.appendChild(ta); ta.select();
+        try{document.execCommand('copy');done();}catch(_){alert('복사에 실패했습니다.');}
+        ta.remove();}
+    };
+    const copySel=()=>toClip(selText(),'선택영역');
+    /* ★전체 복사는 DOM 이 아니라 st.rows 에서 만든다 — 점진 렌더 때문에 화면에는
+         일부 행만 붙어 있어 DOM 을 훑으면 "보이는 데까지만" 복사된다(410 과 같은 이유). */
+    const copyAll=()=>{
+      if(!st.rows.length){alert('조회 결과가 없습니다.');return;}
+      const vs=m7Vis(), out=[];
+      out.push(vs.map(k=>M7DEF[k].t).concat(dates.map(d=>dcol(d))).join('\t'));
+      st.rows.forEach((r,i)=>{
+        const line=vs.map(k=>{const v=M7DEF[k].x.v(r,i);return (v===''||v==null)?'':String(v);});
+        (r.d||[]).forEach(v=>line.push((+v||0)?String(+v):''));
+        out.push(line.join('\t'));});
+      toClip(out.join('\n'),`전체 ${nf(st.rows.length)}행`);
+    };
+    if(!c.dataset.cpkey){
+      c.dataset.cpkey='1';
+      c.addEventListener('keydown',ev=>{
+        if((ev.ctrlKey||ev.metaKey)&&(ev.key==='c'||ev.key==='C')){
+          if(!c.querySelector('td.m7cp'))return;
+          ev.preventDefault(); copySel();}});
+      c.setAttribute('tabindex','-1'); c.style.outline='none';
+    }
+    /* 우클릭 메뉴 — ★실행도 mousedown 에서(410·420·580 과 같은 함정 회피:
+       바깥클릭 닫기가 mousedown 이라 click 은 죽은 노드에 떨어진다). */
+    c.querySelectorAll('.m7tbl thead th,.m7tbl tbody').forEach(el=>{
+      el.oncontextmenu=e=>{
+        e.preventDefault();
+        const o2=document.getElementById('m7-ctx'); if(o2)o2.remove();
+        const m=document.createElement('div'); m.id='m7-ctx';
+        m.style.cssText=`position:fixed;left:${Math.min(e.clientX,innerWidth-170)}px;
+          top:${Math.min(e.clientY,innerHeight-110)}px;z-index:1400;background:#fff;
+          border:1px solid #cfd8e6;border-radius:6px;box-shadow:0 6px 20px rgba(20,40,80,.22);
+          font-size:12.5px;min-width:150px;overflow:hidden`;
+        m.innerHTML=['항목보기','선택영역 복사','전체 복사']
+          .map((t,i)=>`<div data-i="${i}" style="padding:7px 12px;cursor:pointer">${t}</div>`).join('');
+        document.body.appendChild(m);
+        m.querySelectorAll('div[data-i]').forEach(d=>{
+          d.onmouseenter=()=>d.style.background='#eef4ff';
+          d.onmouseleave=()=>d.style.background='';});
+        const kill=()=>{m.remove();document.removeEventListener('mousedown',outside,true);};
+        const outside=ev2=>{if(!m.contains(ev2.target))kill();};
+        setTimeout(()=>document.addEventListener('mousedown',outside,true),0);
+        m.addEventListener('mousedown',ev2=>{
+          ev2.preventDefault(); ev2.stopPropagation();
+          const t=ev2.target.closest&&ev2.target.closest('[data-i]'); if(!t)return;
+          const i=+t.dataset.i; kill();
+          try{ if(i===0)openColPick(); else if(i===1)copySel(); else copyAll(); }
+          catch(err){console.error('[070 메뉴]',err);alert('실행 실패: '+(err&&err.message||err));}});
+      };
+    });
+
+    /* 헤더 더블클릭 정렬 — ★보이는 컬럼 순서를 따른다(항목보기로 순서가 바뀌므로
+       고정 배열을 쓰면 엉뚱한 컬럼으로 정렬된다). SEQ 는 정렬 대상 아님. */
+    const keys=m7Vis().map(k=>k==='seq'?'':k);
     enableSort(c,keys,()=>st.rows,()=>draw());
+  };
+
+  /* == 항목보기 (2026-09-06 — 410·420·580 과 같은 방식) ====================
+       체크 해제 = 그 컬럼 숨김 · 행을 끌거나 ▲▼ 로 순서 변경.
+       ★이 화면은 일자칸이 맨 뒤라 그룹이 하나다(앞쪽 컬럼만 다룬다).
+       ★보기(집계/상세)에 없는 컬럼은 목록에 안 띄운다 — 순서 저장에는 그대로 남는다. */
+  const openColPick=()=>{
+    const old=document.getElementById('m7-colpick'); if(old)old.remove();
+    const hid=m7LoadHide(), avail=m7Avail();
+    const ov=document.createElement('div');
+    ov.id='m7-colpick';
+    ov.style.cssText='position:fixed;inset:0;z-index:1300;background:rgba(20,32,54,.34);'
+                    +'display:flex;align-items:center;justify-content:center';
+    const item=k=>`<div class="m7cp-r" data-k="${k}"
+         style="display:flex;align-items:center;gap:7px;padding:4px 8px;border-bottom:1px solid #eef1f6;
+                cursor:grab;user-select:none;-webkit-user-select:none">
+        <span style="color:#b6c2d4;font-size:11px" title="끌어서 순서 변경">⠿</span>
+        <input type="checkbox" ${hid.has(k)?'':'checked'} data-ck="${k}">
+        <span style="flex:1;font-size:12.5px">${M7DEF[k].t}</span>
+        <button class="btn ghost m7cp-up" data-k="${k}" style="padding:0 6px;font-size:11px">▲</button>
+        <button class="btn ghost m7cp-dn" data-k="${k}" style="padding:0 6px;font-size:11px">▼</button>
+      </div>`;
+    ov.innerHTML=`<div style="background:#fff;border-radius:10px;width:420px;max-height:78vh;
+           display:flex;flex-direction:column;box-shadow:0 8px 30px rgba(20,40,80,.28)">
+        <div style="padding:10px 12px;border-bottom:1px solid #e3e9f2;font-weight:700;color:#16305c">
+          항목보기 <span style="font-weight:400;font-size:11px;color:#7b8aa0">체크 해제 = 숨김 · 행을 끌거나 ▲▼ 로 순서 변경</span></div>
+        <div style="flex:1;overflow:auto;padding:4px 0">
+          <div id="m7cp-l">${avail.map(item).join('')}</div>
+          <div style="padding:6px 10px;font-size:11px;color:#7b8aa0">
+            일자 컬럼은 항상 맨 뒤에 붙습니다. 목록은 현재 보기(${st.mode==='dtl'?'상세':'집계'}) 기준입니다.</div>
+        </div>
+        <div style="padding:9px 12px;border-top:1px solid #e3e9f2;display:flex;gap:6px;justify-content:flex-end">
+          <button class="btn ghost" id="m7cp-reset">초기화</button>
+          <div style="flex:1"></div>
+          <button class="btn ghost" id="m7cp-x">닫기</button>
+          <button class="btn" id="m7cp-ok" style="background:#1c47a0;color:#fff">적용</button>
+        </div></div>`;
+    document.body.appendChild(ov);
+    const q=sel=>ov.querySelector(sel);
+    /* ★모달 mousedown 은 **버블 단계에서만** 막는다(캡처 아님) — 캡처로 끊으면
+         아래 행 드래그 핸들러까지 못 받는다(420 에서 실측한 원인). */
+    ov.addEventListener('mousedown',e=>e.stopPropagation());
+    ov.onclick=e=>{if(e.target===ov)ov.remove();};
+    q('#m7cp-x').onclick=()=>ov.remove();
+    const move=(k,dir)=>{const row=ov.querySelector(`.m7cp-r[data-k="${k}"]`); if(!row)return;
+      const box=row.parentElement;
+      const sib=dir<0?row.previousElementSibling:row.nextElementSibling;
+      if(!sib)return;
+      if(dir<0)box.insertBefore(row,sib); else box.insertBefore(sib,row);};
+    ov.querySelectorAll('.m7cp-up').forEach(b=>b.onclick=()=>move(b.dataset.k,-1));
+    ov.querySelectorAll('.m7cp-dn').forEach(b=>b.onclick=()=>move(b.dataset.k, 1));
+    /* 행 끌어서 순서 변경 — ★HTML5 draggable 은 쓰지 않는다(텍스트 선택이 먼저 잡혀
+         파란 블록만 생기고 드래그가 시작되지 않는다). 5px 이상 움직여야 '이동'이라
+         같은 행에서 "클릭=체크토글 / 끌면=이동"이 공존한다. */
+    let dK=null,dY=0,dMoved=false;
+    const rowsOf=()=>[...ov.querySelectorAll('.m7cp-r')];
+    const rowAtY=y=>{const rs=rowsOf(); if(!rs.length)return null;
+      let best=rs[0],bd=1e9;
+      for(const r of rs){const b=r.getBoundingClientRect();
+        const d=(y<b.top)?(b.top-y):((y>b.bottom)?(y-b.bottom):0);
+        if(d<bd){bd=d;best=r;}}
+      return best;};
+    ov.addEventListener('mousedown',e=>{
+      const row=e.target.closest&&e.target.closest('.m7cp-r'); if(!row)return;
+      if(e.target.tagName==='INPUT')return;
+      if(e.target.closest('.m7cp-up,.m7cp-dn'))return;
+      e.preventDefault();
+      dK=row.dataset.k; dY=e.clientY; dMoved=false;
+      row.style.opacity='.55';});
+    const onMove=e=>{
+      if(!dK)return;
+      if(!ov.isConnected){dK=null;document.removeEventListener('mousemove',onMove);return;}
+      if(!dMoved&&Math.abs(e.clientY-dY)<5)return;
+      dMoved=true;
+      const over=rowAtY(e.clientY);
+      rowsOf().forEach(x=>{if(x!==over)x.style.borderTop='';});
+      if(over&&over.dataset.k!==dK)over.style.borderTop='2px solid #2563eb';};
+    const onUp=e=>{
+      if(!dK)return;
+      if(!ov.isConnected){dK=null;document.removeEventListener('mouseup',onUp);return;}
+      const k=dK; dK=null;
+      rowsOf().forEach(x=>{x.style.opacity='';x.style.borderTop='';});
+      if(!dMoved)return;
+      const over=rowAtY(e.clientY);
+      if(!over||over.dataset.k===k)return;
+      const src=rowsOf().find(r=>r.dataset.k===k); if(!src)return;
+      const box=over.parentElement, sb=over.getBoundingClientRect();
+      if(e.clientY < sb.top+sb.height/2) box.insertBefore(src,over);
+      else box.insertBefore(src,over.nextSibling);};
+    document.addEventListener('mousemove',onMove);
+    document.addEventListener('mouseup',onUp);
+    q('#m7cp-reset').onclick=()=>{
+      try{localStorage.removeItem(M7_LS);localStorage.removeItem(M7_HIDE);}catch(_){}
+      M7_ORD.length=0; M7_DEF.forEach(k=>M7_ORD.push(k));
+      m7Hid=new Set();
+      ov.remove(); draw();};
+    q('#m7cp-ok').onclick=()=>{
+      /* ★현재 보기에 없는 컬럼(예: 집계일 때 자도번·사용수)은 목록에 없다 —
+           그대로 두면 순서에서 사라지므로, 보이던 것만 새 순서로 갈아끼우고
+           나머지는 원래 자리(상대순서)를 지킨다. */
+      const shown=[...ov.querySelectorAll('#m7cp-l .m7cp-r')].map(r=>r.dataset.k);
+      const inSet=new Set(shown);
+      let si=0;
+      const no=M7_ORD.map(k=>inSet.has(k)?shown[si++]:k);
+      shown.slice(si).forEach(k=>{if(!no.includes(k))no.push(k);});
+      M7_DEF.forEach(k=>{if(!no.includes(k))no.push(k);});
+      // 숨김 = 이번에 보인 것 중 체크 해제분 + 이번에 안 보인 기존 숨김분
+      const off=[...ov.querySelectorAll('input[data-ck]')].filter(x=>!x.checked).map(x=>x.dataset.ck);
+      const nhid=[...new Set(off.concat([...m7Hid].filter(k=>!inSet.has(k))))];
+      try{localStorage.setItem(M7_LS,JSON.stringify(no));
+          localStorage.setItem(M7_HIDE,JSON.stringify(nhid));}catch(_){}
+      M7_ORD.length=0; no.forEach(k=>M7_ORD.push(k));
+      m7Hid=new Set(nhid);
+      ov.remove(); draw();};
   };
 
   // 기준일 = 마지막 계획업로드 일자축 첫날(planBase 캐시 반영 후 조회)

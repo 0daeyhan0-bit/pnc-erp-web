@@ -493,8 +493,50 @@ def _step7_sql(cur):
         CASE WHEN MIN(a.part_plan_ymd) < '{B}' AND MAX(dpx.pull_ymd) IS NULL THEN '{B}'
              ELSE MIN(a.part_plan_ymd) END AS part_plan_ymd,
         CASE WHEN MIN(a.part_plan_ymd) < '{B}' AND MAX(dpx.pull_ymd) IS NULL THEN '0750'
-             ELSE MIN(a.part_output_hm) END AS part_output_hm
+             ELSE MIN(a.part_output_hm) END AS part_output_hm,
+        -- ★2026-09-06 신설 — 라이브 PR_T_PLAN_PART_MAT 에는 있으나 클린본에 빠져 있던 6개.
+        --   협력사자재계획현황(w_pr_outside_040 t1)이 이 컬럼들을 그대로 읽는다.
+        --   종전엔 없어서 t1 을 이 테이블만으로 재현할 수 없었다(웹 −673 차이의 원인).
+        --   값은 파생이 아니라 **상위 plan_part_dtl 의 원본**을 그대로 가져온다(pd 조인).
+        --   ※조인키 = (제번, ASSY, 품목, BOM레벨) — plan_part_dtl 의 그레인과 같다.
+        -- ★plan_part_dtl 에 없는 제번은 plan_dtl(계획원본)로 보완한다.
+        --   실측: 2148 자재 2,981행 중 22행이 plan_part_dtl 미대응이었고(WO…SS 등),
+        --   그 22행이 그대로 레거시 대비 −22행·−4,367 차이로 나타났다.
+        --   plan_dtl 에는 LINE_NO·PLAN_QTY 가 있으므로 COALESCE 로 받는다.
+        --   ★3단 폴백: plan_part_dtl → plan_dtl → prod_plan_input(추가계획).
+        --     WO… 제번(A/S·긴급)은 plan_dtl 에 아예 없다 — 원천이 추가계획이다.
+        --     실측 12행(WO1092566SS 등)이 그 경우였고, prod_plan_input 에 line_no·plan_qty 가 있다.
+        COALESCE(NULLIF(MAX(ISNULL(pd.line_no,'')),''), NULLIF(MAX(ISNULL(pdm.line_no,'')),''),
+                 MAX(ISNULL(ppi.line_no,''))) AS line_no,
+        MAX(ISNULL(pd.output_hm,'')) AS output_hm,
+        COALESCE(NULLIF(MIN(pd.lot_qty),0),  NULLIF(MIN(pdm.total_qty),0), MIN(ppi.plan_qty)) AS lot_qty,
+        COALESCE(NULLIF(MIN(pd.plan_qty),0), NULLIF(MIN(pdm.plan_qty),0),  MIN(ppi.plan_qty)) AS plan_qty,
+        MIN(a.use_qty)               AS use_qty,
+        MAX(ISNULL(pdm.model_no,'')) AS model_no
     INTO nx.plan_part_mat_new FROM nx.plan_part_mat_tmp a
+    -- ★(제번, ASSY) 로 **미리 접어서** 조인한다 — plan_part_dtl 은 이 키로 유일하지 않다
+    --   (실측 19,071행 / 6,781키). item_code·bom_level 까지 키에 넣으면 그레인이 달라
+    --   매칭이 안 되고(2148 전건 NULL), 그냥 조인하면 행이 127,435→145,064 로 증식한다.
+    LEFT JOIN (SELECT split_work_order, assy_item_code,
+                      MAX(ISNULL(line_no,''))   line_no,
+                      MAX(ISNULL(output_hm,'')) output_hm,
+                      MIN(lot_qty) lot_qty, MIN(plan_qty) plan_qty
+                 FROM nx.plan_part_dtl
+                GROUP BY split_work_order, assy_item_code) pd
+           ON pd.split_work_order=a.split_work_order AND pd.assy_item_code=a.assy_item_code
+    LEFT JOIN (SELECT RTRIM(WORK_ORDER) work_order,
+                      MAX(RTRIM(ISNULL(MODEL_NO,''))) model_no,
+                      MAX(RTRIM(ISNULL(LINE_NO,''))) line_no,
+                      MIN(CAST(ISNULL(PLAN_QTY,0) AS float))  plan_qty,
+                      MIN(CAST(ISNULL(TOTAL_QTY,0) AS float)) total_qty
+                 FROM nx.plan_dtl GROUP BY RTRIM(WORK_ORDER)) pdm
+           ON pdm.work_order=RTRIM(a.work_order)
+    LEFT JOIN (SELECT RTRIM(work_order) work_order,
+                      MAX(RTRIM(ISNULL(line_no,''))) line_no,
+                      MIN(CAST(ISNULL(plan_qty,0) AS float)) plan_qty
+                 FROM nx.prod_plan_input WHERE ISNULL(work_order,'')<>''
+                GROUP BY RTRIM(work_order)) ppi
+           ON ppi.work_order=RTRIM(a.work_order)
     LEFT JOIN (SELECT RTRIM(work_order) AS work_order, MIN(pull_ymd) AS pull_ymd
                  FROM nx.plan_direct_pull GROUP BY RTRIM(work_order)) dpx
            ON dpx.work_order=RTRIM(a.work_order)

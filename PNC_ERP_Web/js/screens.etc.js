@@ -5342,3 +5342,190 @@ SCREEN.setstockadj=(c)=>{
 
   drawHist(); load();
 };
+
+
+/* ===== 협력사자재계획현황 (레거시 w_pr_outside_040) — 2026-09-06 신설 =====
+   레거시 화면 그대로: 자도번작업처·기준일자·라인·자도번·ASM도번·제번 + 집계/상세.
+     집계 = 납품업체·라인·제번·모델·ASM도번·시간·LOT수량·계획수량·당일·일자별(31)
+     상세 = 위 + 자도번·사용수  (레거시 t2 = BOM 전개, 웹은 통일 소요엔진)
+   ★소속 제한은 서버가 한다(scope_cust) — 협력사는 자기 거래처만 나온다. */
+SCREEN.coopmatplan=(c)=>{
+  const API=API_BASE;
+  const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
+  const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
+  const ymd2iso=s=>(s&&s.length===6)?`20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}`:'';
+  const iso2ymd=s=>(s&&s.length===10)?s.slice(2).replace(/-/g,''):'';
+  // 일자컬럼 = 파트별 생산계획과 같은 형식(일자+요일, 주말 빨강)
+  const wlab=y=>{if(!y||y.length<6)return y;const d=new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6));
+    return `${y.slice(4,6)}${'일월화수목금토'[d.getDay()]}`;};
+  const isWk=y=>{if(!y||y.length<6)return false;const d=new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6));
+    return d.getDay()===0||d.getDay()===6;};
+  const hm=s=>{s=(''+(s||'')).replace(/\D/g,'');return s.length>=4?`${s.slice(0,2)}:${s.slice(2,4)}`:'';};
+
+  let F={ymd:iso(new Date()),cust:'',line:'',asm:'',wo:'',item:'',mode:'sum'};
+  let data={dates:[],rows:[],cnt:0,qty_sum:0,note:'',cust_nm:''};
+  let wcs=[], loading=false, msg='', rowsCur=[];
+
+  const isSolo=()=>wcs.length===1;                 // 협력사 계정 = 서버가 자기 1건만 준다
+  const soloFix=()=>{ if(isSolo() && F.cust!==wcs[0].cc) F.cust = wcs[0].cc || ''; };
+  /* 코드 → 업체명. 레거시처럼 코드를 넣으면 옆에 이름이 뜬다.
+     이름으로 입력해도 받아준다(코드로 되돌려 준다) — datalist 가 이름을 보여주므로. */
+  const custNm=cd=>{const w=wcs.find(x=>x.cc===(cd||'').trim());return w?(w.nm||''):'';};
+  const custCode=v=>{v=(v||'').trim(); if(!v)return '';
+    if(wcs.some(x=>x.cc===v))return v;
+    const w=wcs.find(x=>(x.nm||'')===v)||wcs.find(x=>(x.nm||'').includes(v));
+    return w?w.cc:v;};
+  const loadWc=async()=>{
+    try{const r=await fetch(`${API}/api/partner/workcenters?src=nx`);
+      wcs=r.ok?((await r.json()).rows||[]):[];}
+    catch(e){wcs=[];msg='작업처 목록 조회 실패 — '+(e&&e.message||e);}
+    soloFix();
+  };
+  const load=async()=>{
+    if(loading)return;
+    soloFix();
+    if(!F.cust){msg='자도번작업처(협력사)를 먼저 선택하세요.';
+      data={dates:[],rows:[],cnt:0,qty_sum:0,note:'',cust_nm:''};draw();return;}
+    loading=true;msg='';draw();
+    const qs=new URLSearchParams({ymd:iso2ymd(F.ymd),cust:F.cust,line:F.line,
+      asm:F.asm,wo:F.wo,item:F.item,mode:F.mode});
+    try{const r=await fetch(`${API}/api/coopmatplan/list?${qs}`);
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      data=await r.json();rowsCur=data.rows||[];}
+    catch(e){msg='조회 실패 — '+(e&&e.message||e);data={dates:[],rows:[],cnt:0,qty_sum:0,note:'',cust_nm:''};}
+    loading=false;draw();
+  };
+
+  const isDtl=()=>F.mode==='dtl';
+  const FIX=()=>isDtl()?9:7;      // 고정컬럼 수(일자 앞까지)
+  const body=()=>{
+    const rs=rowsCur;
+    if(loading)return spinRow(FIX()+ (data.dates||[]).length);
+    if(!rs.length)return `<tr><td colspan="${FIX()+(data.dates||[]).length}" class="empty">${
+      esc(msg||'조회 결과 없음 — 조건을 지정하고 조회하세요.')}</td></tr>`;
+    return rs.map(r=>`<tr>
+      <td class="center">${esc(r.cnm||r.cc)}</td>
+      ${isDtl()?`<td class="center"><b>${esc(r.mat||'')}</b></td><td class="num">${r.use||''}</td>`:''}
+      <td class="center">${esc(r.line)}</td>
+      <td class="center">${esc(r.wo)}</td>
+      <td class="cap center" title="${esc(r.model)}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis">${esc(r.model)}</td>
+      <td class="center"><b>${esc(r.asm)}</b></td>
+      <td class="center">${esc(hm(r.hm))}</td>
+      <td class="num">${nf(r.lot)}</td>
+      <td class="num"><b>${nf(r.qty)}</b></td>
+      ${(data.dates||[]).map((d,i)=>{const v=(r.d||[])[i]||0;
+        return `<td class="num"${v?' style="background:#fffbdd;font-weight:700"':''}>${v?nf(v):''}</td>`;}).join('')}
+    </tr>`).join('');
+  };
+  const foot=()=>{
+    const rs=rowsCur; if(!rs.length)return '';
+    const ds=(data.dates||[]).map((d,i)=>rs.reduce((s,r)=>s+((r.d||[])[i]||0),0));
+    return `<tr style="position:sticky;bottom:0;background:#eef3fb;font-weight:700">
+      <td colspan="${FIX()-2}" class="center">합계 (${nf(rs.length)}행)</td>
+      <td class="num">${nf(rs.reduce((s,r)=>s+(+r.lot||0),0))}</td>
+      <td class="num">${nf(rs.reduce((s,r)=>s+(+r.qty||0),0))}</td>
+      ${ds.map(v=>`<td class="num">${v?nf(v):''}</td>`).join('')}</tr>`;
+  };
+
+  const draw=()=>{
+    const dates=data.dates||[];
+    c.innerHTML=`
+     <div style="display:flex;flex-direction:column;height:100%">
+     <div class="page-title" style="flex:0 0 auto">협력사 자재계획현황
+       <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_outside_040 · 제번×라인×ASM도번 · 기준일부터 31일</span></div>
+     <!-- ★레거시 040 조회조건과 같은 2줄 배치(2026-09-06).
+            종전엔 toolbar 한 줄에 다 넣어 라벨이 세로로 쪼개져 읽기 힘들었다(사용자 지적).
+            grid 로 라벨·입력을 칸에 고정하고 라벨은 nowrap 으로 못박는다.
+            업체는 레거시처럼 **코드 입력 + 업체명 표시**(오토컴플리트) — 목록이 100건대라
+            드롭다운은 찾기 어렵다. -->
+     <style>
+       #cm-cond{display:grid;grid-template-columns:auto auto auto 1fr;gap:5px 8px;
+                align-items:center;background:#f4f7fc;border:1px solid #d6e0ee;
+                border-radius:6px;padding:7px 9px;margin:4px 0;flex:0 0 auto}
+       #cm-cond .lb{background:#e7eefa;border:1px solid #cfdcef;border-radius:4px;
+                    padding:3px 8px;font-size:12px;font-weight:700;color:#1c3f78;
+                    text-align:center;white-space:nowrap}
+       #cm-cond .fx{display:flex;align-items:center;gap:5px;white-space:nowrap}
+       #cm-cond input.inp,#cm-cond select.inp{min-width:0}
+       #cm-custnm{font-size:12px;font-weight:700;color:#1c47a0;min-width:110px}
+     </style>
+     <div id="cm-cond">
+       <!-- ★코드칸 + 돋보기 + 거래처명칸 — 「협력사 계획현황」과 같은 방식(2026-09-06 사용자 확정).
+              코드를 알면 코드칸에, 모르면 거래처명칸에 일부만 쳐도 잡힌다. -->
+       <span class="lb">자도번작업처</span>
+       <span class="fx">
+         <input class="inp" id="cm-cust" list="cm-custdl" value="${esc(F.cust)}"
+                style="width:88px;text-align:center" placeholder="코드"${isSolo()?' disabled':''}>
+         <datalist id="cm-custdl">${wcs.map(w=>`<option value="${esc(w.cc)}">${esc(w.nm||'')}</option>`).join('')}</datalist>
+         <button class="btn" id="cm-find" title="거래처 찾기" style="padding:2px 8px"${isSolo()?' disabled':''}>🔍</button>
+         <input class="inp" id="cm-custnm" list="cm-nmdl" value="${esc(custNm(F.cust))}"
+                style="width:150px;background:#fffbe8" placeholder="거래처명"${isSolo()?' disabled':''}>
+         <datalist id="cm-nmdl">${wcs.map(w=>`<option value="${esc(w.nm||'')}">${esc(w.cc)}</option>`).join('')}</datalist>
+       </span>
+       <span class="lb">기준일자</span>
+       <span class="fx"><input class="inp" type="date" id="cm-ymd" value="${F.ymd}" style="width:150px"></span>
+
+       <span class="lb">자도번</span>
+       <span class="fx"><input class="inp" id="cm-item" value="${esc(F.item)}" style="width:180px" placeholder="자도번"></span>
+       <span class="lb">ASM도번</span>
+       <span class="fx"><input class="inp" id="cm-asm" value="${esc(F.asm)}" style="width:150px" placeholder="ASM도번">
+         <span class="lb" style="margin-left:6px">제번</span>
+         <input class="inp" id="cm-wo" value="${esc(F.wo)}" style="width:130px" placeholder="제번">
+         <span class="lb" style="margin-left:6px">라인</span>
+         <input class="inp" id="cm-line" value="${esc(F.line)}" style="width:70px" placeholder="전체">
+         <span class="lb" style="margin-left:6px">구분</span>
+         <label style="font-size:12px"><input type="radio" name="cm-md" value="sum"${F.mode==='sum'?' checked':''}> 집계</label>
+         <label style="font-size:12px"><input type="radio" name="cm-md" value="dtl"${F.mode==='dtl'?' checked':''}> 상세</label>
+         <button class="btn" id="cm-go" style="margin-left:8px">조회</button>
+         <button class="btn" id="cm-xls" style="background:#1c7c3a;color:#fff">엑셀</button>
+         <span class="rowcount" style="margin-left:10px">${nf(data.cnt||0)}행 · 수량합 <b>${nf(data.qty_sum||0)}</b></span>
+       </span>
+     </div>
+     ${msg?`<div class="page-sub" style="flex:0 0 auto;color:#c0392b;font-weight:600">${esc(msg)}</div>`:''}
+     ${data.note?`<div class="page-sub" style="flex:0 0 auto;color:#c77700">${esc(data.note)}</div>`:''}
+     <div class="grid-wrap" style="flex:1 1 auto;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+      <table class="tbl" id="cm-tbl" style="font-size:11.5px"><thead><tr>
+        <th>납품업체</th>
+        ${isDtl()?'<th>자도번</th><th class="num">사용수</th>':''}
+        <th class="center">라인</th><th class="center">제번</th><th class="center">모델</th>
+        <th class="center">ASM도번</th><th class="center">시간</th>
+        <th class="num">LOT수량</th><th class="num">계획수량</th>
+        ${dates.map(d=>`<th class="center"${isWk(d)?' style="color:#c0392b"':''}>${esc(wlab(d))}</th>`).join('')}
+      </tr></thead>
+      <tbody id="cm-body">${body()}</tbody>
+      <tfoot>${foot()}</tfoot></table></div>
+     </div>`;
+    const g=id=>c.querySelector(id);
+    /* 코드칸 ↔ 거래처명칸 양방향 연동 — 한쪽을 고르면 다른 쪽이 자동으로 채워진다.
+       재렌더하면 포커스가 날아가므로 상대 칸의 value 만 갈아끼운다. */
+    const cu=g('#cm-cust'), cn=g('#cm-custnm');
+    cu.oninput=e=>{F.cust=(e.target.value||'').trim(); cn.value=custNm(F.cust);};
+    cu.onkeyup=e=>{if(e.key==='Enter')load();};
+    cn.oninput=e=>{const cd=custCode(e.target.value); if(cd&&cd!==F.cust){F.cust=cd;cu.value=cd;}};
+    cn.onchange=e=>{const cd=custCode(e.target.value);
+      if(cd){F.cust=cd;cu.value=cd;e.target.value=custNm(cd)||e.target.value;}};
+    cn.onkeyup=e=>{if(e.key==='Enter')load();};
+    g('#cm-find').onclick=()=>{ cn.focus(); try{cn.select();}catch(e){} };
+    g('#cm-ymd').onchange=e=>{F.ymd=e.target.value;};
+    g('#cm-ymd').onchange=e=>{F.ymd=e.target.value;};
+    ['line','item','asm','wo'].forEach(k=>{const el=g('#cm-'+k);
+      el.oninput=e=>{F[k]=e.target.value;};
+      el.onkeyup=e=>{if(e.key==='Enter')load();};});
+    c.querySelectorAll('input[name=cm-md]').forEach(r=>r.onchange=()=>{F.mode=r.value;load();});
+    g('#cm-go').onclick=load;
+    g('#cm-xls').onclick=()=>{
+      if(!rowsCur.length){alert('조회 결과가 없습니다.');return;}
+      const t=c.querySelector('#cm-tbl');
+      if(typeof downloadXLS==='function')downloadXLS(t,`협력사자재계획현황_${iso2ymd(F.ymd)}`);
+      else alert('엑셀 내보내기를 사용할 수 없습니다.');
+    };
+    // 헤더 더블클릭 정렬(CLAUDE.md §3) — 고정컬럼만
+    if(typeof enableSort==='function'){
+      const keys=isDtl()?['cnm','mat','use','line','wo','model','asm','hm','lot','qty']
+                       :['cnm','line','wo','model','asm','hm','lot','qty'];
+      try{enableSort(c,keys,()=>rowsCur,()=>{const b=c.querySelector('#cm-body');if(b)b.innerHTML=body();});}
+      catch(e){}
+    }
+  };
+  (async()=>{ await loadWc(); draw(); if(F.cust) load(); })();
+};

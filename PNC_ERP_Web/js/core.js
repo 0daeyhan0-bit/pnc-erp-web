@@ -329,6 +329,11 @@ const MODULES=[
  ]},
  {id:'partner',nm:'협력사',ic:'🤝',subs:[
    {id:'partnerplan',ic:'📋',nm:'협력사 계획현황'},
+   /* ★협력사자재계획현황(레거시 w_pr_outside_040) — 2026-09-06 신설.
+        위 「협력사 계획현황」과 같은 040 이지만 **다른 DataWindow** 다:
+          계획현황     = t1 계열 · 도번(자도번LIST 묶음) 그레인 · 자재수량
+          자재계획현황 = 제번×라인×ASM도번 그레인 · 계획수량 + 시간·모델 (집계/상세) */
+   {id:'coopmatplan',ic:'📑',nm:'협력사 자재계획현황'},
    {id:'coopporder',ic:'📦',nm:'협력사 발주현황(일반)'},
    {id:'deliv420',ic:'🧾',nm:'거래명세서 발행'},
    {id:'delivedit',ic:'📝',nm:'거래명세표 수정'},
@@ -336,6 +341,15 @@ const MODULES=[
    // 자재세트입고관리는 구매/자재 메뉴로 이동(레거시 배치와 동일) — 2026-08-29
    {id:'sagubadjust',ic:'🛠️',nm:'협력사사급재고관리'},
    {id:'sagubledger',ic:'📊',nm:'사급 수불장'},
+   {sep:true},
+   /* ★매입/매출 마감현황(2026-09-06) — 레거시 협력사 메뉴와 같은 배치.
+        구매/자재의 「자재매입마감」·「자재매출마감」과 **같은 화면**(SCREEN.purmagam/salemagam)이다.
+        레거시도 협력사 메뉴에 따로 두고 있어 그대로 맞췄다 — 협력사 담당자가
+        자재 메뉴까지 가지 않고 여기서 바로 보게 하려는 배치.
+        내부 직원은 전체 거래처가 보이고(scope_cust=None), 협력사 포털에서는
+        서버가 자기 거래처로 강제한다. */
+   {id:'cooppurmagam',ic:'📥',nm:'매입마감현황'},
+   {id:'coopsalemagam',ic:'🧾',nm:'매출마감현황'},
  ]},
  {id:'prod',nm:'생산',ic:'🏭',subs:[
    {id:'prodstock',ic:'🏭',nm:'생산재고조회'},
@@ -2344,7 +2358,11 @@ const _mkMagam=(CFG)=>(c)=>{
   // ★2026-08-23 P/No 펼침(레거시 w_pu_sale_010) — 집계를 자도번 단위로 풀어서 본다.
   //   view='sum'(기존 거래처집계, 마감/계산서) | 'line'(P/No 상세)
   //   basis='magam'(거래처별 마감일 창) | 'input'(입고기간 fr~to, 기본 당월1일~오늘)
-  let view='sum', basis='magam', lrows=[], ldays=[], lLoading=false, lcnt=0, ltotq=0, ltota=0, lq='';
+  // ★CFG.view 로 초기 보기를 지정할 수 있다(2026-09-06). 협력사 메뉴의 매입/매출
+  //   마감현황은 **P/No 상세 + 마감기준**으로 열려야 한다 — 협력사는 거래처집계(자기 1행)를
+  //   볼 이유가 없고, 레거시 협력사 화면도 품목 상세를 바로 보여준다.
+  //   자재 메뉴(자재매입마감·자재매출마감)는 종전대로 'sum' 으로 열린다.
+  let view=(CFG.view||'sum'), basis='magam', lrows=[], ldays=[], lLoading=false, lcnt=0, ltotq=0, ltota=0, lq='';
   let lsel=new Set();          // ★단가재계산 체크(레거시 select_flag) — 키 = cc|mat
   const _pad=n=>String(n).padStart(2,'0');
   const _isoToday=()=>{const d=new Date();return `${d.getFullYear()}-${_pad(d.getMonth()+1)}-${_pad(d.getDate())}`;};
@@ -2967,7 +2985,10 @@ const _mkMagam=(CFG)=>(c)=>{
     try{const r=await fetch(`${API}/api/${CFG.base}/reopen`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ym,cust_code:mc.cc})});
       const j=await r.json();if(!j.ok)throw new Error('reopen');alert('마감 취소됨 — 수정 가능');closeModal();load(ym);}catch(e){alert('마감취소 실패: '+e.message);}};
 
-  load('');
+  /* ★부팅 — load() 는 거래처집계(sum)를 채운다. CFG.view='line'(협력사 마감현황)이면
+       화면이 P/No 상세로 열리므로 그 데이터도 함께 받아야 빈 표가 안 뜬다.
+       load 가 먼저 끝나야 ym·거래처명 맵이 서고, 그 뒤 lines 를 받는다. */
+  Promise.resolve(load('')).then(()=>{ if(view==='line') loadLines(); });
 };
 /* 공용 필터 렌더/바인딩 — 라벨+필드 나란히(nowrap), select 자동폭, 자동완성(이름표시/코드저장) */
 function qfFields(filters,F,pfx){
