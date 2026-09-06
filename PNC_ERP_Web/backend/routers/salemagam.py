@@ -3,7 +3,7 @@
 import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
-from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
+from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form, Request
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _carry_win, _sale_win_ovr, _carry_win_ovr, _win_ovr, _ensure_carry_ovr, _carry_ovr_set, _carry_ovr_set_bulk)
 
 import weight_calc
@@ -60,9 +60,12 @@ def _gubun_filter(gubun, allowed):
     return "" if (not g or g in ("전체", "all", "ALL")) else (g if g in allowed else None)
 
 @router.get("/api/salemagam/list")
-def salemagam_list(ym: str = Query(""), gubun: str = Query("")):
+def salemagam_list(request: Request, ym: str = Query(""), gubun: str = Query("")):
     """매출마감 업체별 집계(판매 tag5 + 반품 + 수출, 마감기준) + nx 마감상태·조정합.
-       gubun='' /전체=3구분 합(=자재불출집계표 총액) · '판매'/'반품'/'수출'=해당 구분만. 판매=이월 반영."""
+       gubun='' /전체=3구분 합(=자재불출집계표 총액) · '판매'/'반품'/'수출'=해당 구분만. 판매=이월 반영.
+
+       ★협력사 포털 공개(2026-09-06) — 업체별 집계라 그냥 열면 전 업체가 보인다.
+         아래에서 scope_cust 로 자기 행만 남긴다."""
     y = _dig4(ym) or _cur_ym()
     gf = _gubun_filter(gubun, _SALE_GUBUNS)
     if gf is None:
@@ -92,6 +95,11 @@ def salemagam_list(ym: str = Query(""), gubun: str = Query("")):
         adj = {r[0]: float(r[1] or 0) for r in nc.fetchall()}
     finally:
         nx.close()
+    # ★소속강제 — 협력사면 자기 업체 행만 남긴다(내부 직원은 전체 그대로).
+    from routers.auth import current_user, scope_cust
+    _mine = scope_cust(current_user(request), None)
+    if _mine is not None:
+        rows = [r for r in rows if str(r.get("cc") or "").strip() == _mine]
     for r in rows:
         cc = r["cc"]; s = st.get(cc, (0, 0))
         r["qty"] = float(r["qty"] or 0); r["amt"] = float(r["amt"] or 0); r["vat"] = float(r["vat"] or 0); r["items"] = int(r["items"] or 0)
@@ -267,11 +275,19 @@ def salemagam_carry_set(payload: dict = Body(...)):
                           "".join(ch for ch in str(payload.get("maint_ymd", "")) if ch.isdigit()), carry)
 
 @router.get("/api/salemagam/lines")
-def salemagam_lines(ym: str = Query(""), basis: str = Query("magam"), fr: str = Query(""), to: str = Query(""),
+def salemagam_lines(request: Request, ym: str = Query(""), basis: str = Query("magam"), fr: str = Query(""), to: str = Query(""),
                     q: str = Query(""), cust: str = Query(""), cust_code: str = Query("")):
     """★2026-08-23 레거시 w_pu_sale_010 형태 = 집계를 P/No 단위로 펼친 목록(거래처×자도번×단가).
     basis='magam'(마감기준: 거래처별 마감일 창) | 'input'(입고기준: fr~to 일자범위, 기본 당월1일~오늘).
-    일자별 수량 피벗(byday) 포함 → 프론트에서 일자 컬럼으로 전개. 거래처 그룹 소계는 프론트에서 계산."""
+    일자별 수량 피벗(byday) 포함 → 프론트에서 일자 컬럼으로 전개. 거래처 그룹 소계는 프론트에서 계산.
+
+    ★협력사 포털 공개(2026-09-06) — 레거시 협력사 메뉴의 「매출마감현황」에 해당.
+      협력사는 **자기 것만** 봐야 하므로 scope_cust 로 거래처를 강제한다(파라미터 불신).
+      내부 직원은 passthrough."""
+    from routers.auth import current_user, scope_cust
+    _mine = scope_cust(current_user(request), None)
+    if _mine is not None:                      # 협력사 계정 — 자기 코드로 고정
+        cust_code = _mine; cust = ""
     y = _dig4(ym) or _cur_ym()
     if basis == "input":
         f6 = "".join(ch for ch in str(fr or "") if ch.isdigit())[:6]
@@ -454,9 +470,12 @@ def salemagam_weight(ym: str = Query("")):
             "real_weld": rw, "sagub_weld": (sw if sw is not None else 21100.0), "rows": data}
 
 @router.get("/api/salemagam/weight_quote")
-def salemagam_weight_quote(ym: str = Query("")):
+def salemagam_weight_quote(request: Request, ym: str = Query("")):
     """★규격별 LME 정산금액(견적기준): 규격(재질·외경)별 재고(출고−소요)×(현물가−사급가).
-       현물가/사급가=nx.price_metal(해당월). 절삭 8개 협력사만. compute_quote_lme 사용."""
+       현물가/사급가=nx.price_metal(해당월). 절삭 8개 협력사만. compute_quote_lme 사용.
+
+       ★협력사 포털 공개(2026-09-06) — 전 협력사 정산금액이 담기므로
+         scope_cust 로 자기 행만 남긴다(총계도 자기 것만 다시 계산)."""
     y = _dig4(ym) or _cur_ym()
     try:
         data = weight_calc.compute_quote_lme(y)
@@ -472,6 +491,11 @@ def salemagam_weight_quote(ym: str = Query("")):
                      "weld_out": d.get("weld_out"), "weld_in": d.get("weld_in"),
                      "weld_diff": d.get("weld_diff"), "weld_amt": d.get("weld_amt"),
                      "specs": d.get("specs", [])})
+    # ★소속강제 — 협력사면 자기 행만(총계도 자기 것만 다시 합산된다).
+    from routers.auth import current_user, scope_cust
+    _mine = scope_cust(current_user(request), None)
+    if _mine is not None:
+        rows = [r for r in rows if str(r.get("cc") or "").strip() == _mine]
     rows.sort(key=lambda r: (r["settle_amt"] if r["settle_amt"] is not None else 0))
     total = round(sum((r["settle_amt"] or 0) for r in rows))
     weld_total = round(sum((r["weld_amt"] or 0) for r in rows))

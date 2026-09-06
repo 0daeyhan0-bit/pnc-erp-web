@@ -1982,3 +1982,187 @@ def partner_qr(request: Request, barcode: str = Query(...), scale: int = Query(6
     svg = _qr_svg("SET" + bc, scale=max(2, min(int(scale), 14)))
     return _Resp(content=svg, media_type="image/svg+xml",
                  headers={"Cache-Control": "no-store"})
+
+
+# ================= 협력사자재계획현황 (레거시 w_pr_outside_040) — 2026-09-06 신설 =================
+# ★레거시 dw_pr_outside_040_t1(집계) / _t2(상세) 를 웹 클린본 위에서 재현한다.
+#   원문은 t1=PR_T_PLAN_PART_MAT 직독, t2=PR_T_PLAN_DTL + pr_m_item_bom 1~5단계 union all.
+#   여기서는 CLAUDE.md 규칙에 맞춰 두 가지를 바꾼다:
+#     §1-9  테이블 = 웹 클린본(nx.plan_dtl · nx.item · nx.plan_part_mat)
+#     §1-10 소요전개 = **통일 소요엔진**(nx_soyo_engine.sagub_parts_soyo).
+#           원문의 "1~5단계 union all + 중간노드 not in(거래처)" 는 곧
+#           **그 협력사 자재에 도달하면 계상하고 멈춘다** 이고, 엔진의 stop_set 이 같은 동작이다.
+#           ad-hoc 재귀는 변형SUB 이중계상 함정이 있어 금지(§1-10).
+#
+#   두 모드의 원천이 다르다(레거시 원문 그대로):
+#     집계(sum) = 편성결과 nx.plan_part_mat · 일자축 part_plan_ymd(협력사 당김 반영)
+#     상세(dtl) = 생산계획 nx.plan_dtl + 모델BOM 전개 · 일자축 plan_ymd(생산일)
+@router.get("/api/coopmatplan/list")
+def coopmatplan_list(request: Request, ymd: str = Query(""), cust: str = Query(""),
+                     line: str = Query(""), asm: str = Query(""), wo: str = Query(""),
+                     item: str = Query(""), mode: str = Query("sum"), limit: int = Query(6000)):
+    """협력사자재계획현황. mode: sum=집계(t1) / dtl=상세(t2). 기준일자 + 30일(총 31칸).
+
+       ★소속강제 — 협력사 계정은 cust 를 자기 거래처로 덮는다(파라미터 불신)."""
+    import datetime as _dt
+    import nx_soyo_engine as _nse
+
+    cc = (scope_cust(require_user(request), cust) or "").strip()
+    if not cc:
+        raise HTTPException(400, "자도번작업처(거래처)를 선택하세요.")
+    d6 = _d6(ymd) if ymd else _dt.date.today().strftime("%y%m%d")
+    da = _dt.date(2000 + int(d6[:2]), int(d6[2:4]), int(d6[4:6]))
+    dates = [(da + _dt.timedelta(days=i)).strftime("%y%m%d") for i in range(31)]
+    dend = dates[-1]
+    didx = {d: i for i, d in enumerate(dates)}
+    fl, fa, fw, fi = (line.strip().upper(), asm.strip().upper(),
+                      wo.strip().upper(), item.strip().upper())
+    isdtl = (mode or "sum").strip().lower() in ("dtl", "detail", "상세")
+
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("SELECT ISNULL(CUST_DESC,'') FROM nx.CM_M_CUST WHERE CUST_CODE=?", cc)
+        _r = cur.fetchone(); cnm = (_r[0].strip() if _r else "")
+
+        rows = []
+        if not isdtl:
+            # ── 집계(t1) — 레거시 dw_pr_outside_040_t1 원문 그대로, 테이블만 웹 클린본.
+            #   원문 구조 = 내부에서 (계획일·제번·ASSY·거래처) 로 **먼저 접고**(min(plan_qty))
+            #   바깥에서 (거래처·제번·라인·ASSY) 로 sum. 내부 접기가 없으면 자재 수만큼 부푼다.
+            #   ★2026-09-06 planrev STEP7 에 line_no·plan_qty·lot_qty·model_no·use_qty·output_hm 을
+            #     적재하도록 고쳐서(라이브에는 있는데 클린본에 빠져 있던 컬럼) 이제 재현이 된다.
+            #   일자축 = part_plan_ymd(협력사 당김 반영). 첫 칸 = 기준일 이전 누적(원문 plan_qty_01).
+            w = ["pp.part_plan_ymd<=?", "pp.mat_work_center_code=?"]; p = [dend, cc]
+            if fw: w.append("UPPER(pp.split_work_order) LIKE ?"); p.append(f"%{fw}%")
+            if fa: w.append("UPPER(pp.assy_item_code) LIKE ?");   p.append(f"%{fa}%")
+            if fl: w.append("UPPER(ISNULL(pp.line_no,'')) LIKE ?"); p.append(f"%{fl}%")
+            cur.execute(f"""
+              SELECT t.wo, t.line, t.assy, t.ppy, t.phm, t.q, t.lot, t.model, t.uq
+                FROM ( SELECT pp.split_work_order wo, MAX(ISNULL(pp.line_no,'')) line,
+                              pp.assy_item_code assy, MIN(pp.part_plan_ymd) ppy,
+                              SUBSTRING(MIN(pp.part_plan_ymd + ISNULL(pp.part_output_hm,'')),7,4) phm,
+                              MIN(CAST(ISNULL(pp.plan_qty,0) AS float)) q,
+                              MIN(CAST(ISNULL(pp.lot_qty,0) AS float)) lot,
+                              MAX(ISNULL(pp.model_no,'')) model,
+                              MIN(CAST(ISNULL(pp.use_qty,1) AS float)) uq
+                         FROM nx.plan_part_mat pp WITH(NOLOCK)
+                        WHERE {' AND '.join(w)}
+                        GROUP BY pp.plan_ymd, pp.split_work_order, pp.assy_item_code ) t""", *p)
+            acc = {}
+            for r in cur.fetchall():
+                wo_, ln, assy = (r[0] or "").strip(), (r[1] or "").strip(), (r[2] or "").strip()
+                ppy, phm = (r[3] or "").strip(), (r[4] or "").strip()
+                q, lot, model, uq = float(r[5] or 0), float(r[6] or 0), (r[7] or "").strip(), float(r[8] or 1)
+                # ★그레인 = 제번 × 라인 × **당김일자 × 시간**(2026-09-06 실측 확정).
+                #   ASM도번은 그 안에서 한 칸에 모은다("AJJ76617501  AJR30083101").
+                #   왜 당김일자·시간이 키인가 — 같은 제번이라도 ASSY 마다 당김이 다르다:
+                #     6J1M08T5 : AJJ76617502 → 260907 17:00 / AJR30083102 → 260906 07:50
+                #   레거시도 이 제번을 **두 줄**로 보여준다(실물 확인). 제번+라인으로만 묶으면
+                #   한 줄이 되어 서로 다른 납기가 뭉개진다(1,016행 = 과다접힘).
+                #   실측 행수: 제번+라인 1,016 / +당김일 1,653 / +당김일+시간 1,781 (레거시 1,776).
+                k = (wo_, ln, ppy, phm)
+                g = acc.get(k)
+                if g is None:
+                    g = acc[k] = {"cc": cc, "cnm": cnm, "wo": wo_, "line": ln, "model": model,
+                                  "asm": "", "_asms": [], "hm": phm, "lot": lot, "qty": 0.0,
+                                  "use": uq, "d": [0.0] * 31}
+                if assy and assy not in g["_asms"]: g["_asms"].append(assy)
+                if phm and (not g["hm"] or phm < g["hm"]): g["hm"] = phm
+                if lot and (not g["lot"] or lot < g["lot"]): g["lot"] = lot
+                if model and not g["model"]: g["model"] = model
+                # ★수량은 **더하지 않는다**(2026-09-06 레거시 실물 확인).
+                #   6I2M03QV = 도번 3개(AJJ75698805·AJR76982501·AJR77182404)가 한 행인데
+                #   레거시 화면 계획수량은 9(합)가 아니라 **3**이다.
+                #   이유 — plan_qty 는 그 **제번의 생산 대수**다. 도번마다 3대씩 따로 만드는 게
+                #   아니라 같은 3대를 도번 3종 관점에서 본 것이라, 합치면 3배로 뻥튀기된다.
+                #   ※단 하단 합계는 레거시가 원본 행을 그대로 더한다(21,664) — 재는 대상이 다르다
+                #     (행=생산 대수 / 합계=자재 소요 건수). 합계는 아래 qty_sum 에서 별도 계산.
+                g["qty"] = max(g["qty"], q)
+                g["_raw"] = g.get("_raw", 0.0) + q      # 합계용 원본 누적
+                # 원문 plan_qty_01 = part_plan_ymd <= 기준일(누적) · 이후는 해당 일자칸
+                # ★일자칸도 계획수량과 같은 규칙(대표값) — 레거시 6I2M03QV 는 06일칸도 3이다.
+                #   합치면 9가 되어 행의 계획수량(3)과 어긋난다.
+                i = didx.get(ppy)
+                if i is None and ppy and ppy <= d6: i = 0
+                if i is not None: g["d"][i] = max(g["d"][i], q)
+            # ASM도번 여러 개를 한 칸에(레거시 표기) — 정렬해 두면 같은 조합이 항상 같게 보인다.
+            for g in acc.values():
+                g["asm"] = "  ".join(sorted(g.pop("_asms")))
+            rows = list(acc.values())
+        else:
+            # ── 상세(t2) — 생산계획 + 모델BOM, 소요는 통일엔진(§1-10). 일자축 = plan_ymd.
+            cur.execute("""SELECT UPPER(RTRIM(item_code)), RTRIM(ISNULL(in_cust,'')),
+                                  ISNULL(prod_rate,100) FROM nx.item WITH(NOLOCK)""")
+            _im = cur.fetchall()
+            prate = {r[0]: float(r[2] if r[2] is not None else 100) for r in _im}
+            stop  = set(r[0] for r in _im if r[1] == cc)      # ★그 협력사 자재 = 정지집합
+            if not stop:
+                return {"ymd": d6, "dates": dates, "cust": cc, "cust_nm": cnm,
+                        "mode": "dtl", "rows": [], "cnt": 0,
+                        "note": f"{cnm or cc} 매입처로 등록된 품목이 없습니다."}
+            mb = _mp070_modelbom(cur) if "_mp070_modelbom" in globals() else None
+            if mb is None:
+                from routers.gagong import _mp070_modelbom as _mbf
+                mb = _mbf(cur)
+            # ★nx.plan_dtl 에는 SPLIT_WORK_ORDER·LOT_QTY 가 없다(실측) —
+            #   제번은 WORK_ORDER, LOT 은 TOTAL_QTY 로 대응한다.
+            cur.execute("""SELECT RTRIM(ISNULL(PLAN_YMD,'')), RTRIM(WORK_ORDER),
+                                  RTRIM(ISNULL(MODEL_NO,'')), RTRIM(ISNULL(LINE_NO,'')),
+                                  CAST(ISNULL(PLAN_QTY,0) AS float), RTRIM(ISNULL(START_HM,'')),
+                                  CAST(ISNULL(TOTAL_QTY,0) AS float)
+                             FROM nx.plan_dtl WITH(NOLOCK)
+                            WHERE PLAN_YMD BETWEEN ? AND ?""", d6, dend)
+            plans = cur.fetchall()
+            eng = NxCostEngine(cur)
+            try: _nse.warm_vpr(eng)
+            except Exception: pass
+            memo, ucache = {}, {}
+            def unit(start):
+                u = start.upper()
+                if u not in ucache:
+                    ucache[u] = ({u: 1.0} if u in stop else
+                                 {k: v for k, v in
+                                  _nse.sagub_parts_soyo(eng, u, stop, memo).items() if v > 0})
+                return ucache[u]
+            acc = {}
+            for pymd, wo_, model, ln, pq, shm, lot in plans:
+                if fw and fw not in wo_.upper(): continue
+                if fl and fl not in ln.upper():  continue
+                di = didx.get(pymd)
+                if di is None: continue
+                for c_item, m_use, afrom, ato in (mb.get(model) or []):
+                    cu = c_item.upper()
+                    if fa and fa not in cu: continue
+                    if cu in stop: continue          # ★원문 c.in_cust_code not in (거래처)
+                    if (afrom and afrom > pymd) or (ato and ato < pymd): continue
+                    base = math.ceil(float(pq) * m_use * prate.get(cu, 100) / 100.0)
+                    if base <= 0: continue
+                    for mat, per in unit(cu).items():
+                        if fi and fi not in mat: continue
+                        q = base * per
+                        if q <= 0: continue
+                        k = (wo_, ln, model, cu, mat)
+                        g = acc.get(k)
+                        if g is None:
+                            g = acc[k] = {"cc": cc, "cnm": cnm, "wo": wo_, "line": ln,
+                                          "model": model, "asm": c_item, "mat": mat,
+                                          "hm": (shm or "")[:4], "use": round(per, 4),
+                                          "lot": float(lot or 0), "qty": 0.0, "d": [0.0] * 31}
+                        g["qty"] += q
+                        g["d"][di] += q
+            rows = list(acc.values())
+
+        rows.sort(key=lambda r: (r["line"], r["wo"], r["asm"], r.get("mat", "")))
+        # ★합계 = **원본 누적**(_raw). 레거시 하단 합계가 그렇다(21,664).
+        #   행에 보이는 qty 는 도번을 묶은 대표값이라 그걸 더하면 레거시 합계와 어긋난다
+        #   (행합 18,709 ≠ 합계 21,664). 재는 대상이 달라서 생기는 정상 차이다.
+        #   ※자르기(limit) 전에 낸다 — 잘린 뒤 세면 총량이 아니다.
+        qsum = sum((r.pop("_raw", r["qty"]) if not isdtl else r["qty"]) for r in rows)
+        capped = len(rows) > int(limit)
+        rows = rows[:int(limit)]
+        return {"ymd": d6, "dates": dates, "cust": cc, "cust_nm": cnm,
+                "mode": ("dtl" if isdtl else "sum"), "rows": rows, "cnt": len(rows),
+                "qty_sum": round(qsum, 2),
+                "note": ("상위 %d건만 표시 — 조건으로 좁혀주세요." % limit) if capped else ""}
+    finally:
+        cn.close()

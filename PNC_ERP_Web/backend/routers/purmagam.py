@@ -3,7 +3,7 @@
 import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
-from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
+from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form, Request
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _carry_win,
                     _sale_win_ovr, _carry_win_ovr, _win_ovr, _ensure_carry_ovr, _carry_ovr_set, _carry_ovr_set_bulk)
 
@@ -26,9 +26,12 @@ def _pur_src(win):
      WHERE {win} AND A.DIVISION='P'"""
 
 @router.get("/api/purmagam/list")
-def purmagam_list(ym: str = Query(""), gubun: str = Query("")):
+def purmagam_list(request: Request, ym: str = Query(""), gubun: str = Query("")):
     """매입마감 거래처별 집계(확정입고=매입 + 수입, 마감기준) + nx 마감상태·조정합.
-       gubun='' /전체=매입+수입(=자재입고집계표 총액) · '매입'/'수입'=해당 구분만."""
+       gubun='' /전체=매입+수입(=자재입고집계표 총액) · '매입'/'수입'=해당 구분만.
+
+       ★협력사 포털 공개(2026-09-06) — 이건 **거래처별 집계**라 그냥 열면 전 거래처가
+         다 보인다(경쟁사 매입액 유출). 아래에서 scope_cust 로 자기 행만 남긴다."""
     y = _dig4(ym) or _cur_ym()
     g = (gubun or "").strip()
     gf = "" if (not g or g in ("전체", "all", "ALL")) else g
@@ -57,6 +60,11 @@ def purmagam_list(ym: str = Query(""), gubun: str = Query("")):
         adj = {r[0]: float(r[1] or 0) for r in nc.fetchall()}
     finally:
         nx.close()
+    # ★소속강제 — 협력사면 자기 거래처 행만 남긴다(내부 직원은 전체 그대로).
+    from routers.auth import current_user, scope_cust
+    _mine = scope_cust(current_user(request), None)
+    if _mine is not None:
+        rows = [r for r in rows if str(r.get("cc") or "").strip() == _mine]
     for r in rows:
         cc = r["cc"]; s = st.get(cc, (0, 0))
         r["qty"] = float(r["qty"] or 0); r["amt"] = float(r["amt"] or 0); r["vat"] = float(r["vat"] or 0); r["items"] = int(r["items"] or 0)
@@ -220,11 +228,20 @@ def _pur_src_moda(win):
      WHERE {win} AND A.DIVISION='P'"""
 
 @router.get("/api/purmagam/lines")
-def purmagam_lines(ym: str = Query(""), basis: str = Query("magam"), fr: str = Query(""), to: str = Query(""),
+def purmagam_lines(request: Request, ym: str = Query(""), basis: str = Query("magam"), fr: str = Query(""), to: str = Query(""),
                    q: str = Query(""), cust: str = Query(""), cust_code: str = Query("")):
     """★2026-08-23 레거시 w_pu_sale_010 형태 = 집계를 P/No 단위로 펼친 목록(거래처×자도번×단가).
-    basis='magam'(마감기준: 거래처별 마감일 창) | 'input'(입고기준: fr~to, 기본 당월1일~오늘)."""
+    basis='magam'(마감기준: 거래처별 마감일 창) | 'input'(입고기준: fr~to, 기본 당월1일~오늘).
+
+    ★협력사 포털 공개(2026-09-06) — 레거시 협력사 메뉴의 「매입마감현황」에 해당.
+      협력사는 **자기 것만** 봐야 하므로 scope_cust 로 거래처를 강제한다.
+      파라미터(cust/cust_code)를 신뢰하지 않는다 — 남의 코드를 넣어도 자기 것만 나온다.
+      내부 직원은 passthrough(=지금까지와 동일)."""
     from routers.salemagam import _magam_lines_shape
+    from routers.auth import current_user, scope_cust
+    _mine = scope_cust(current_user(request), None)
+    if _mine is not None:                      # 협력사 계정 — 자기 코드로 고정
+        cust_code = _mine; cust = ""
     y = _dig4(ym) or _cur_ym()
     if basis == "input":
         f6 = "".join(ch for ch in str(fr or "") if ch.isdigit())[:6]

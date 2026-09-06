@@ -1417,6 +1417,16 @@ SCREEN.matkanban=(c)=>{
 };
 SCREEN.salemagam=_mkMagam({base:'salemagam',weight:true,title:'🧾 매출마감처리',sub:'협력사 매출(tag5)',src:'PU_T_STOCK_MAINT(5)',verb:'매출',amtlbl:'매출금액',recalc:true});
 SCREEN.purmagam=_mkMagam({base:'purmagam',weight:false,title:'📥 매입마감처리',sub:'확정입고 매입(9/S/C/G/H)',src:'PU_T_STOCK_MAINT 확정입고',verb:'매입',amtlbl:'매입금액',recalc:true});   // recalc=매입단가 재계산(레거시 cost_calc) 노출
+/* ★협력사 메뉴/포털용 — 같은 화면을 **P/No 상세**로 열리게만 바꾼 별도 등록(2026-09-06).
+     · view:'line'  = 보기 기본값(협력사는 거래처집계=자기 1행을 볼 이유가 없다).
+                      조회기준은 원래부터 '마감기준'이 기본이라 따로 줄 것이 없다.
+     · sid 를 따로 둔 이유 = 같은 SCREEN.purmagam 을 고치면 **자재 메뉴**(자재매입마감)도
+       함께 P/No 로 열려 버린다. 자재쪽은 거래처집계로 시작해 마감·계산서를 처리하는 화면이라
+       기본값이 달라야 한다.
+     · 쓰기(재계산·저장·마감확정)는 core.js 의 canW(PERM.canEdit) 게이트가 그대로 적용된다 —
+       협력사는 수정권한이 없어 버튼이 숨는다. 소속 제한은 서버(scope_cust)가 강제한다. */
+SCREEN.coopsalemagam=_mkMagam({base:'salemagam',weight:true,view:'line',title:'🧾 매출마감현황',sub:'협력사 매출(tag5) · P/No 상세',src:'PU_T_STOCK_MAINT(5)',verb:'매출',amtlbl:'매출금액',recalc:true});
+SCREEN.cooppurmagam=_mkMagam({base:'purmagam',weight:false,view:'line',title:'📥 매입마감현황',sub:'확정입고 매입(9/S/C/G/H) · P/No 상세',src:'PU_T_STOCK_MAINT 확정입고',verb:'매입',amtlbl:'매입금액',recalc:true});
 
 /* ==== 수동발주 (구매/자재) — 매입처 선택→품목별 계획/재고/추가발주→발주서→메일(UI) ==== */
 SCREEN.manorder=(c)=>{
@@ -4380,6 +4390,11 @@ SCREEN.matinput=(c)=>{
     return w===0||w===6;};
 
   let base=_t(), days=4, gubun='all', cust='', line='', wo='', doban='', jado='';
+  /* ★IN/OUT (2026-09-06) — 일자칸 축.
+       'I' INPUT  = 당김 계산이 반영된 소요일(part_plan_ymd/part_output_hm)
+       'O' OUTPUT = 엑셀 업로드 원본 계획일·시각(plan_ymd/output_hm)
+     구분(gubun)과 달리 **서버 재조회가 필요하다** — 축이 바뀌면 조회 범위 자체가 달라진다. */
+  let io='I';
   let open=new Set();          // ★집계에서 클릭해 펼친 자도번(그 위로 제번이 뜬다)
   let dets=[];                 // ★서버가 준 제번 상세 원본(구분 전환의 기준)
   let rows=[], cal=[], loading=false, msg='';
@@ -4404,7 +4419,8 @@ SCREEN.matinput=(c)=>{
       const u=`${API}/api/matinput/list?base_ymd=${y6(base)}&days=${days}&gubun=${gubun}`
         +`&cust=${encodeURIComponent(cust.trim())}&line=${encodeURIComponent(line.trim())}`
         +`&wo=${encodeURIComponent(wo.trim())}&doban=${encodeURIComponent(doban.trim())}`
-        +`&jadoban=${encodeURIComponent(jado.trim())}`;
+        +`&jadoban=${encodeURIComponent(jado.trim())}`
+        +`&inout=${io==='O'?'OUTPUT':'INPUT'}`;
       const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();
       dets=j.rows||[];cal=j.cal||[];detCnt=j.det_cnt||0;
@@ -4649,7 +4665,9 @@ SCREEN.matinput=(c)=>{
     c.innerHTML=`
      <div style="display:flex;flex-direction:column;height:100%;min-height:0">
      <div class="page-title">📥 자재입고진행현황 <span style="font-size:12px;color:var(--muted);font-weight:400">자재(자도번)별 소요계획·진행 · nx</span></div>
-     <div class="page-sub">기준일부터 근무일 ${days}일. 일자칸=소요수량(휴무일은 회색). 레거시 <code>w_pr_input_010_part</code> · IN/OUT = <b>INPUT</b></div>
+     <div class="page-sub">기준일부터 근무일 ${days}일. 일자칸=소요수량(휴무일은 회색). 레거시 <code>w_pr_input_010_part</code> ·
+       IN/OUT = <b>${io==='O'?'OUTPUT':'INPUT'}</b>
+       <span style="color:var(--muted)">(${io==='O'?'엑셀 업로드 원본 계획일·시각':'당김 계산이 반영된 소요일'})</span></div>
      <!-- ★레거시 w_pr_input_010_part 조건부 레이아웃 — 라벨=파란 블록, 2행 배치,
           구분은 드롭다운이 아니라 라디오(레거시 동일). 2026-08-28 사용자요청 -->
      <div class="mi-cond">
@@ -4667,8 +4685,13 @@ SCREEN.matinput=(c)=>{
          </span>
          <span class="mi-lb">IN/OUT</span>
          <span class="mi-rg">
-           <label class="mi-rd"><input type="radio" name="mi-io" value="I" checked> INPUT</label>
-           <label class="mi-rd mi-dis" title="계획DB 차이 — 2차 구현"><input type="radio" name="mi-io" value="O" disabled> OUTPUT</label>
+           <!-- ★OUTPUT 개방(2026-09-06) — 일자칸 축을 바꾼다.
+                  INPUT  = 당김 계산이 반영된 소요일(part_plan_ymd/part_output_hm)
+                  OUTPUT = 엑셀 업로드 원본 계획일·시각(plan_ymd/output_hm) -->
+           <label class="mi-rd"><input type="radio" name="mi-io" value="I" ${io==='I'?'checked':''}
+                  title="당김 계산이 반영된 소요일"> INPUT</label>
+           <label class="mi-rd"><input type="radio" name="mi-io" value="O" ${io==='O'?'checked':''}
+                  title="엑셀 업로드 원본 계획일·시각(당김 전)"> OUTPUT</label>
          </span>
        </div>
        <div class="mi-row">
@@ -4833,6 +4856,10 @@ SCREEN.matinput=(c)=>{
     c.querySelectorAll('input[name="mi-gb"]').forEach(x=>x.onchange=e=>{
       // ★구분 = 조회한 데이터로 즉시 전환(재조회 없음 — 레거시 동일)
       if(!e.target.checked)return;gubun=e.target.value;reView();});
+    /* ★IN/OUT = 일자축이 바뀌므로 **서버 재조회**. 구분(gubun)처럼 로컬 전환이 안 된다 —
+         OUTPUT 은 조회 범위에 들어오는 행 자체가 다르다(실측 INPUT 1,150 / OUTPUT 771). */
+    c.querySelectorAll('input[name="mi-io"]').forEach(x=>x.onchange=e=>{
+      if(!e.target.checked)return;io=e.target.value;load();});
     g('#mi-line').onchange=e=>{line=e.target.value;};
     // ★작업처 코드칸 ↔ 거래처명칸 상호 채움(부분갱신, 포커스 유지). 조회는 코드로.
     const cu=g('#mi-cu'), cn2=g('#mi-cnm');

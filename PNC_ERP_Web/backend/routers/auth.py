@@ -179,6 +179,24 @@ COOP_ALLOW = {
     "/api/delivedit/items",               # 〃 도번·자도번 목록
     "/api/delivedit/update",              # 〃 수량수정 (쓰기·_guard 가 출발20 이후 차단)
     "/api/delivedit/delete",              # 〃 삭제   (쓰기·동상)
+
+    # ── 매입/매출 마감현황 (2026-09-06) ────────────────────────────────────
+    #   레거시 협력사 메뉴의 「매입마감현황」·「매출마감현황」에 해당한다.
+    #   내부 화면(SCREEN.purmagam/salemagam)을 그대로 쓰고 **조회 API 만** 연다.
+    #   ★소속강제 = purmagam.py/salemagam.py 의 lines() 가 scope_cust 로 cust_code 를
+    #     자기 코드로 덮는다(파라미터 불신). list 는 거래처별 집계라 협력사도 자기 행만 보인다.
+    #   ★단가 재계산·저장·마감확정은 **열지 않는다** — 협력사는 조회만 한다.
+    #     (화면의 재계산 버튼·체크박스는 core.js `canW`(PERM.canEdit) 게이트로 이미 숨는다)
+    "/api/purmagam/list",                 # 매입마감 — 거래처별 집계 (읽기)
+    "/api/purmagam/lines",                # 〃 P/No 상세 (읽기·scope_cust 강제)
+    "/api/salemagam/list",                # 매출마감 — 거래처별 집계 (읽기)
+    "/api/salemagam/lines",               # 〃 P/No 상세 (읽기·scope_cust 강제)
+    "/api/salemagam/weight_quote",        # 〃 LME 중량정산(매출 화면이 함께 부름·읽기)
+
+    # ── 협력사자재계획현황 (2026-09-06) ───────────────────────────────────
+    #   레거시 w_pr_outside_040. 읽기 전용이고 scope_cust 로 거래처가 강제된다
+    #   (coopplan.coopmatplan_list — 협력사는 cust 파라미터를 넣어도 자기 코드로 덮인다).
+    "/api/coopmatplan/list",
 }
 # ★★협력사에게 **열지 않은 것** — 뺀 이유를 남긴다(나중에 무심코 추가하지 않도록).
 #   · /api/sagub/* 전부 (holding/list · adjust/list · adjust/save · adjust/delete)

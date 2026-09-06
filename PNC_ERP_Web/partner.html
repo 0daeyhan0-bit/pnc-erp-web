@@ -283,8 +283,12 @@
   var DB = {items:[], itemDetail:{}, priceItems:[], priceBuyHist:{}, priceSaleHist:{},
             stock:[], lineNames:{}, custTypeNames:{}};
 </script>
-<script src="js/core.js?v=260903magamgubun"></script>
-<script src="js/screens.etc.js?v=260903sumfoot"></script>
+<script src="js/core.js?v=260906coopmat3"></script>
+<script src="js/screens.etc.js?v=260906coopmat3"></script>
+<!-- ★매입/매출 마감현황(2026-09-06) — SCREEN.purmagam·salemagam 이 여기 정의돼 있다.
+     포털 기존 4화면(partnerplan·deliv420·delivedit·sagubledger)은 전부 screens.etc.js 라
+     종전엔 이 파일이 필요 없었다. 마감현황을 추가하면서 함께 로드한다. -->
+<script src="js/screens.pur.js?v=260906matio"></script>
 
 <script>
 /* ★포털 스크립트 전체를 IIFE 로 감싼다(2026-09-03).
@@ -465,6 +469,7 @@ function tabs(){
   const isCutting = !!((T.me||{}).is_cutting);
   const t=[{v:'home',n:'홈'}];
   t.push({v:'pplan', n:'협력사 계획현황',      scr:'partnerplan'});
+  t.push({v:'pmat',  n:'협력사 자재계획현황',   scr:'coopmatplan'});
   // ★일반협력사만 발주현황(일반). 절삭협력사(is_cutting)는 계획현황을 쓴다.
   if(isPartner && !isCutting) t.push({v:'order', n:'협력사 발주현황(일반)'});
   t.push({v:'deliv', n:'거래명세서 발행',      scr:'deliv420'});
@@ -472,6 +477,14 @@ function tabs(){
   // ★「협력사사급재고관리」는 뺐다(2026-09-03) — 사급 수불장과 같은 원장(nx.sagub_maint)을
   //   보는 중복 화면이고, 수불장이 상위(입고·출고·잔량 + 일자별 이력)라 잔량 컬럼으로 갈음된다.
   t.push({v:'sledg', n:'사급 수불장',          scr:'sagubledger'});
+  /* ★매입/매출 마감현황 (2026-09-06) — 레거시 협력사 메뉴와 같은 구성.
+       내부 화면(SCREEN.purmagam/salemagam)을 **그대로** 쓴다(추가개발 없음).
+       · 자기 것만 = 서버가 강제한다 — purmagam.py/salemagam.py 의 list·lines·weight_quote 가
+                     scope_cust 로 거래처를 덮는다(URL 파라미터를 신뢰하지 않는다).
+       · 조회만    = 재계산·저장·마감확정 API 는 COOP_ALLOW 에 넣지 않았다.
+                     화면의 단가 재계산 버튼·체크박스도 core.js `canW`(PERM.canEdit)로 숨는다. */
+  t.push({v:'pmagam', n:'매입마감현황',         scr:'cooppurmagam'});
+  t.push({v:'smagam', n:'매출마감현황',         scr:'coopsalemagam'});
   /* ★「내 송장」 제거(2026-09-03 사용자 요청 — 화면이 깨졌다).
        내가 모바일용으로 짠 자체화면인데, PC 전환·내부 ERP 재사용으로 구조가 바뀌면서
        레이아웃이 맞지 않게 됐다. 세트입고 송장 발행은 「거래명세서 발행」(SCREEN.deliv420)이
