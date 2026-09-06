@@ -47,7 +47,7 @@ def qareview_opts():
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute(f"""SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC
-              FROM {LIVE}.PR_M_PROC_GAGONG
+              FROM {NXS}.PR_M_PROC_GAGONG
              WHERE ISNULL(GAGONG_PROC_CODE,'')<>''
              ORDER BY SORT_KEY, GAGONG_PROC_CODE""")
         procs = [{"code": "%", "nm": "전체"}]
@@ -61,7 +61,12 @@ def qareview_opts():
 @router.get("/api/qareview/list")
 def qareview_list(from_ymd: str = Query(""), to_ymd: str = Query(""),
                   q: str = Query(""), limit: int = Query(1000)):
-    """좌측 목록(dw_pr_input_590_l01) — 라이브 + nx 합산."""
+    """좌측 목록(dw_pr_input_590_l01) — ★nx 단일소스(2026-09-07).
+
+       종전엔 라이브 UNION ALL nx 였는데 **같은 건이 두 줄로 나왔다**(화면 84건 = 42건×2).
+       실측: 양쪽 1,015행 완전 동일(ISSUE_SEQ 차집합 0/0 · 최종수정 시각까지 동일),
+             웹 등록분(9000000+)은 0건 → 라이브를 빼도 사라지는 건이 없다.
+       CLAUDE.md §1-9-1(한 개념에 소스는 하나) 준수. 쓰기는 원래부터 nx 만."""
     d6a = _d6(from_ymd) if from_ymd else ""
     d6b = _d6(to_ymd) if to_ymd else ""
     w = ["1=1"]; p = []
@@ -83,16 +88,10 @@ def qareview_list(from_ymd: str = Query(""), to_ymd: str = Query(""),
               SELECT A.ISSUE_SEQ,A.ISSUE_YMD,A.ISSUE_HHMM,A.WRITE_USER_ID,A.PLACE_DESC,A.TARGET_DESC,
                      A.TODAY_PROC_TARGET_QTY,A.TODAY_PROC_RESULT_QTY,A.TODAY_QA_TARGET_PPM,A.TODAY_QA_RESULT_PPM,
                      A.TODAY_ERROR_QTY,A.TODAY_INWON,A.TODAY_HOLIDAY_INWON,A.TODAY_ATTEND_INWON,
-                     A.GAGONG_PROC_CODE,A.UPDATE_USER_ID,A.UPDATE_DATETIME,'라이브' SRC
-                FROM {LIVE}.PR_T_DAILY_ISSUE_REVIEW A WITH(NOLOCK) WHERE {wsql}
-              UNION ALL
-              SELECT A.ISSUE_SEQ,A.ISSUE_YMD,A.ISSUE_HHMM,A.WRITE_USER_ID,A.PLACE_DESC,A.TARGET_DESC,
-                     A.TODAY_PROC_TARGET_QTY,A.TODAY_PROC_RESULT_QTY,A.TODAY_QA_TARGET_PPM,A.TODAY_QA_RESULT_PPM,
-                     A.TODAY_ERROR_QTY,A.TODAY_INWON,A.TODAY_HOLIDAY_INWON,A.TODAY_ATTEND_INWON,
                      A.GAGONG_PROC_CODE,A.UPDATE_USER_ID,A.UPDATE_DATETIME,'nx' SRC
                 FROM {NXS}.PR_T_DAILY_ISSUE_REVIEW A WITH(NOLOCK) WHERE {wsql}
             ) u
-            ORDER BY u.ISSUE_YMD DESC, u.ISSUE_HHMM DESC, u.ISSUE_SEQ DESC""", *(p + p))
+            ORDER BY u.ISSUE_YMD DESC, u.ISSUE_HHMM DESC, u.ISSUE_SEQ DESC""", *p)
         rows = []
         for r in cur.fetchall():
             rows.append({
@@ -110,8 +109,12 @@ def qareview_list(from_ymd: str = Query(""), to_ymd: str = Query(""),
 
 @router.get("/api/qareview/detail")
 def qareview_detail(seq: int = Query(...)):
-    """우측 상세(dw_pr_input_590_p) + 첨부목록(dw_pr_input_590_l03)."""
-    src = f"{NXS}" if seq >= NX_SEQ_BASE else f"{LIVE}"
+    """우측 상세(dw_pr_input_590_p) + 첨부목록(dw_pr_input_590_l03).
+
+       ★nx 단일소스(2026-09-07) — 종전엔 SEQ 대역으로 라이브/nx 를 갈랐다.
+         실측: 미러가 본문(CONTENTS_01~04)·첨부까지 라이브와 완전 동일(불일치 0건, 첨부 97행 동일).
+         목록을 nx 로 통일했으므로 상세도 같은 소스를 봐야 값이 어긋나지 않는다."""
+    src = f"{NXS}"
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute(f"""SELECT A.ISSUE_SEQ,A.ISSUE_YMD,A.ISSUE_HHMM,A.WRITE_USER_ID,A.PLACE_DESC,A.TARGET_DESC,
@@ -121,8 +124,9 @@ def qareview_detail(seq: int = Query(...)):
               A.CONTENTS_01_DESC,A.CONTENTS_02_DESC,A.CONTENTS_03_DESC,A.CONTENTS_04_DESC,
               A.GAGONG_PROC_CODE,
               -- ★레거시는 WORK_CODE 로 조인해 항상 '전체'가 나오는 버그. 웹은 코드로 조인(§7 버그 미복제)
-              ISNULL((SELECT TOP 1 GAGONG_PROC_DESC FROM {LIVE}.PR_M_PROC_GAGONG WITH(NOLOCK)
+              ISNULL((SELECT TOP 1 GAGONG_PROC_DESC FROM {NXS}.PR_M_PROC_GAGONG WITH(NOLOCK)
                        WHERE GAGONG_PROC_CODE=A.GAGONG_PROC_CODE),'전체') proc_nm,
+              -- ★CM_M_USERS_INFO 만 라이브 유지 — nx 에 아직 없다(작성자명 표시용 조회).
               ISNULL((SELECT TOP 1 USER_NAME FROM {LIVE}.CM_M_USERS_INFO WITH(NOLOCK)
                        WHERE USER_ID=A.WRITE_USER_ID),'') user_name,
               A.INSERT_USER_ID,A.INSERT_DATETIME,A.UPDATE_USER_ID,A.UPDATE_DATETIME
