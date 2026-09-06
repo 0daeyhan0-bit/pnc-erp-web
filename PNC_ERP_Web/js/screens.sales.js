@@ -76,7 +76,7 @@ SCREEN.prodinvout=(c)=>{
   };
   const _reload=()=>{frm=d2ymd(c.querySelector('#frm').value)||frm;to=d2ymd(c.querySelector('#to').value)||to;load();};
   c.querySelector('#go').onclick=_reload;c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')renderLeft();};
-  c.querySelector('#nxsrc').onclick=()=>{source='nx';load();};   // ★Phase5 nx 파생 보기
+  c.querySelector('#nxsrc').onclick=()=>{source='ledger';load();};   // ★웹원장 파생 보기(기본 nx 는 일반 그리드)
   c.querySelector('#gubun').onchange=renderLeft;c.querySelector('#work').onchange=renderLeft;
   
   c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#gubun').value='all';c.querySelector('#work').value='';sel=null;renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
@@ -532,14 +532,17 @@ SCREEN.shipment=(c)=>{
 /* 제품재고조회 (영업, dw_pr_stock_040) — 기초/입고/출고/조정/현재고 · 작업장별 */
 SCREEN.salesstock=(c)=>{
   const API=API_BASE;
-  let pool=[], loading=false, msg='', curFrom='', curTo='', cur=[], source='live', incZero=false;   // ★Phase5 데이터원(기본 라이브 무변경) · incZero=0재고포함(레거시 gross 대조)
+  // ★2026-09-06 기본 소스 nx(=웹 미러). 레거시 직독은 쓰지 않는다(대표 지시).
+  //   nx=일반 그리드(미러 기반) / live=라이브 직독(대조 전용) / ledger=웹 자체원장 파생(진단용)
+  let pool=[], loading=false, msg='', curFrom='', curTo='', cur=[], source='nx', incZero=false;   // incZero=0재고포함(레거시 gross 대조)
   const dToInput=d=>{d=(''+(d||'')).trim();return d.length>=6?`20${d.slice(0,2)}-${d.slice(2,4)}-${d.slice(4,6)}`:'';};
   const inD=v=>(''+(v||'')).slice(2).replace(/-/g,'');
   const load=async()=>{loading=true;msg='';
     const bd=c.querySelector('#body');if(bd)bd.innerHTML=spinRow(10);
     const zq=incZero?'&zero=1':'';
-    if(source==='nx'){loading=false;return nxDerivedView(c,`${API}/api/live/salesstock?dfrom=${curFrom}&dto=${curTo}&source=nx`,{title:'제품재고조회',onBack:()=>{source='live';load();}});}
-    try{const r=await fetch(`${API}/api/live/salesstock?dfrom=${curFrom}&dto=${curTo}${zq}`);if(!r.ok)throw new Error('HTTP '+r.status);
+    // ★원장 파생뷰는 ledger 일 때만 — nx 는 일반 그리드로 본다(자재입출고 pur.js:28 과 같은 규약).
+    if(source==='ledger'){loading=false;return nxDerivedView(c,`${API}/api/live/salesstock?dfrom=${curFrom}&dto=${curTo}&source=nx`,{title:'제품재고조회(웹원장)',onBack:()=>{source='nx';load();}});}
+    try{const r=await fetch(`${API}/api/live/salesstock?dfrom=${curFrom}&dto=${curTo}${zq}&source=${encodeURIComponent(source)}`);if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();pool=j.rows||[];curFrom=j.dfrom||curFrom;curTo=j.dto||curTo;}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';pool=[];}
     loading=false;
@@ -581,7 +584,7 @@ SCREEN.salesstock=(c)=>{
     render(pool.filter(r=>gbf(r)&&(!w||r.wc===w)&&(!q||(r.cd||'').toLowerCase().includes(q)||(r.nm||'').toLowerCase().includes(q)||(r.spec||'').toLowerCase().includes(q))));};
   const go=()=>{curFrom=inD(c.querySelector('#dfrom').value);curTo=inD(c.querySelector('#dto').value);load();};
   c.querySelector('#go').onclick=go;c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')apply();};
-  c.querySelector('#nxsrc').onclick=()=>{source='nx';load();};   // ★Phase5 nx 파생 보기
+  c.querySelector('#nxsrc').onclick=()=>{source='ledger';load();};   // ★웹원장 파생 보기(기본 nx 는 일반 그리드)
   
   c.querySelector('#zero').onchange=e=>{incZero=e.target.checked;load();};   // 0재고 포함=서버 재조회(레거시 gross 대조)
   c.querySelector('#wc').onchange=apply;c.querySelector('#gubun').onchange=apply;

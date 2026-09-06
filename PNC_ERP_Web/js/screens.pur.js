@@ -109,7 +109,7 @@ SCREEN.matinout=(c)=>{
     attachResizers(c);
   };
   c.querySelector('#go').onclick=()=>load();
-  c.querySelector('#nxsrc').onclick=()=>{source='nx';load();};   // ★Phase5 nx 파생 보기
+  c.querySelector('#nxsrc').onclick=()=>{source='ledger';load();};   // ★웹원장 파생 보기(기본 nx 는 일반 그리드)
   c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')load();else renderLeft();};   // ★Enter=서버 스코프 조회(기간 무관 빠름), 그외=로드된 데이터 클라 필터
   c.querySelector('#qbuy').onkeyup=()=>renderLeft();
   c.querySelector('#qsell').onkeyup=()=>renderLeft();
@@ -304,7 +304,9 @@ SCREEN.receiptdetail=(c)=>{
     itemcust: {label:'품목/업체별',  lead:ITEM.concat(['cnm','ct','chg','ymd','seq','ym']), sort:['mat','cc','ymd','seq'], g1:'mat',g2:'cc',l1:'품목계',l2:'업체계'},
   };
   const API=API_BASE;
-  let gijun='close', mode='day', cur=[], pool=[], loading=false, msg='', curYm='', curFrom='', curTo='', source='live', curMq='';   // ★Phase5 데이터원(기본 라이브 무변경) + curMq=품번 검색어(조회 후 유지·서버 스코프)
+  // ★2026-09-06 기본 소스 nx(=웹 미러). 레거시 직독은 쓰지 않는다(대표 지시).
+  //   nx=일반 그리드(미러 기반) / live=라이브 직독(대조 전용) / ledger=웹 자체원장 파생(진단용)
+  let gijun='close', mode='day', cur=[], pool=[], loading=false, msg='', curYm='', curFrom='', curTo='', source='nx', curMq='';   // curMq=품번 검색어(조회 후 유지·서버 스코프)
   let curCq='', curLg='', curSg='', curCt='';   // ★거래처·대분류·소분류·거래처분류 검색어 유지(재조회·기간변경 시 안없어지게)
   const RENDER_CAP=1500;   // ★초기속도: 비그룹(일자별) 렌더 상한(총계는 전체 기준·엑셀은 전체)
   const ymToInput=y=>{y=(''+(y||'')).trim();return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'';};
@@ -314,8 +316,9 @@ SCREEN.receiptdetail=(c)=>{
     try{const qs=curMq?`&q=${encodeURIComponent(curMq)}`:'';   // ★품번 서버 스코프(미입력=전체·무변경)
       const u=(gijun==='close'?`${API}/api/live/receiptdetail?gijun=close`+(curYm?`&ym=${curYm}`:'')
         :`${API}/api/live/receiptdetail?gijun=issue&dfrom=${curFrom}&dto=${curTo}`)+qs;
-      if(source==='nx'){loading=false;return nxDerivedView(c,u+'&source=nx',{title:'자재입고명세서',onBack:()=>{source='live';load();}});}
-      const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();
+      // ★원장 파생뷰는 ledger 일 때만 — nx 는 일반 그리드로 본다(자재입출고 pur.js:28 과 같은 규약).
+      if(source==='ledger'){loading=false;return nxDerivedView(c,u+'&source=nx',{title:'자재입고명세서(웹원장)',onBack:()=>{source='nx';load();}});}
+      const r=await fetch(u+`&source=${encodeURIComponent(source)}`);if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();
       pool=j.rows||[];if(gijun==='close')curYm=j.ym||curYm;else{curFrom=j.dfrom||curFrom;curTo=j.dto||curTo;}}
     catch(e){pool=[];msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';}
     loading=false;draw();};
@@ -396,7 +399,7 @@ SCREEN.receiptdetail=(c)=>{
     const capF=()=>{curCq=c.querySelector('#cq').value.trim();curLg=c.querySelector('#lg').value;curSg=c.querySelector('#sg').value;curCt=c.querySelector('#ct').value;curMq=c.querySelector('#mq').value.trim();};
     const doSearch=()=>{capF();load();};   // ★검색버튼=Enter 동일(서버 재조회, 필터 유지)
     c.querySelector('#go').onclick=doSearch;
-    c.querySelector('#nxsrc').onclick=()=>{capF();source='nx';load();};   // ★Phase5 nx 파생 보기
+    c.querySelector('#nxsrc').onclick=()=>{capF();source='ledger';load();};   // ★웹원장 파생 보기(기본 nx 는 일반 그리드)
     const _dto=c.querySelector('#dto');if(_dto)_dto.onchange=()=>{capF();go();};   // 날짜 변경(검색어 유지)
     const _dfr=c.querySelector('#dfrom');if(_dfr)_dfr.onchange=()=>{capF();go();};
     ['#lg','#sg','#ct'].forEach(s=>c.querySelector(s).onchange=()=>{capF();render();});   // 분류=클라 필터(유지)
@@ -451,7 +454,9 @@ SCREEN.dispatchdetail=(c)=>{
     itemcust: {label:'품목/불출처별',  lead:['mat','nm','spec','lg','sg','incust','cc','ct','chg','ymd','seq'], sort:['mat','cc','ymd','seq'], g1:'mat',g2:'cc',l1:'품목계',l2:'불출처소계'},
   };
   const API=API_BASE;
-  let gijun='close', mode='day', cur=[], pool=[], loading=false, msg='', curYm='', curFrom='', curTo='', source='live';   // ★Phase5 데이터원(기본 라이브 무변경)
+  // ★2026-09-06 기본 소스 nx(=웹 미러). 레거시 직독은 쓰지 않는다(대표 지시).
+  //   nx=일반 그리드(미러 기반) / live=라이브 직독(대조 전용) / ledger=웹 자체원장 파생(진단용)
+  let gijun='close', mode='day', cur=[], pool=[], loading=false, msg='', curYm='', curFrom='', curTo='', source='nx';
   let curCq='', curLg='', curSg='', curCt='', curMq='';   // ★검색어 유지(재조회·기간변경 시)
   const RENDER_CAP=1500;   // ★초기속도: 비그룹 렌더 상한
   const ymToInput=y=>{y=(''+(y||'')).trim();return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'';};
@@ -460,8 +465,9 @@ SCREEN.dispatchdetail=(c)=>{
   const load=async()=>{loading=true;msg='';draw();
     try{const u=gijun==='close'?`${API}/api/live/dispatchdetail?gijun=close`+(curYm?`&ym=${curYm}`:'')
         :`${API}/api/live/dispatchdetail?gijun=issue&dfrom=${curFrom}&dto=${curTo}`;
-      if(source==='nx'){loading=false;return nxDerivedView(c,u+'&source=nx',{title:'자재불출명세서',onBack:()=>{source='live';load();}});}
-      const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();
+      // ★원장 파생뷰는 ledger 일 때만 — nx 는 일반 그리드로 본다(자재입출고 pur.js:28 과 같은 규약).
+      if(source==='ledger'){loading=false;return nxDerivedView(c,u+'&source=nx',{title:'자재불출명세서(웹원장)',onBack:()=>{source='nx';load();}});}
+      const r=await fetch(u+`&source=${encodeURIComponent(source)}`);if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();
       pool=j.rows||[];if(gijun==='close')curYm=j.ym||curYm;else{curFrom=j.dfrom||curFrom;curTo=j.dto||curTo;}}
     catch(e){pool=[];msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';}
     loading=false;draw();};
@@ -544,6 +550,8 @@ SCREEN.dispatchdetail=(c)=>{
       load();};
     const capF=()=>{curCq=c.querySelector('#cq').value.trim();curLg=c.querySelector('#lg').value;curSg=c.querySelector('#sg').value;curCt=c.querySelector('#ct').value;curMq=c.querySelector('#mq').value.trim();};
     c.querySelector('#go').onclick=()=>{capF();render();};   // ★검색=필터적용(검색어 유지·버튼=Enter 동일)
+    // ★#nxsrc 배선 누락이었다(버튼은 있는데 핸들러가 없어 눌러도 무반응) — 2026-09-06 보강.
+    {const _nx=c.querySelector('#nxsrc');if(_nx)_nx.onclick=()=>{capF();source='ledger';load();};}
     const _dto=c.querySelector('#dto');if(_dto)_dto.onchange=()=>{capF();go();};   // 날짜 변경(검색어 유지)
     const _dfr=c.querySelector('#dfrom');if(_dfr)_dfr.onchange=()=>{capF();go();};
     ['#lg','#sg','#ct'].forEach(s=>c.querySelector(s).onchange=()=>{capF();render();});
