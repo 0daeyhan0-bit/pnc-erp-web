@@ -446,7 +446,7 @@ SCREEN.prodinout=(c)=>{
   const _reload=()=>{frm=d2ymd(c.querySelector('#frm').value)||frm;to=d2ymd(c.querySelector('#to').value)||to;load();};
   c.querySelector('#go').onclick=_reload;
   c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')renderLeft();};
-  c.querySelector('#nxsrc').onclick=()=>{source='nx';load();};   // ★Phase5 nx 파생 보기
+  c.querySelector('#nxsrc').onclick=()=>{source='ledger';load();};   // ★웹원장 파생 보기(기본 nx 는 일반 그리드)
   // ★0재고 표시 토글 — 서버 필터라 재조회한다(2026-08-28)
   {const z=c.querySelector('#zero');if(z)z.onchange=e=>{incZero=e.target.checked;load();};}
   c.querySelector('#gubun').onchange=renderLeft;c.querySelector('#part').onchange=renderLeft;
@@ -461,7 +461,9 @@ SCREEN.prodstock=(c)=>{
   const API=API_BASE;
   const _pad=n=>(''+n).padStart(2,'0');
   const _tod=(()=>{const d=new Date();return `${(''+d.getFullYear()).slice(2)}${_pad(d.getMonth()+1)}${_pad(d.getDate())}`;})();
-  let stage='GAGONG', wmode='agg', livePS=[], curYm='', loading=false, source='live';   // livePS=가공/용접 라이브 · ★Phase5 데이터원(기본 라이브)
+  // ★2026-09-06 기본 소스 nx(=라이브 미러 + 웹실적). 자재·생산·제품 입출고와 통일(대표 지시).
+  //   nx=일반 그리드(미러 기반) / live=라이브 직독 / ledger=웹 자체원장 파생(진단용)
+  let stage='GAGONG', wmode='agg', livePS=[], curYm='', loading=false, source='nx';   // livePS=가공/용접 라이브
   let frm=_tod.slice(0,4)+'01', to=_tod;   // YYMMDD 수불기간
   const ymToInput=y=>{y=(''+(y||'')).trim();return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'';};
   const inYm=v=>(''+(v||'')).slice(2).replace('-','');
@@ -471,8 +473,9 @@ SCREEN.prodstock=(c)=>{
   const load=async()=>{loading=true;
     const bd=c.querySelector('#body');if(bd)bd.innerHTML=spinRow(11);
     const qs=`frm=${encodeURIComponent(frm)}&to=${encodeURIComponent(to)}`;
-    if(source==='nx'){loading=false;return nxDerivedView(c,`${API}/api/live/prodstock?${qs}&source=nx`,{title:'생산재고조회',onBack:()=>{source='live';load();}});}
-    try{const r=await fetch(`${API}/api/live/prodstock?${qs}`);if(!r.ok)throw new Error('HTTP '+r.status);
+    // ★원장 파생뷰는 ledger 일 때만 — nx 는 일반 그리드로 본다(자재입출고 pur.js:28 과 같은 규약).
+    if(source==='ledger'){loading=false;return nxDerivedView(c,`${API}/api/live/prodstock?${qs}&source=nx`,{title:'생산재고조회(웹원장)',onBack:()=>{source='nx';load();}});}
+    try{const r=await fetch(`${API}/api/live/prodstock?${qs}&source=${encodeURIComponent(source)}`);if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();livePS=j.rows||[];curYm=j.ym||to.slice(0,4)||'';}
     catch(e){livePS=[];}
     loading=false;draw();};
@@ -509,7 +512,7 @@ SCREEN.prodstock=(c)=>{
      <div class="rowcount" id="cnt"></div>
      <div class="summary-bar botsum" id="botsum" style="margin-top:6px;position:sticky;bottom:0"></div>`;
     c.querySelectorAll('[data-stage]').forEach(b=>b.onclick=()=>{stage=b.dataset.stage;wmode='agg';draw();});
-    {const _nx=c.querySelector('#nxsrc');if(_nx)_nx.onclick=()=>{source='nx';load();};}   // ★Phase5 nx 파생 보기
+    {const _nx=c.querySelector('#nxsrc');if(_nx)_nx.onclick=()=>{source='ledger';load();};}   // ★웹원장 파생 보기(기본 nx 는 일반 그리드)
     c.querySelectorAll('[data-w]').forEach(b=>b.onclick=()=>{wmode=b.dataset.w;draw();});
     let cur=[];
     const sumbar=rows=>{const qty=rows.reduce((a,b)=>a+(+b.qty||0),0),amt=rows.reduce((a,b)=>a+(+b.amt||0),0);

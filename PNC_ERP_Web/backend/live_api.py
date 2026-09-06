@@ -155,7 +155,7 @@ def matledger(period: str = Query("day"), ymd: str = Query(""), source: str = Qu
             key = key[2:6]
         if not key:
             key = _scalar("SELECT MAX(STOCK_YYMM) FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH WHERE cust_code='Z99990'")
-        if source == "nx":
+        if source == "ledger":
             r = _nx_screen("MAT", str(key) + "01", str(key) + "31"); r["period"] = "month"; r["key"] = key; return r
         sql = _LEDGER_SELECT.format(tbl="PU_T_MONTH_STOCK_WH", col="STOCK_YYMM", lastin="''")
         _cols, rows = _rows(sql, key)
@@ -166,7 +166,7 @@ def matledger(period: str = Query("day"), ymd: str = Query(""), source: str = Qu
             key = key[2:]
         if not key:
             key = _scalar("SELECT MAX(STOCK_YMD) FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH_DAILY WHERE cust_code='Z99990'")
-        if source == "nx":
+        if source == "ledger":
             r = _nx_screen("MAT", str(key), str(key)); r["period"] = "day"; r["key"] = key; return r
         sql = _LEDGER_SELECT.format(tbl="PU_T_MONTH_STOCK_WH_DAILY", col="STOCK_YMD", lastin="max(t.last_in_ymd)")
         _cols, rows = _rows(sql, key)
@@ -680,7 +680,7 @@ def receiptdetail(gijun: str = Query("close"), ym: str = Query(""), dfrom: str =
     q(자도번/품명) 입력 시 서버 WHERE로 스코프 → 해당 품목만 조회(기간 넓어도 빠름). 미입력=전체(무변경)."""
     if gijun == "issue":
         f, t = _def_range(dfrom, dto)
-        if source == "nx":
+        if source == "ledger":
             r = _nx_screen("MAT", f, t); r["gijun"] = "issue"; return r
         ref = t[:4]
         dc = f"A.MAINT_YMD between '{f}' and '{t}'"
@@ -688,7 +688,7 @@ def receiptdetail(gijun: str = Query("close"), ym: str = Query(""), dfrom: str =
         return {"gijun": "issue", "dfrom": f, "dto": t, "count": len(rows), "rows": rows, "q": q}
     else:
         y = _ym4(ym) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
-        if source == "nx":
+        if source == "ledger":
             r = _nx_screen("MAT", y + "01", y + "31"); r["gijun"] = "close"; r["ym"] = y; return r
         dc = _win_ovr('PUR', y)   # ★마감창 + 매입마감 수동이월(PUR) 반영
         rows = _receiptdetail(dc, y, q)
@@ -726,7 +726,7 @@ def dispatchdetail(gijun: str = Query("close"), ym: str = Query(""), dfrom: str 
     """자재불출명세서. 기본 source=live(현행 무변경). source=nx면 stock_ledger(MAT) 파생(원장 재고, 명세shape 아님). gijun=close/issue."""
     if gijun == "issue":
         f, t = _def_range(dfrom, dto)
-        if source == "nx":
+        if source == "ledger":
             r = _nx_screen("MAT", f, t); r["gijun"] = "issue"; return r
         ref = t[:4]
         dc = f"A.MAINT_YMD between '{f}' and '{t}'"
@@ -734,7 +734,7 @@ def dispatchdetail(gijun: str = Query("close"), ym: str = Query(""), dfrom: str 
         return {"gijun": "issue", "dfrom": f, "dto": t, "count": len(rows), "rows": rows}
     else:
         y = _ym4(ym) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
-        if source == "nx":
+        if source == "ledger":
             r = _nx_screen("MAT", y + "01", y + "31"); r["gijun"] = "close"; r["ym"] = y; return r
         dc = f"A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{y}'+mg.magam_day"
         rows = _dispatchdetail(dc, y, _win_ovr('SALE', y))   # ★tag5(판매) 매출마감 이월 반영
@@ -1135,7 +1135,9 @@ def salesstock(dfrom: str = Query(""), dto: str = Query(""), source: str = Query
     """제품재고조회. 기본 source=live(현행 무변경). source=nx면 stock_ledger(ASY) 파생(컷오버 전 빈데이터 사유표시). dfrom~dto=YYMMDD.
     zero=1이면 최종재고 0인 품목도 포함(레거시 w_pr_stock_040 2,172건과 동일 gross 대조용). 기본=0재고 숨김."""
     f, t = _def_range(dfrom, dto)
-    if source == "nx":
+    # ★source 의미 통일(2026-09-06) — nx=미러 기반 일반조회(기본) / ledger=웹 자체원장 파생(진단용).
+    #   종전엔 nx 가 원장으로 가버려 기본을 nx 로 바꾸면 화면이 간이뷰로 바뀜다.
+    if source == "ledger":
         return _nx_screen("ASY", f, t)
     S040 = f"""
 select /*생산입고*/ UPPER(a.item_code) mat,0 basic,a.maint_qty inq,0 outq,0 etc
@@ -1364,7 +1366,8 @@ def prodstock(ym: str = Query(""), frm: str = Query(""), to: str = Query(""), so
     frm/to 없으면 ym(YYMM) 월전체(하위호환). source=nx면 stock_ledger(PRD) 파생."""
     f6, t6 = _digits(frm, 6), _digits(to, 6)
     y = _ym4(ym) or (f6[:4] if f6 else None) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
-    if source == "nx":
+    # ★source 의미 통일(2026-09-06) — nx=미러 기반 일반조회(기본) / ledger=웹 자체원장 파생.
+    if source == "ledger":
         r = _nx_screen("PRD", (f6 or y + "01"), (t6 or y + "31")); r["ym"] = y; return r
     rows = _prodstock(y, f6 or None, t6 or None)
     return {"ym": y, "frm": f6 or (y + "01"), "to": t6 or (y + "99"), "rows": rows}
