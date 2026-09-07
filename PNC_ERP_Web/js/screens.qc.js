@@ -450,6 +450,23 @@ SCREEN.qcspec=(c)=>{
             form.id=j.id;
             form._ry=String(form.rev_ymd||'').replace(/\D/g,'');   // 화면 입력값 → 업로드 키
             form._rn=String(form.rev_no||'').trim();
+            /* ★신규 화면에서 고른 파일을 **저장 직후 자동 업로드**한다.
+                 저장 전에는 업로드 키(rev_ymd/rev_no)가 없어 보낼 수 없기 때문이다.
+                 draw() 가 input 을 새로 그리므로 **그 전에** File 객체를 붙잡아 둔다. */
+            const _pend=[];
+            {const d=body.querySelector('#hf-dwg'), s=body.querySelector('#hf-spec');
+             if(d&&d.files[0])_pend.push(['SPEC_DWG',d.files[0]]);
+             if(s&&s.files[0])_pend.push(['SPEC_SHEET',s.files[0]]);}
+            for(const [kind,f] of _pend){
+              const fd=new FormData();
+              fd.append('file',f); fd.append('doc_kind',kind);
+              fd.append('item_code',form.item_code||'');
+              fd.append('rev_ymd',form._ry||''); fd.append('rev_no',form._rn||'');
+              fd.append('user',(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹사용자'));
+              try{const u=await(await fetch(`${API}/api/doc/upload`,{method:'POST',body:fd})).json();
+                if(!u.ok)alert('첨부 업로드 실패('+kind+'): '+(u.detail||''));}
+              catch(e){alert('첨부 업로드 오류('+kind+'): '+e);}
+            }
             await load(); draw();                                   // 목록 갱신 + 첨부 영역 표시
             const _fb=body.querySelector('#hf-files');
             if(_fb)_fb.scrollIntoView({block:'center',behavior:'smooth'});
@@ -498,13 +515,20 @@ SCREEN.qcspec=(c)=>{
           <div style="background:#fff;border-radius:10px;box-shadow:0 22px 64px rgba(0,0,0,.32);width:560px;max-width:96vw">
            <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 16px;background:#1c47a0;color:#fff;border-radius:10px 10px 0 0"><b>시방변경 ${form.id?'수정':'신규'}</b><span id="hf-x" style="cursor:pointer;font-size:17px">✕</span></div>
            <div style="padding:12px 16px;max-height:calc(100vh - 170px);overflow:auto"><table style="border-collapse:collapse;width:100%">${HFORM.map(f=>`<tr><td style="padding:5px 10px 5px 0;white-space:nowrap;color:#33507d;font-weight:600;font-size:12px;text-align:right;width:96px">${f.label}${f.optional?'':'<span style="color:#c0392b">*</span>'}</td><td style="padding:4px 0">${mfld(f)}</td></tr>`).join('')}</table>
-             ${form.id?`<div style="margin-top:10px;border-top:1px solid #eef;padding-top:8px">
-               <div style="font-weight:600;color:#33507d;font-size:12px;margin-bottom:6px">📎 첨부파일 <span style="color:#8aa0bd;font-weight:400">(도면/시방서 · nx 등록건)</span></div>
-               <div id="hf-files" style="font-size:12px">불러오는 중...</div>
+             <!-- ★신규 등록에서도 첨부를 고를 수 있다(2026-09-07).
+                    종전엔 form.id 가 있어야만(=저장된 건만) 이 영역이 나와서,
+                    신규는 "저장 → 목록에서 다시 찾아 수정으로 열기 → 첨부" 3단계였다.
+                  ★업로드 키가 (rev_ymd, rev_no) 라 **저장 전에는 서버로 보낼 수 없다**.
+                    그래서 신규에서는 파일만 고르게 두고, [저장] 이 끝나면 그 파일을
+                    자동으로 올린다(saveHdr → _pendingUp). 사용자는 한 번만 누르면 된다. -->
+             <div style="margin-top:10px;border-top:1px solid #eef;padding-top:8px">
+               <div style="font-weight:600;color:#33507d;font-size:12px;margin-bottom:6px">📎 첨부파일
+                 <span style="color:#8aa0bd;font-weight:400">${form.id?'(도면/시방서 · nx 등록건)':'(저장하면 함께 업로드됩니다)'}</span></div>
+               ${form.id?`<div id="hf-files" style="font-size:12px">불러오는 중...</div>`:''}
                <div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap;font-size:12px">
-                 <span style="color:#33507d;font-weight:600">도면</span><input type="file" id="hf-dwg" style="width:150px"><button class="btn" id="hf-dwg-up" style="padding:2px 8px">⬆</button>
-                 <span style="color:#33507d;font-weight:600;margin-left:6px">시방서</span><input type="file" id="hf-spec" style="width:150px"><button class="btn" id="hf-spec-up" style="padding:2px 8px">⬆</button>
-               </div></div>`:''}
+                 <span style="color:#33507d;font-weight:600">도면</span><input type="file" id="hf-dwg" style="width:150px">${form.id?`<button class="btn" id="hf-dwg-up" style="padding:2px 8px">⬆</button>`:''}
+                 <span style="color:#33507d;font-weight:600;margin-left:6px">시방서</span><input type="file" id="hf-spec" style="width:150px">${form.id?`<button class="btn" id="hf-spec-up" style="padding:2px 8px">⬆</button>`:''}
+               </div></div>
            </div>
            <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center"><span style="color:#c0392b;font-size:11px">* 필수항목 제외품목들을 사용해보고 전산담당에게 알려주세요.</span><span><button class="btn" id="hf-save" style="background:#1b6ec2;color:#fff">💾 저장</button> <button class="btn" id="hf-cancel">닫기</button></span></div>
           </div></div>`:''}
