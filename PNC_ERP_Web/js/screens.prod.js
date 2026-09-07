@@ -4166,6 +4166,24 @@ SCREEN.kitting=(host)=>{
      우상단  : 공정상세 — 전표처리방법 J:전표 / G:가간판 (그 공정 실적을 뭘로 잡는지)
      우하단좌: 간판(PR_T_INDI_SHEET2)   우하단우: 라벨(PR_T_PRINT_STICKER)
    ※행 클릭 시 우측만 부분갱신(CLAUDE.md §3 마스터-디테일 스크롤 리셋 방지). */
+/* ★라벨 출력 보정값 — 이 PC 에 저장한다(2026-09-07).
+     갭(mm)·세로(dot)를 매번 다시 입력하지 않게 localStorage 에 남긴다.
+   ★왜 서버가 아니라 localStorage 인가 —
+     프린터는 **PC 마다 USB 로 물려 있고 개체차가 있다**. 한 PC 에서 맞춘 값이
+     다른 PC 에서 맞다는 보장이 없으므로, 서버에 공유하면 오히려 틀어진다.
+     (계정별 화면설정과는 성격이 다르다 — 이건 그 PC 의 장비 특성이다) */
+const _LBL_KEY='prodsheet_label_cal';
+function _lblCfg(){
+  const d={gap:3,shift:0};
+  try{const s=localStorage.getItem(_LBL_KEY); if(!s)return d;
+      const o=JSON.parse(s)||{};
+      const g=parseFloat(o.gap), h=parseInt(o.shift,10);
+      return {gap:(g>=0.5&&g<=20)?g:d.gap, shift:(h>=-200&&h<=200)?h:d.shift};}
+  catch(e){return d;}
+}
+function _lblCfgSave(gap,shift){
+  try{localStorage.setItem(_LBL_KEY,JSON.stringify({gap:gap,shift:shift}));}catch(e){}
+}
 SCREEN.prodsheet=(host)=>{
   const API=API_BASE;
   const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -4969,16 +4987,16 @@ SCREEN.prodsheet=(host)=>{
               2·3·4mm 를 넣어보며 맞추는 편이 빠르다. 값이 실제와 다르면 프린터가
               라벨 시작점을 계속 잘못 잡는다. 여기서 정한 값은 실제 출력에도 함께 쓰인다. -->
        <label class="tl" style="font-size:11px;color:#41546b">갭</label>
-       <input class="inp" id="ps-gap" type="number" step="0.5" min="1" max="10" value="3"
-              style="width:52px;height:24px;font-size:11px;min-width:52px" title="라벨과 라벨 사이 간격(mm)">
+       <input class="inp" id="ps-gap" type="number" step="0.5" min="1" max="10" value="${esc(_lblCfg().gap)}"
+              style="width:52px;height:24px;font-size:11px;min-width:52px" title="라벨과 라벨 사이 간격(mm) — 이 PC 에 저장됩니다">
        <span style="font-size:11px;color:#8a94a6">mm</span>
        <!-- ★세로 보정(2026-09-07) — 갭을 2·3·4 로 바꿔 보정해도 위치가 그대로일 때 쓴다.
               인쇄 시작점을 직접 위(−)/아래(+)로 민다. 1mm = 8dot.
               예: 한 칸의 60% 정도 아래로 밀렸으면 -96 부터 시험한다. -->
        <label class="tl" style="font-size:11px;color:#41546b;margin-left:4px">세로</label>
-       <input class="inp" id="ps-shift" type="number" step="8" min="-200" max="200" value="0"
+       <input class="inp" id="ps-shift" type="number" step="8" min="-200" max="200" value="${esc(_lblCfg().shift)}"
               style="width:56px;height:24px;font-size:11px;min-width:56px"
-              title="인쇄 시작점 보정 — 음수=위로, 양수=아래로 (8dot=1mm)">
+              title="인쇄 시작점 보정 — 음수=위로, 양수=아래로 (8dot=1mm) — 이 PC 에 저장됩니다">
        <span style="font-size:11px;color:#8a94a6">dot</span>
        <button class="btn" id="ps-calib" style="height:24px;padding:0 8px;font-size:11px"
                title="라벨이 밀려 찍힐 때 누르세요 — 프린터가 라벨 간격을 다시 측정합니다(라벨 1~2장 사용)">갭 보정</button>
@@ -5041,6 +5059,15 @@ SCREEN.prodsheet=(host)=>{
     g('#ps-all').onclick=e=>{st.sel.clear();if(e.target.checked)st.rows.forEach((r,i)=>st.sel.add(i));
       host.querySelectorAll('.ps-chk').forEach(ch=>ch.checked=e.target.checked);
       const c=g('#ps-selcnt');if(c)c.textContent=st.sel.size;};
+    /* ★갭·세로 보정값은 바꾸는 즉시 이 PC 에 저장한다 —
+         맞는 값을 찾은 뒤 매번 다시 입력하지 않게. */
+    {const _sv=()=>{
+       const gp=parseFloat((g('#ps-gap')||{}).value||'')||3;
+       const sh=parseInt((g('#ps-shift')||{}).value||'',10)||0;
+       _lblCfgSave(gp,sh);};
+     const ge=g('#ps-gap'), se=g('#ps-shift');
+     if(ge)ge.onchange=_sv;
+     if(se)se.onchange=_sv;}
     // 프린터 에이전트 상태 새로고침 — 에이전트를 켜거나 프린터를 바꾼 뒤 누른다.
     {const pr=g('#ps-prn-r');
      if(pr)pr.onclick=async()=>{pr.disabled=true;pr.textContent='확인 중…';
