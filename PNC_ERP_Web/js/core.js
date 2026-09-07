@@ -694,6 +694,15 @@ const PERM={
     if(a&&a.id===this.userId)return a;
     return getUsers().find(u=>u.id===this.userId)||{id:'-',nm:'미지정',roles:['시스템관리자']};},
   isAdmin(){return (this.currentUser().roles||[]).includes('시스템관리자');},
+  /* ★협력사 소속 거래처 — 협력사 계정이면 코드, 내부 직원이면 ''.
+       화면이 조회조건(거래처·자도번작업처)을 **자기 것으로 고정**할 때 쓴다.
+       ※보안 경계가 아니다 — 실제 차단은 서버 auth.scope_cust() 가 한다.
+         이건 "내가 누구로 보고 있는지"를 보여주고, 딴 코드를 쳐서 빈 화면을 보는
+         혼란을 없애기 위한 UI 고정이다(대표 지시 2026-09-07
+         "협력사는 자기꺼만 볼수 있어야 하는데 입력칸도 수정안되고 강제 되어야 해"). */
+  coopCust(){const u=this.currentUser()||{};
+    return (u.utype==='협력사'||u.partner_code)?String(u.partner_code||'').trim():'';},
+  isCoop(){return !!this.coopCust();},
   can(sid,act){ if(this.isAdmin())return true;   // TEST1(시스템관리자)=전권
     const pm=(this.perms[this.userId]||{})[sid];
     if(pm){ if(act==='view')return pm.view!==false; return !!pm.edit; }   // ★TEST1이 개별 부여한 권한 우선(override)
@@ -2362,7 +2371,35 @@ const _mkMagam=(CFG)=>(c)=>{
   const ymValid=raw=>{const m=/^(\d{4})-(\d{2})$/.exec((''+(raw||'')).trim());return m&&+m[1]>=2015&&+m[1]<=2099&&+m[2]>=1&&+m[2]<=12;};
   const shiftYm=(y,delta)=>{y=(''+(y||'')).trim();if(y.length<4)return y;const tot=(+y.slice(0,2))*12+(+y.slice(2,4)-1)+delta;const ny=Math.floor(tot/12),nm=(tot%12)+1;return String(ny).padStart(2,'0')+String(nm).padStart(2,'0');};
   const canW=(typeof PERM!=='undefined')?PERM.canEdit(CFG.base):true;   // 수정권한 게이트(규칙#16)
-  let ym='', rows=[], loading=false, msg='', reasons=[], q='', wmap={}, realRaw=25000, sagubRaw=20000;
+  /* ★협력사 소속 거래처 — 있으면 조회조건을 이 코드로 고정한다(입력칸 readonly).
+       실제 차단은 서버(auth.scope_cust)가 하므로 이건 UI 고정이다. */
+  const _coopCC=(typeof PERM!=='undefined'&&PERM.coopCust)?PERM.coopCust():'';
+  /* 거래처명 — **조회 결과에서 뽑는다**(별도 API 호출 없음).
+       purmagam/salemagam 의 list·lines 응답이 거래처명을 `nm` 으로 함께 준다.
+       ★/api/cust/list 를 쓰면 안 된다 — COOP_ALLOW 화이트리스트에 없어
+         협력사가 부르면 403 이라 이름이 영영 안 채워진다(2026-09-07 실측).
+       조회 전에는 코드만 보이고, 조회하면 이름이 채워진다. */
+  /* ★필드명이 응답마다 다르다(2026-09-07 실측) — 잘못 고르면 품명이 거래처명 자리에 들어간다.
+       list (거래처집계) : nm  = 거래처명
+       lines(P/No 상세)  : cnm = 거래처명 · nm = **품명**
+     ⟹ lines 는 cnm 을, list 는 nm 을 본다. 순서를 섞지 말 것. */
+  let _coopNm='';
+  const _coopName=()=>{
+    if(_coopNm) return _coopNm;
+    const _L=(typeof lrows!=='undefined')?lrows:null;
+    const hL=(_L||[]).find(r=>String(r.cc||'').trim()===_coopCC);
+    if(hL){ _coopNm=String(hL.cnm||'').trim(); if(_coopNm) return _coopNm; }
+    const hS=(rows||[]).find(r=>String(r.cc||'').trim()===_coopCC);
+    if(hS){ _coopNm=String(hS.nm||'').trim(); }
+    return _coopNm;
+  };
+  // 조회 후 이름 칸만 채운다(전체 재렌더 없이 — 스크롤·입력상태 보존)
+  const _paintCoopNm=()=>{
+    if(!_coopCC) return;
+    const v=_coopName(); if(!v) return;
+    const el=c.querySelector('#sm-qnm'); if(el&&el.value!==v) el.value=v;
+  };
+  let ym='', rows=[], loading=false, msg='', reasons=[], q=_coopCC||'', wmap={}, realRaw=25000, sagubRaw=20000;
   let listSel=new Set();   // 거래처 다중선택(체크박스) — 툴바 처리버튼(마감확정)이 대상
   let sortKey='', sortDir=1, ctf='';   // 정렬키·방향(1오름/-1내림)·분류필터
   let gsel='', gubunOpts=[];   // 거래구분 필터(전체/판매·반품·수출 / 매입·수입) + 옵션(백엔드 j.gubuns)
@@ -2630,7 +2667,23 @@ const _mkMagam=(CFG)=>(c)=>{
        `:`
          <label class="tl" style="margin-left:8px">마감년월</label><button class="btn" id="sm-ymp" title="이전 월" style="padding:2px 7px">◀</button><input type="month" class="inp" id="sm-ym" value="${esc(ymToInput(ym))}" style="min-width:120px"><button class="btn" id="sm-ymn" title="다음 월" style="padding:2px 7px">▶</button>
        `}
-       <label class="tl">거래처</label><input class="inp" id="sm-q" value="${esc(q)}" placeholder="코드/거래처명${view==='line'?'':'/담당자'}" style="width:180px">
+       <!-- ★협력사 계정은 자기 거래처로 고정(2026-09-07 대표 지시
+              "협력사는 자기꺼만 볼수 있어야 하는데 입력칸도 수정안되고 강제 되어야 해").
+              서버(auth.scope_cust)가 이미 자기 것만 주므로 데이터는 원래 정상이었고,
+              칸이 비어 있어 "내가 누구로 보는지" 알 수 없고 딴 코드를 치면 빈 화면이 됐다.
+              readonly 는 UI 고정일 뿐 보안 경계가 아니다(차단은 서버). -->
+       ${_coopCC?`
+         <!-- 협력사 = 코드/거래처명 두 칸(거래명세서 발행과 같은 모양). 둘 다 읽기전용. -->
+         <label class="tl">거래처</label>
+         <input class="inp" id="sm-q" value="${esc(_coopCC)}" readonly tabindex="-1"
+           title="협력사 계정은 자기 거래처만 조회합니다"
+           style="width:74px;min-width:74px;text-align:center;background:#eef1f5;color:#5a6b80;border:2px solid #cbd3de;font-weight:700;cursor:default">
+         <input class="inp" id="sm-qnm" value="${esc(_coopName())}" readonly tabindex="-1"
+           title="협력사 계정은 자기 거래처만 조회합니다"
+           style="width:150px;min-width:150px;background:#eef1f5;color:#33507d;border:2px solid #cbd3de;font-weight:600;cursor:default">
+       `:`
+         <label class="tl">거래처</label><input class="inp" id="sm-q" value="${esc(q)}" placeholder="코드/거래처명${view==='line'?'':'/담당자'}" style="width:180px">
+       `}
        ${view==='sum'?`<label class="tl">분류</label><select class="inp" id="sm-ct" style="width:auto"><option value="">전체</option>${cts.map(t=>`<option value="${esc(t)}" ${ctf===t?'selected':''}>${esc(t)}</option>`).join('')}</select>`:''}
        ${view==='sum'&&gubunOpts.length?`<label class="tl">거래구분</label><select class="inp" id="sm-gb" style="width:auto"><option value="">전체</option>${gubunOpts.map(g=>`<option value="${esc(g)}" ${gsel===g?'selected':''}>${esc(g)}</option>`).join('')}</select>`:''}
        <button class="btn" id="sm-go">조회</button>
@@ -2721,7 +2774,11 @@ const _mkMagam=(CFG)=>(c)=>{
     const goYm=v=>{if(view==='line'){ym=v;loadLines();}else load(v);};   // ◀▶ 월 이동
     const ymp=c.querySelector('#sm-ymp');if(ymp)ymp.onclick=()=>goYm(shiftYm(ym,-1));
     const ymn=c.querySelector('#sm-ymn');if(ymn)ymn.onclick=()=>goYm(shiftYm(ym,+1));
-    const qi=c.querySelector('#sm-q');qi.oninput=e=>{q=e.target.value;};qi.onkeyup=e=>{if(e.key==='Enter'){view==='line'?loadLines():draw();}};
+    /* ★협력사면 입력을 받지 않는다 — readonly 로 이미 막히지만, 개발자도구 등으로
+         풀어도 q 가 자기 코드에서 안 벗어나게 여기서도 고정한다(서버가 최종 차단). */
+    const qi=c.querySelector('#sm-q');
+    qi.oninput=e=>{ if(_coopCC){e.target.value=_coopCC;q=_coopCC;return;} q=e.target.value; };
+    qi.onkeyup=e=>{if(e.key==='Enter'){view==='line'?loadLines():draw();}};
     c.querySelector('#sm-go').onclick=()=>{view==='line'?loadLines():draw();};
     const xb=c.querySelector('#sm-xls');if(xb)xb.onclick=()=>exportXls();
     const rb=c.querySelector('#sm-recalc');if(rb)rb.onclick=()=>recalcCost();
@@ -2751,6 +2808,7 @@ const _mkMagam=(CFG)=>(c)=>{
     // 툴바 처리버튼: 마감/해제(선택 거래처 토글) · 계산서(추후)
     const bc=c.querySelector('#sm-bulk-close');if(bc)bc.onclick=bulkClose;
     const bb=c.querySelector('#sm-bulk-bill');if(bb)bb.onclick=()=>alert('계산서 발행은 추후 구현 예정입니다.');
+    _paintCoopNm();      // 협력사 거래처명 — 조회 결과가 들어오면 그때 채워진다
     if(mc)drawModal();
   };
   // 선택 거래처 일괄 마감/해제(미마감→마감확정, 마감→마감취소). 조정은 행 클릭 모달에서.
@@ -3000,7 +3058,7 @@ const _mkMagam=(CFG)=>(c)=>{
   /* ★부팅 — load() 는 거래처집계(sum)를 채운다. CFG.view='line'(협력사 마감현황)이면
        화면이 P/No 상세로 열리므로 그 데이터도 함께 받아야 빈 표가 안 뜬다.
        load 가 먼저 끝나야 ym·거래처명 맵이 서고, 그 뒤 lines 를 받는다. */
-  Promise.resolve(load('')).then(()=>{ if(view==='line') loadLines(); });
+  Promise.resolve(load('')).then(()=>{ _paintCoopNm(); if(view==='line') loadLines(); });
 };
 /* 공용 필터 렌더/바인딩 — 라벨+필드 나란히(nowrap), select 자동폭, 자동완성(이름표시/코드저장) */
 function qfFields(filters,F,pfx){
@@ -3082,6 +3140,7 @@ function wrCrud(host, cfg){
        <button class="btn" id="wr-search">🔍 조회</button>
        ${ed?`<button class="btn" id="wr-new" style="background:#1c7c3a;color:#fff">➕ 신규</button>
        <button class="btn" id="wr-del">🗑 선택삭제</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
+       <button class="btn" id="wr-xls" style="background:#1c7c3a;color:#fff" title="화면 그대로 엑셀로 저장">엑셀</button>
        <div class="spacer"></div><span class="rowcount">${nf(d.cnt||0)}건${cfg.sum?(' · '+cfg.sum(d)):''}</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${(st.msg.includes('실패')||st.msg.includes('오류'))?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
@@ -3141,6 +3200,56 @@ function wrCrud(host, cfg){
     const g=id=>host.querySelector(id);
     const doSearch=()=>{st.F.from=g('#wr-from').value;st.F.to=g('#wr-to').value;qfRead(host,cfg.filters,st.F,'wr-f-');load();};
     g('#wr-search').onclick=doSearch;
+    /* ★엑셀 — wrCrud 를 쓰는 **모든 화면**에 공통 적용(품질불량관리·시방변경 등).
+         화면 표를 그대로 뽑으므로 화면마다 컬럼을 따로 정의할 필요가 없고,
+         cfg.cols 가 바뀌어도 자동으로 따라간다.
+       ★첫칸(체크박스)·끝칸(작업 버튼)은 데이터가 아니라 뺀다.
+       ★HTML→.xls 가 아니라 downloadXLS(진짜 xlsx) — HTML 방식은 색이 버려진다. */
+    {const xb=g('#wr-xls'); if(xb)xb.onclick=()=>{
+      const tbl=host.querySelector('.grid-wrap table');
+      if(!tbl||!d.rows||!d.rows.length)return alert('내려받을 자료가 없습니다.');
+      // 투명(rgba 0)을 안 거르면 색 없는 셀이 #000000(검정)이 되어 표가 새까맣게 나온다
+      const rgb2hex=s=>{const m=/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?/.exec(s||'');
+        if(!m)return '';
+        if(m[4]!==undefined&&parseFloat(m[4])===0)return '';
+        const h=(+m[1]<<16|+m[2]<<8|+m[3]).toString(16).padStart(6,'0').toUpperCase();
+        return (h==='FFFFFF')?'':'#'+h;};
+      const mid=a=>a.slice(1,a.length-1);          // 체크박스칸·작업칸 제거
+      const cellOf=td=>{const cs=getComputedStyle(td);
+        const t=(td.innerText||'').trim();
+        const bg=rgb2hex(cs.backgroundColor), fg=rgb2hex(cs.color);
+        const num=(t!==''&&/^-?[\d,]+(\.\d+)?$/.test(t))?Number(t.replace(/,/g,'')):null;
+        return {v:(num===null||isNaN(num))?t:num, bg:bg||'',
+                fg:(fg&&fg!=='#000000')?fg:'', b:(+cs.fontWeight>=600)?1:0,
+                al:td.classList.contains('num')?'right':(td.classList.contains('center')?'center':'left')};};
+      const hr=tbl.tHead.rows[0];
+      const xcols=mid([...hr.cells]).map(th=>({h:(th.innerText||'').trim(),
+                     w:Math.max(60,Math.round(th.getBoundingClientRect().width))}));
+      const xrows=[];
+      for(const tr of tbl.tBodies[0].rows){
+        if(tr.querySelector('td.empty'))continue;
+        xrows.push(mid([...tr.cells]).map(cellOf));
+      }
+      const T2=new Date(),p2=n=>String(n).padStart(2,'0');
+      const stamp=`${String(T2.getFullYear()).slice(2)}${p2(T2.getMonth()+1)}${p2(T2.getDate())}`
+                 +`${p2(T2.getHours())}${p2(T2.getMinutes())}`;
+      /* 시트/파일명 = 화면 제목. cfg.xlsName 이 있으면 그걸 우선 쓴다.
+         제목 요소는 wrShell 이 host 바깥(형제)에 그리므로 문서에서 가장 가까운 것을 찾는다.
+         이모지·부제(작은 회색 글씨)는 빼고 앞머리 단어만 쓴다. */
+      let ttl=cfg.xlsName||'';
+      if(!ttl){
+        const pg=host.closest('.content')||document;
+        const te=pg.querySelector('.page-title');
+        // firstChild 텍스트만 = <span> 부제 제외. 이모지·기호 제거.
+        ttl=te?String(te.firstChild&&te.firstChild.nodeValue||te.textContent||'')
+                 .replace(/[^가-힣A-Za-z0-9()\s-]/g,'').trim():'';
+      }
+      const nm=(String(ttl||'조회결과').replace(/[\\/:*?"<>|]/g,'').trim()||'조회결과').slice(0,40);
+      downloadXLS(`${nm}_${stamp}`,xcols,xrows,
+        {sheet:nm.slice(0,28),
+         title:`${nm} — ${cfg.dateLabel||'기간'} ${st.F.from} ~ ${st.F.to}`,
+         sub:`${nf(d.cnt||0)}건${cfg.sum?(' · '+String(cfg.sum(d)).replace(/<[^>]*>/g,'')):''}`});
+    };}
     if(ed){g('#wr-new').onclick=()=>{st.form=cfg.newRow(st.F);render();};
       g('#wr-del').onclick=()=>del([...st.sel]);}
     host.querySelectorAll('.wr-chk').forEach(ch=>ch.onclick=()=>{const id=ch.dataset.id;ch.checked?st.sel.add(id):st.sel.delete(id);});  // ★ID는 문자열 유지(웹행 ID='YMD-SEQ' 복합키, +변환시 NaN)
