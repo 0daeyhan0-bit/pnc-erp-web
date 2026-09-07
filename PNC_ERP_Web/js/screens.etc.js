@@ -385,10 +385,26 @@ SCREEN.perm=(c)=>{
       if(!u){box.innerHTML='<div class="empty" style="padding:60px">오른쪽에서 사용자를 선택하세요.</div>';return;}
       const admin=(u.roles||[]).includes('시스템관리자');
       const pm=PERM.perms[selUid]=PERM.perms[selUid]||{};
-      // ★역할(부서) 기본권한 반영 — 실제 로그인 시 권한과 동일하게 표시(자재는 자재만 체크)
-      const roleHas=(sid)=>(u.roles||[]).some(r=>(ROLE_MOD[r]||[]).includes(_sid2mod(sid)));
-      const effView=(sid)=>admin||(pm[sid]&&pm[sid].view!==undefined?pm[sid].view:roleHas(sid));
-      const effEdit=(sid)=>admin||(pm[sid]&&pm[sid].edit!==undefined?pm[sid].edit:roleHas(sid));
+      /* ★역할 기본권한 반영 (2026-09-07 교정)
+           증상 — [역할별 설정]에서 역할 권한을 저장해도 사용자 화면에 반영되지 않았다.
+                  '조회전용' 역할 사용자는 체크가 **하나도** 안 떴다.
+           원인 두 가지
+             ① 사용자 화면이 ROLE_MOD(코드 상수)만 보고, 화면에서 저장한
+                '@역할명' 권한행(user_perm)을 **아예 읽지 않았다**.
+             ② ROLE_MOD 에는 '조회전용'·'협력사' 키가 없다 → undefined → 항상 false.
+           ⟹ '@역할명' 에 설정이 있으면 그것을 우선하고, 없을 때만 ROLE_MOD 로 넘어간다.
+              (역할별 설정에서 만든 값이 곧 그 역할의 기본권한이 된다) */
+      const roleAt=(sid,act)=>{
+        for(const r of (u.roles||[])){
+          const rp=(PERM.perms[ROLE_KEY(r)]||{})[sid];
+          if(rp && rp[act]!==undefined) return !!rp[act];
+        }
+        return null;      // 역할행에 설정 없음 → ROLE_MOD 폴백
+      };
+      const roleMod=(sid)=>(u.roles||[]).some(r=>(ROLE_MOD[r]||[]).includes(_sid2mod(sid)));
+      const roleHas=(sid,act)=>{const v=roleAt(sid,act); return v===null?roleMod(sid):v;};
+      const effView=(sid)=>admin||(pm[sid]&&pm[sid].view!==undefined?pm[sid].view:roleHas(sid,'view'));
+      const effEdit=(sid)=>admin||(pm[sid]&&pm[sid].edit!==undefined?pm[sid].edit:roleHas(sid,'edit'));
       const nv=progs.filter(p=>effView(p.id)).length;
       const ne=progs.filter(p=>effEdit(p.id)).length;
       box.innerHTML=`
