@@ -293,6 +293,32 @@ python _migration\cutover_rollback.py --diff    :: ★먼저: 되돌리면 몇 �
 
 ---
 
+## 6. 🔴 롤백 실행 (2026-09-07 야간 — 컷오버 연기 결정)
+
+> **결정: 대표 — 컷오버 실패 판단 → 롤백 + 컷오버 2026-09-08로 연기.** 재점검 요구사항 = `CUTOVER_RETRY_REQUIREMENTS_260907.md`(단일 데이터셋 THE원칙·이관선행 마감·음수0·롤포워드·테이블 이관구분표·사전 프로그램 전부수정).
+
+**실패로 본 증상 & 실측 판정**
+- 9월 자재입출고현황 재고 대량 음수(합계 −176,924). **원인 = 데이터 이관 실패 아님** — nx vs ORG 재고·실적 diff0(§4-C)·7월 화면 정상·일마감 260906 최신. 진짜 원인 = **8월 월마감 미수행(pu_t_month_stock_wh 2608 없음, 레거시에도 없음) + 화면의 직전월 스냅샷 의존 로직** → bf=0.
+
+**롤백 조치 로그**
+| 시각 | 조치 | 결과 |
+|---|---|---|
+| ~22:55 | `cutover_rollback.py --diff`(읽기전용) | 유실후보 **3,963행**(스냅샷 19:46→현재). 대부분 delta_sync 유입(레거시 존재)·price sync·웹 테스트입력 → **실데이터 손실 없음**(테스트 트랜잭션 폐기가능) |
+| ~22:5x | DB명 **PARTNER_ERP_ORG → PARTNER_ERP 원복**(대표) | ✅ 레거시 DB 복귀 |
+| ~22:5x | 운영 `deploy_pull.ps1 -Restart` | ⚠ 롤백 아님 — d015d21→**5a9941d Fast-forward**(컷오버 코드가 오히려 운영에 더 적용)·16 files·health 200 |
+| ~22:5x | 운영 `git revert 326ae5e 5a9941d d015d21` | ❌ **fatal: bad revision '326ae5e'** — 운영 히스토리가 5a9941d까지라 #188 없음 → revert 전체 중단(아무것도 안 됨) |
+| ~22:57 | **선택 = option B(sync만 재가동)** | 코드 revert 안 함 |
+| ~22:5x | `cutover_mark.py --clear --commit` | ✅ 마커 해제(20:02 set→해제) → **"컷오버 전 — sync 정상 동작"**. 다음 매일마이그부터 delta_sync가 nx 미러를 레거시와 재정합 |
+
+**현재 상태 / 남은 것**
+- DB=PARTNER_ERP(레거시 복귀) · sync 재가동됨 · 코드는 nx 읽기 유지(option B, sync가 값 맞춤).
+- ☐ ilshin 권한 복구(레거시 직접입력 필요 시·대표/DBA).
+- ☐ **git main 정합** — 운영 origin/main=5a9941d vs 내가 병합한 main=0b8d46b(#189~192). **184/zt 저장소 어긋남 의심** → 내일 정리.
+- ☐ 재컷오버(2026-09-08) = `CUTOVER_RETRY_REQUIREMENTS_260907.md` 순서대로.
+- 참고: revert가 필요해지면 운영이 가진 2개만 = `git revert --no-edit 5a9941d d015d21`(#188은 TestBed·런타임무관).
+
+---
+
 ## 5. 참고 문서 (정본)
 - 절차: `CUTOVER_RUNBOOK.md` · 항목상태: `CUTOVER_CHECKLIST.md`(1194줄)
 - FLIP 대상: `CUTOVER_FLIP_WORKLIST.md` · 매일마이그: `CUTOVER_MUST_AND_DAILY_MIGRATION.md`
