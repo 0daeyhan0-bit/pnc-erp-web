@@ -404,6 +404,31 @@ def qc_spec_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str =
         for r in rows:
             r["cost_f"] = _b(r["cost_f"]); r["bom_f"] = _b(r["bom_f"]); r["lg_cost_f"] = _b(r["lg_cost_f"])
             r["ID"] = int(r["key_id"]) if r["src"] == "nx" and str(r["key_id"]).isdigit() else None
+        # ★목록의 도면파일·시방서파일 칸을 nx.doc 첨부로 채운다(2026-09-07 교정).
+        #   그 두 칸은 qc_spec_rev.drawing_file / specs_file 컬럼을 읽는데,
+        #   **웹 첨부는 nx.doc 에 저장**되므로 신규 등록건은 늘 비어 있었다(사용자 신고).
+        #   레거시는 그 컬럼에 파일명을 직접 넣어 값이 있다 — 그래서 옛 행만 파일명이 보였다.
+        #   ⟹ 컬럼이 비어 있을 때만 nx.doc 에서 채운다(레거시 값은 그대로 존중).
+        try:
+            _nxc = _nx(); _nc = _nxc.cursor()
+            _nc.execute("""SELECT rev_yymd, rev_no, doc_kind, orig_filename FROM nx.doc
+                            WHERE del_flag=0 AND doc_kind IN ('SPEC_DWG','SPEC_SHEET')
+                              AND rev_yymd IS NOT NULL AND rev_no IS NOT NULL""")
+            _att = {}
+            for _ry, _rn, _k, _fn in _nc.fetchall():
+                _att.setdefault((str(_ry).strip(), str(_rn).strip()), {})[
+                    ('drawing' if _k == 'SPEC_DWG' else 'specs')] = _fn
+            _nxc.close()
+            for r in rows:
+                _a = _att.get((str(r.get("rev_ymd") or "").strip(), str(r.get("rev_no") or "").strip()))
+                if not _a:
+                    continue
+                if not str(r.get("drawing") or "").strip() and _a.get("drawing"):
+                    r["drawing"] = _a["drawing"]
+                if not str(r.get("specs") or "").strip() and _a.get("specs"):
+                    r["specs"] = _a["specs"]
+        except Exception:
+            pass      # 첨부 조회 실패해도 목록은 그대로 나간다
         return {"rows": rows, "cnt": len(rows)}
     finally:
         cn.close()
