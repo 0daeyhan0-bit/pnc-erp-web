@@ -421,7 +421,8 @@ LABEL_GAPDETECT = True
 _GAP_DONE = False          # 이번 프로세스에서 이미 측정을 보냈는가
 
 
-def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3, gap: float = 0) -> str:
+def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3, gap: float = 0,
+                     shift: int = 0) -> str:
     """제품스티커 TSPL — TSC/Bixolon 계열 직송용.
 
     ★프린터가 QR·텍스트를 직접 그리므로 래스터(PDF)보다 훨씬 선명하고 빠르다.
@@ -454,6 +455,17 @@ def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3, gap: float = 0)
         "DIRECTION 1",
         "CODEPAGE UTF-8",
     ]
+    # ★세로 위치 보정 — 인쇄 시작점을 위(−)/아래(+)로 민다(2026-09-07).
+    #   현장 실측: 갭을 2·3·4mm 로 바꿔 보정해도 위치가 그대로였다. 좌표는 라벨 안에
+    #   들어가는데(콘텐츠 최하단 142dot < 160dot) 인쇄 자체가 아래로 밀려 찍혔다.
+    #   ⟹ 갭 인식이 아니라 **시작점 오프셋** 문제다. TSPL SHIFT 로 직접 당긴다.
+    #   1mm = 8dot. 예: 라벨 높이의 60% 밀렸으면 SHIFT -96 정도.
+    try:
+        _sh = int(shift or 0)
+    except Exception:
+        _sh = 0
+    if _sh:
+        out.append(f"SHIFT {max(-200, min(_sh, 200))}")   # 상식 밖 값은 잘라 용지 낭비를 막는다
     global _GAP_DONE
     if LABEL_GAPDETECT and not _GAP_DONE:
         out.append("GAPDETECT")      # ★첫 1회만 — 측정값은 프린터에 저장된다
@@ -506,7 +518,8 @@ def print_label(print_seq: str = Query(...), start_no: int = Query(0), end_no: i
                 worker: str = Query(""), inspector: str = Query(""),
                 mode: str = Query("pdf", description="pdf | tspl"),
                 darkness: int = Query(8), speed: int = Query(3),
-                gap: float = Query(0, description="갭 mm — 0이면 기본값(LABEL_GAP_MM)")):
+                gap: float = Query(0, description="갭 mm — 0이면 기본값(LABEL_GAP_MM)"),
+                shift: int = Query(0, description="세로 보정 dot — 음수=위로, 8dot=1mm")):
     """제품스티커 인쇄물. mode=pdf 면 PDF(base64), mode=tspl 이면 TSPL 명령어 문자열."""
     j = prodsheet_label_print(print_seq=print_seq, start_no=start_no, end_no=end_no,
                               worker=worker, inspector=inspector)
@@ -515,7 +528,7 @@ def print_label(print_seq: str = Query(...), start_no: int = Query(0), end_no: i
     doc = f"제품스티커 {j.get('item','')} ({j.get('qty',0)}장)"
     if str(mode).lower() == "tspl":
         return {"ok": True, "kind": "label", "mode": "tspl", "cnt": j.get("qty", 0), "doc": doc,
-                "tspl": build_label_tspl(j, darkness, speed, gap)}
+                "tspl": build_label_tspl(j, darkness, speed, gap, shift)}
     return {"ok": True, "kind": "label", "mode": "pdf", "cnt": j.get("qty", 0), "doc": doc,
             "pdf": base64.b64encode(build_label_pdf(j)).decode("ascii")}
 
