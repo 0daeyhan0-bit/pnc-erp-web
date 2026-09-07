@@ -4191,7 +4191,7 @@ SCREEN.prodsheet=(host)=>{
         </span>
         <button class="btn" id="ps-agent-dl" style="height:24px;padding:0 10px;font-size:11px;
                 background:#1c7c3a;color:#fff;border-color:#1c7c3a"
-                title="설치파일을 받아 더블클릭하면 자동으로 설치됩니다">설치파일 받기</button>
+                title="zip 을 받아 압축을 풀고 더블클릭하면 자동으로 설치됩니다">설치파일 받기</button>
         <span id="ps-agent-dlmsg" style="font-size:11px;color:#8a94a6"></span>`;
     const one=(tit,sz,nm,bg,bd,c1)=>`<span style="display:inline-flex;align-items:center;gap:5px;
           padding:3px 9px;background:${bg};border:1px solid ${bd};border-radius:14px">
@@ -5036,10 +5036,13 @@ SCREEN.prodsheet=(host)=>{
          const blob=await r.blob();
          const u=URL.createObjectURL(blob);
          const a2=document.createElement('a');
-         a2.href=u;a2.download='PNC프린터에이전트.exe';
+         // ★zip 으로 받는다(2026-09-07). 서명 없는 .exe 를 직접 받으면 브라우저가
+         //   "일반적으로 다운로드되지 않습니다" 로 막아 사용자가 경고를 뚫어야 했다.
+         //   zip 은 그 경고가 안 뜬다 — 압축을 풀고 실행할 때 1회만 뜬다.
+         a2.href=u;a2.download='PNC프린터에이전트.zip';
          document.body.appendChild(a2);a2.click();a2.remove();
          setTimeout(()=>URL.revokeObjectURL(u),10000);
-         if(dm)dm.textContent=`받았습니다 (${inf.size_mb}MB) — 더블클릭하면 설치됩니다.`;
+         if(dm)dm.textContent=`받았습니다 (${inf.size_mb}MB) — 압축을 풀고 더블클릭하면 설치됩니다.`;
        }catch(e){
          if(dm)dm.textContent='';
          alert('설치파일 다운로드 실패: '+e.message);}

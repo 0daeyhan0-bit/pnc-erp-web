@@ -516,15 +516,60 @@ def print_agent_info():
             "built": datetime.fromtimestamp(stt.st_mtime).strftime("%Y-%m-%d %H:%M")}
 
 
+AGENT_ZIP_NAME = "PNC프린터에이전트.zip"
+
+
+def _agent_zip_path() -> str | None:
+    """배포용 zip 을 만들어(없거나 낡았으면) 그 경로를 준다. exe 가 없으면 None.
+
+    ★왜 zip 인가 (2026-09-07 현장 오류)
+      서명 없는 .exe 를 브라우저로 직접 받으면 SmartScreen 이
+        "PNC프린터에이전트.exe은(는) 일반적으로 다운로드되지 않습니다"
+      로 막아, 사용자가 [유지]→[자세히]→[무시하고 계속] 을 뚫어야 했다.
+      PC 마다 이 과정을 시키면 반드시 빠지는 사람이 생긴다.
+      zip 으로 감싸면 다운로드 단계 경고가 사라진다(실행 시 1회만 뜬다).
+
+    ★캐시 — exe 가 67MB 라 매 요청 압축하면 느리다.
+      zip 이 exe 보다 새것이면 그대로 재사용하고, 낡았으면 다시 만든다.
+      (에이전트를 새로 빌드해 exe 를 갈아끼우면 자동으로 다시 압축된다)
+    """
+    import zipfile
+    exe = _agent_exe_path()
+    if not exe:
+        return None
+    zp = os.path.join(os.path.dirname(exe), AGENT_ZIP_NAME)
+    try:
+        if os.path.exists(zp) and os.path.getmtime(zp) >= os.path.getmtime(exe):
+            return zp
+        # ZIP_DEFLATED — exe 는 이미 압축돼 있어 크게 줄진 않지만, 전송량이 조금 준다.
+        with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
+            z.write(exe, AGENT_EXE_NAME)
+        return zp
+    except Exception:
+        return None      # 압축 실패(권한·디스크) 시엔 exe 직접 제공으로 폴백
+
+
 @router.get("/api/print/agent-download")
-def print_agent_download():
-    """프린터 에이전트 설치파일 다운로드. 받아서 더블클릭하면 자동 설치된다."""
+def print_agent_download(raw: str = Query("")):
+    """프린터 에이전트 설치파일 다운로드.
+
+    기본 = zip(브라우저 경고 없음). 압축 풀고 더블클릭하면 자동 설치된다.
+    raw=1 이면 종전처럼 exe 를 직접 준다(zip 을 못 만든 경우의 폴백 포함).
+    """
     from fastapi.responses import FileResponse
+    from urllib.parse import quote
+    if not str(raw).strip():
+        zp = _agent_zip_path()
+        if zp:
+            return FileResponse(
+                zp, media_type="application/zip",
+                headers={"Content-Disposition":
+                         "attachment; filename=\"PNC_PrintAgent.zip\"; "
+                         f"filename*=UTF-8''{quote(AGENT_ZIP_NAME)}"})
     p = _agent_exe_path()
     if not p:
         raise HTTPException(404, "설치파일이 서버에 없습니다. 관리자에게 문의하세요.")
     # ★한글 파일명 — RFC5987(filename*) 로 줘야 브라우저가 안 깨뜨린다.
-    from urllib.parse import quote
     fn = quote(AGENT_EXE_NAME)
     return FileResponse(
         p, media_type="application/octet-stream",
