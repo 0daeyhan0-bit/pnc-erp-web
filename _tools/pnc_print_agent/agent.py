@@ -597,8 +597,10 @@ def open_settings() -> None:
 # ───────────────────────────── 테스트 출력물 ─────────────────────────────
 def tspl_test(darkness: int = 8, speed: int = 3) -> bytes:
     """40×20mm 라벨 테스트(TSPL). QR + 텍스트 — 실제 제품스티커와 같은 배치."""
+    # ★GAP 3mm — 현장 실측(2026-09-07). 2mm 로는 프린터가 라벨 시작점을 잘못 잡아
+    #   인쇄가 위쪽 경계를 넘어 잘리고 빈 라벨이 섞여 나왔다(서버 printjob.LABEL_GAP_MM 과 동일 값).
     cmds = [
-        "SIZE 40 mm,20 mm", "GAP 2 mm,0", f"DENSITY {int(darkness)}", f"SPEED {int(speed)}",
+        "SIZE 40 mm,20 mm", "GAP 3 mm,0", f"DENSITY {int(darkness)}", f"SPEED {int(speed)}",
         "DIRECTION 1", "CLS",
         'QRCODE 12,12,L,4,A,0,"PNC-TEST-0001"',
         'TEXT 165,20,"3",0,1,1,"PNC Industry"',
