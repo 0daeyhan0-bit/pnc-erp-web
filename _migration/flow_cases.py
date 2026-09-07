@@ -54,9 +54,22 @@ FIXTURES = [
                 ORDER BY 2 DESC""",
      lambda ctx, r: ctx.update(mat=str(r[0]), avail=float(r[1]))),
 
+    # ★2026-09-08 재설계(CLOSE_REDESIGN §3): 잠그는 것은 **월마감뿐**이다.
+    #   종전 픽스처는 ORDER BY period DESC 라 최신 '일마감'(260904)을 집었는데, 이제 그 날은
+    #   잠기지 않으므로 잠금 케이스가 통째로 헛돈다. ⟹ 확정(월)만 고른다.
     ("closed", """SELECT TOP 1 ptype, period FROM nx.period_close
-                   WHERE domain='MAT' AND close_flag=1 ORDER BY period DESC""",
+                   WHERE domain='MAT' AND close_flag=1 AND ptype='M' ORDER BY period DESC""",
      lambda ctx, r: ctx.update(closed_ptype=str(r[0]), closed_period=str(r[1]))),
+
+    # ★잠정 일마감 일자 = 일마감은 됐으나 그 달이 아직 월마감 안 된 날.
+    #   여기 쓰기가 **통과해야** 정상이다(조정을 넣을 열린 날 — CLOSE_REDESIGN §2·§5).
+    ("provday", """SELECT TOP 1 a.period FROM nx.period_close a
+                    WHERE a.domain='MAT' AND a.ptype='D' AND a.close_flag=1
+                      AND NOT EXISTS (SELECT 1 FROM nx.period_close m
+                                       WHERE m.domain='MAT' AND m.ptype='M' AND m.close_flag=1
+                                         AND m.period = LEFT(a.period,4))
+                    ORDER BY a.period DESC""",
+     lambda ctx, r: ctx.update(provday=str(r[0]))),
 
     ("kit", """SELECT TOP 1 UPPER(LTRIM(RTRIM(ITEM_CODE))), GAGONG_PROC_CODE, WORK_ORDER
                  FROM nx.stock_ledger WHERE STOCK_POINT='RDY' AND GAGONG_PROC_CODE IS NOT NULL
@@ -196,10 +209,20 @@ CASES = [
          keyword="이미 마감", skip_if=lambda ctx: not ctx.get("closed_period"),
          body=lambda ctx: {"domain": "MAT", "ptype": ctx["closed_ptype"],
                            "period": ctx["closed_period"], "user": "admin"}),
-    dict(kind="R", name="마감 해제 권한 게이트 (조회전용 사용자)", method="POST", path="/api/close/cancel",
-         keyword="권한이 없습니다", skip_if=lambda ctx: not ctx.get("closed_period"),
+    # ★월마감 해제 = 수퍼관리자(시스템관리자)만 → 문구가 "권한이 없습니다"가 아니다.
+    #   5c07288(_assert_reopen) 이후 이 케이스가 문구 불일치로 헛통과하고 있었다.
+    dict(kind="R", name="월마감 해제 권한 게이트 (조회전용 사용자)", method="POST", path="/api/close/cancel",
+         keyword="수퍼관리자", skip_if=lambda ctx: not ctx.get("closed_period"),
          body=lambda ctx: {"domain": "MAT", "ptype": ctx["closed_ptype"],
                            "period": ctx["closed_period"], "user": "kdev"}),
+
+    # ★역(逆)케이스 — 잠정 일마감 일자는 **막히면 안 된다**.
+    #   막는 것만 검사하면 "다 막아버리는" 회귀를 못 잡는다. 실제 원장 기록까지 본다.
+    dict(kind="F", name="자재입고 — 잠정 일마감 일자는 열려 있다", method="POST", path="/api/stock/save",
+         probe="원장MAT", delta=+7, mirror=True,
+         skip_if=lambda ctx: not ctx.get("provday"),
+         scope_ymd=lambda ctx: ctx["provday"],   # ★프로브 관측일자를 그 날로(기본=오늘이라 안 보인다)
+         body=lambda ctx: _save("receipt", 7, ymd=ctx["provday"])(ctx)),
 
     # ══ [R] 규칙 : 생산실적 재고 게이트 (예외 없음) ═══════════════════
     dict(kind="R", name="백플러시 — 자재부족 차단", method="POST", path="/api/backflush/post",

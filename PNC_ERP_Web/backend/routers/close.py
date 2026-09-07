@@ -79,7 +79,9 @@ def close_status():
                 cur.execute("""SELECT TOP 1 period, close_user, close_dt FROM nx.period_close
                                WHERE domain=? AND ptype=? AND close_flag=1 ORDER BY period DESC""", d, t)
                 r = cur.fetchone()
+                # ★firm = 확정 여부. 월마감만 확정·잠금이고 일마감은 잠정이다(CLOSE_REDESIGN §5·§7).
                 rows.append({"domain": d, "domain_nm": dnm, "ptype": t, "ptype_nm": tnm,
+                             "firm": 1 if t == "M" else 0,
                              "last": (r[0] if r else None), "user": (r[1] if r else None),
                              "dt": (str(r[2]) if r and r[2] else None),
                              "snap_ready": 1 if d in SNAP_READY else 0})
@@ -1361,8 +1363,11 @@ def close_anomaly(domain: str = Query("MAT"), ptype: str = Query("M"), period: s
 
 @router.post("/api/close/run")
 def close_run(payload: dict = Body(...)):
-    """마감 실행 = ①스냅샷 확정(가능 도메인) + ②잠금.
-       가드: 이미 마감 / 직전 기간 미마감(기초 연쇄의존) / 미래 기간."""
+    """마감 실행. ★2026-09-08 재설계(CLOSE_REDESIGN §3·§5·§8-2)로 일/월의 성격이 갈린다.
+         · 일마감(D) = **잠정 스냅샷**. 잠그지 않고(=_lock_msg 대상 아님) 순서 강제도 없다.
+                       재실행 = 갱신(refresh, 멱등) — 조정이 들어오면 다시 돌린다.
+         · 월마감(M) = **유일한 확정·잠금**. 중복 확정 금지 + 직전 월 연쇄 가드 유지.
+       가드: (월)이미 마감 · (월)직전 기간 미마감 / 미래 기간 / 마감권한."""
     d, t, p = _norm(payload.get("domain"), payload.get("ptype"), payload.get("period"))
     user = str(payload.get("user", "") or "web").strip()
     # ★원자성: 스냅샷 확정과 잠금은 한 트랜잭션(부분실패 시 스냅샷만 남는 사고 방지 — 게이트C에서 실제 발생)
@@ -1370,22 +1375,28 @@ def close_run(payload: dict = Body(...)):
     try:
         _assert_can_close(cur, user, "마감")
         _ledger_cache_clear()      # ★확정값이 바뀌므로 수불장 캐시를 버린다
-        if _is_closed(cur, d, t, p):
+        refresh = _is_closed(cur, d, t, p)
+        if refresh and t == "M":
             raise HTTPException(409, f"{DOMAINS[d]} {p} 는 이미 마감되었습니다.")
+        # ★일마감은 잠정 → 재실행을 막지 않는다(갱신). 확정은 월마감 하나뿐이라 중복확정만 차단.
         cur.execute("SELECT FORMAT(GETDATE(),'yyMMdd'), FORMAT(GETDATE(),'yyMM')")
         today, curym = cur.fetchone()
         if (t == "D" and p > today) or (t == "M" and p > curym):
             raise HTTPException(400, f"미래 기간({p})은 마감할 수 없습니다.")
-        # ★연쇄 가드 — 직전 기간이 마감돼 있어야 한다(기초가 이어짐). 단 첫 마감은 예외.
-        cur.execute("SELECT COUNT(*) FROM nx.period_close WHERE domain=? AND ptype=? AND close_flag=1", d, t)
-        if cur.fetchone()[0]:
-            prev = _prev_period(t, p)
-            if not _is_closed(cur, d, t, prev):
-                cur.execute("""SELECT TOP 1 period FROM nx.period_close
-                               WHERE domain=? AND ptype=? AND close_flag=1 ORDER BY period DESC""", d, t)
-                last = cur.fetchone()[0]
-                if p > last:
-                    raise HTTPException(409, f"직전 기간({prev})이 마감되지 않았습니다 — 마감은 순서대로 해야 합니다(최종 마감 {last}).")
+        # ★연쇄 가드 — **월마감만**. 직전 월이 확정돼 있어야 기초가 이어진다(전월말 전체재생의 전제).
+        #   일마감은 순서 강제를 걷어냈다 — 강제하면 31일까지 전부 마감해야 해서 조정을 넣을
+        #   열린 날이 사라진다(CLOSE_REDESIGN §2·§5). 중간이 비어도 _mv_base 가 "직전 확정
+        #   스냅샷"을 알아서 찾아 그 지점부터 이어 계산하므로 값은 어긋나지 않는다.
+        if t == "M":
+            cur.execute("SELECT COUNT(*) FROM nx.period_close WHERE domain=? AND ptype=? AND close_flag=1", d, t)
+            if cur.fetchone()[0]:
+                prev = _prev_period(t, p)
+                if not _is_closed(cur, d, t, prev):
+                    cur.execute("""SELECT TOP 1 period FROM nx.period_close
+                                   WHERE domain=? AND ptype=? AND close_flag=1 ORDER BY period DESC""", d, t)
+                    last = cur.fetchone()[0]
+                    if p > last:
+                        raise HTTPException(409, f"직전 기간({prev})이 마감되지 않았습니다 — 마감은 순서대로 해야 합니다(최종 마감 {last}).")
         n, asof = (0, None)
         if d in SNAP_READY:
             if d == "MAT":
@@ -1397,6 +1408,8 @@ def close_run(payload: dict = Body(...)):
             n, asof = SNAPPERS[d](cur, t, p)
         note = ((f"스냅샷 {n}품목(기준 {asof})" + ("" if str(asof)==str(p if t=="D" else "") or (t=="D" and str(asof)==str(p)) else " ※이월"))
                 if d in SNAP_READY else "잠금만(스냅샷 2단계)")
+        if t == "D":   # ★잠정임을 기록에 남긴다(감사·화면 표기용 — CLOSE_REDESIGN §7)
+            note = "[잠정] " + note + (" ·갱신" if refresh else "")
         # ★UPSERT — 해제 후 재마감이 가능해야 한다(PK=domain+ptype+period, 기존행은 flag=0으로 남아있음)
         cur.execute("""UPDATE nx.period_close SET close_flag=1, close_user=?, close_dt=GETDATE(),
                               reopen_user=NULL, reopen_dt=NULL, note=?
@@ -1406,28 +1419,36 @@ def close_run(payload: dict = Body(...)):
                            VALUES(?,?,?,1,?,GETDATE(),?)""", d, t, p, user, note)
         cn.commit()
         return {"ok": True, "domain": d, "ptype": t, "period": p, "snapshot_rows": n, "snapshot_asof": asof,
-                "msg": f"{DOMAINS[d]} {'일' if t=='D' else '월'}마감 완료" + (f" · 스냅샷 {n:,}품목 확정" if n else " · 잠금만(스냅샷은 2단계)")}
+                "firm": 1 if t == "M" else 0, "refresh": 1 if refresh else 0,
+                "msg": (f"{DOMAINS[d]} " + ("월마감 확정" if t == "M" else ("일마감(잠정) " + ("갱신" if refresh else "완료")))
+                        + (f" · 스냅샷 {n:,}품목" if n else " · 잠금만(스냅샷은 2단계)"))}
     finally:
         cn.close()
 
 
 @router.post("/api/close/cancel")
 def close_cancel(payload: dict = Body(...)):
-    """마감 해제(reopen) = 잠금 해제 + 확정 스냅샷 제거 + 로그.
-       가드: 미마감 / 후속 기간이 마감돼 있으면 해제 불가(기초 연쇄의존)."""
+    """마감 해제(reopen) = 잠금 해제 + 스냅샷 제거 + 로그.
+       ★월마감(확정) 해제 = 수퍼관리자만 + 후속 월이 마감돼 있으면 불가(기초 연쇄의존).
+       ★일마감(잠정) 해제 = 그냥 잠정 스냅샷 버리기 → 일반 마감권한, 순서 가드 없음.
+         (확정을 되돌리는 게 아니므로 수퍼관리자까지 요구하면 과하다 — CLOSE_REDESIGN §3·#3)"""
     d, t, p = _norm(payload.get("domain"), payload.get("ptype"), payload.get("period"))
     user = str(payload.get("user", "") or "web").strip()
     cn = _nx_tx(); cur = cn.cursor()      # ★원자성: 스냅샷 제거 + 잠금해제 동시
     try:
-        _assert_reopen(cur, user)   # ★재개는 수퍼관리자만(CLOSE_REDESIGN #3)
+        if t == "M":
+            _assert_reopen(cur, user)          # ★확정 되돌리기 = 수퍼관리자만(CLOSE_REDESIGN #3)
+        else:
+            _assert_can_close(cur, user, "일마감 해제")   # 잠정 취소 = 일반 마감권한
         _ledger_cache_clear()      # ★확정값이 바뀌므로 수불장 캐시를 버린다
         if not _is_closed(cur, d, t, p):
             raise HTTPException(409, f"{DOMAINS[d]} {p} 는 마감 상태가 아닙니다.")
-        cur.execute("""SELECT TOP 1 period FROM nx.period_close
-                       WHERE domain=? AND ptype=? AND close_flag=1 AND period>? ORDER BY period""", d, t, p)
-        nxt = cur.fetchone()
-        if nxt:
-            raise HTTPException(409, f"후속 기간({nxt[0]})이 마감되어 있어 해제할 수 없습니다 — 최근 기간부터 순서대로 해제하세요.")
+        if t == "M":   # ★후속 연쇄 가드도 확정(월)에만 — 잠정 일마감은 아무 날이나 버릴 수 있다
+            cur.execute("""SELECT TOP 1 period FROM nx.period_close
+                           WHERE domain=? AND ptype=? AND close_flag=1 AND period>? ORDER BY period""", d, t, p)
+            nxt = cur.fetchone()
+            if nxt:
+                raise HTTPException(409, f"후속 기간({nxt[0]})이 마감되어 있어 해제할 수 없습니다 — 최근 기간부터 순서대로 해제하세요.")
         cur.execute("DELETE FROM nx.stock_snapshot WHERE domain=? AND ptype=? AND period=?", d, t, p)
         removed = cur.rowcount
         cur.execute("""UPDATE nx.period_close SET close_flag=0, reopen_user=?, reopen_dt=GETDATE()
