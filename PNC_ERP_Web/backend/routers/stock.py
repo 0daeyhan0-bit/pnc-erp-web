@@ -429,12 +429,16 @@ def stock_save(payload: dict = Body(...)):
             _mc = str(r.get("MAT_CODE", "")).strip()
             _cc = (str(r.get("CUST_CODE") or "").strip() or "Z99990")
             _gp = (str(r.get("GAGONG_PROC_CODE") or "").strip() or "IS0001")
-            # ★출고(개별일괄출고)의 CUST_CODE 는 **원장 기록용 거래처**(영업창고로 보낼 상대처)이지
-            #   재고 버킷 키가 아니다. 레거시 w_pu_stock_156 도 재고처리엔 'Z99990' 고정을 쓴다:
+            # ★CUST_CODE 는 **원장 기록용 거래처**(입고=매입처 / 출고=상대처)이지 재고 버킷 키가 아니다.
+            #   레거시 w_pu_stock_156·057 모두 재고처리엔 'Z99990' 고정을 쓴다:
             #     f_pu_set_mat_stock_wh(..., ls_mat_code, 'Z99990', ls_gagong_proc_code, ld_qty,'')
-            #   그대로 버킷키에 쓰면 자재창고 재고가 안 줄고 거래처 버킷만 음수가 된다.
-            if screen == "issue":
-                _cc = "Z99990"
+            #   그대로 버킷키에 쓰면 자재창고 재고가 안 움직이고 거래처 버킷만 늘거나 준다.
+            #   ★2026-09-07 — 출고(issue)만 고쳐져 있고 **입고·조정이 빠져** 있었다.
+            #     실사용 오류: 자재입고 100개를 잡았는데 자재입출고현황에 안 보임
+            #     (재고가 CUST_CODE=2023(매입처) 버킷에 쌓여 Z99990 조회에서 빠졌다).
+            #     같은 증상으로 잘못 쌓인 행이 23건 있었다(2111·2320·2062·2319·2023).
+            #   ⟹ 자재창고 버킷은 화면·경로와 무관하게 항상 Z99990 이다.
+            _cc = "Z99990"
             try:
                 cur.execute("""UPDATE nx.PU_T_MAT_STOCK_WH SET STOCK_QTY=ISNULL(STOCK_QTY,0)+?,
                                   UPDATE_USER_ID='web', UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW='stockadjust'
@@ -643,6 +647,37 @@ def matrecv_receive(payload: dict = Body(...)):
                 ymd, seq, (r.get("cust") or None), wh, item, qty, cost, round(qty * cost), vat,
                 py, ps, (int(prw) if prw is not None else None), (r.get("insp") or None),
                 (r.get("remarks") or "발주입고"), "web")
+            # ★★2026-09-07 — 이 경로는 **원장(stock_ledger)에만** 쓰고 있었다.
+            #   실사용 오류: 자재입고 100개를 잡았는데 「자재 입출고현황」에 안 보임.
+            #   원인 = 화면(live_api._matinout)은 nx.PU_T_STOCK_MAINT(미러)를 읽는데
+            #          여기서 그 행을 안 만들었다. 잔액 PU_T_MAT_STOCK_WH 도 안 늘렸다.
+            #   /api/stock/save(위 stock_save) 는 이미 둘 다 쓰고 있었다 — 이 경로만 빠져 있었다.
+            #   ⟹ 같은 세 곳(원장·잔액·미러)에 전부 기록한다. 버킷키는 항상 Z99990(§stock_save).
+            _cc = "Z99990"
+            _gp = (wh or "IS0001")
+            try:
+                cur.execute("""UPDATE nx.PU_T_MAT_STOCK_WH SET STOCK_QTY=ISNULL(STOCK_QTY,0)+?,
+                                  UPDATE_USER_ID='web', UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW='matrecv'
+                                WHERE MAT_CODE=? AND CUST_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')=?""",
+                            qty, item, _cc, _gp)
+                if cur.rowcount == 0:
+                    cur.execute("""INSERT INTO nx.PU_T_MAT_STOCK_WH(MAT_CODE,CUST_CODE,GAGONG_PROC_CODE,STOCK_QTY,
+                                      UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                                    VALUES(?,?,?,?,'web',GETDATE(),'matrecv')""", item, _cc, _gp, qty)
+            except Exception: pass   # 잔액 반영 실패해도 원장 기록은 유지(이력 우선)
+            try:
+                cur.execute("""SELECT ISNULL(MAX(MAINT_SEQ),19999)+1 FROM nx.PU_T_STOCK_MAINT
+                                WHERE MAINT_YMD=? AND MAINT_SEQ>=20000""", ymd)
+                _sq = int(cur.fetchone()[0] or 1)
+                cur.execute("""INSERT INTO nx.PU_T_STOCK_MAINT
+                        (MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,MAT_CODE,MAINT_QTY,REMARKS,
+                         WH_CUST_CODE,GAGONG_PROC_CODE,
+                         INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,
+                         UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                        VALUES(?,?,'9',?,?,?,?,?,?,?,GETDATE(),'matrecv',?,GETDATE(),'matrecv')""",
+                    ymd, _sq, (str(r.get("cust") or "").strip() or None), item, qty,
+                    (r.get("remarks") or "발주입고"), _cc, _gp, "web", "web")
+            except Exception: pass
             saved += 1
         stock_changed("stock_save")           # ★재고 변경 → 수불장 캐시 버림
         return {"ok": True, "count": saved}

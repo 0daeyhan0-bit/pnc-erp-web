@@ -162,22 +162,131 @@ SCREEN.perm=(c)=>{
   const progs=allPrograms();
   const users0=getUsers();
   let selUid=(users0.find(u=>!(u.roles||[]).includes('시스템관리자'))||users0[0]||{}).id;
+  /* ★역할별 권한 편집(2026-09-07 지시 "메뉴별 역할 설정하는걸 추가해야 되지").
+       종전엔 사용자를 골라야만 권한을 만질 수 있어 '품질 역할의 기본권한' 을 정할 자리가 없었다.
+       역할 기본값은 core.js ROLE_MOD 에 **코드로 하드코딩**돼 있어 화면에서 못 고쳤다.
+     ⟹ 역할 권한을 user_perm 에 **특수 user_id(`@역할명`)** 로 저장한다.
+        · 테이블·API 를 새로 만들지 않는다(perm_save 는 전체 스냅샷 교체라 그대로 쓴다)
+        · '@' 로 시작하는 계정은 실재하지 않으므로 사용자 권한과 절대 충돌하지 않는다
+        · 저장 후 [역할 적용]을 누르면 그 역할 사용자 전원에게 복사된다
+          (판정 정본은 여전히 사용자별 user_perm — can() 을 안 고쳐도 된다) */
+  const ROLE_KEY=r=>'@'+r;
+  // 기본 역할(코드) + 사용자가 추가한 역할(@키). 시스템관리자는 전권이라 편집 대상이 아니다.
+  const roleList=()=>(typeof allRoles==='function'?allRoles():(typeof ROLES!=='undefined'?ROLES:[]))
+                     .filter(r=>r!=='시스템관리자');
+  const isBuiltin=r=>(typeof ROLES!=='undefined'?ROLES:[]).indexOf(r)>=0;
+  let tab='user';            // 'user' | 'role'
+  let selRole=roleList()[0]||'';
+  let fType='', fRole='';    // 좌측 목록 필터 — 구분(사내/협력사) · 역할
   const draw=()=>{
     const users=getUsers();
     c.innerHTML=`
       <div class="page-title">🔑 권한관리</div>
-      <div class="page-sub">오른쪽 <b>사용자 클릭</b> → 왼쪽에 그 사용자의 <b>부문별·프로그램별 조회/수정 권한</b> · 시스템관리자=전권(설정불가) · <b>조회 해제 시 그 메뉴는 사이드바에서 숨김</b> · 기본=조회O·수정X · 저장(브라우저 임시)</div>
+      <div class="page-sub">왼쪽 <b>사용자 클릭</b> → 오른쪽에 그 사용자의 <b>부문별·프로그램별 조회/수정 권한</b> ·
+        시스템관리자=전권(설정불가) · <b>조회 해제 시 그 메뉴는 사이드바에서 숨김</b> ·
+        <b style="color:#7a4ec0">역할 일괄적용</b> = 지금 설정을 같은 역할 전원에게 복사(역할=기본권한) →
+        그 뒤 <b>개인별로 더 주거나 빼면 됩니다</b>(개인=추가·예외)</div>
       <div style="display:flex;gap:14px;align-items:flex-start">
         <div style="flex:0 0 340px;width:340px">
-          <div class="sum-box" style="margin-bottom:8px"><span class="k">사용자</span> <b id="ucnt">${users.length}</b> 명 <span style="color:var(--muted);font-size:12px">(클릭하여 선택)</span></div>
-          <div class="toolbar" style="margin-bottom:6px"><input class="inp" id="q" placeholder="이름·ID·부서 검색" style="width:100%"></div>
-          <div class="grid-wrap" style="max-height:560px;overflow:auto"><div id="ulist"></div></div>
+          <!-- ★역할 / 사용자 탭 — 역할을 먼저 정하고(기본권한), 사용자에서 개인 예외를 준다 -->
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <button class="btn ${tab==='role'?'':'ghost'}" id="tabrole"
+              style="flex:1${tab==='role'?';background:#7a4ec0;color:#fff':''}">역할별 설정</button>
+            <button class="btn ${tab==='user'?'':'ghost'}" id="tabuser"
+              style="flex:1${tab==='user'?';background:#1c47a0;color:#fff':''}">사용자별 설정</button>
+          </div>
+          ${tab==='role'?`
+            <div class="sum-box" style="margin-bottom:8px;display:flex;align-items:center;gap:8px">
+              <span class="k">역할</span> <b>${roleList().length}</b> 개
+              <span style="color:var(--muted);font-size:12px">(기본권한을 정합니다)</span>
+              <button class="btn xs" id="raddbtn" style="margin-left:auto;background:#7a4ec0;color:#fff"
+                title="역할을 새로 만듭니다">＋ 역할추가</button>
+            </div>
+            <div class="grid-wrap" style="max-height:520px;overflow:auto"><div id="rlist"></div></div>
+          `:`
+            <div class="sum-box" style="margin-bottom:8px"><span class="k">사용자</span> <b id="ucnt">${users.length}</b> 명 <span style="color:var(--muted);font-size:12px">(클릭하여 선택)</span></div>
+            <!-- ★필터 — 196명이라 검색만으로는 찾기 어렵다(2026-09-07 지시).
+                   구분(사내/협력사) · 역할로 좁히고, 정렬은 이름 기준. -->
+            <div class="toolbar" style="margin-bottom:6px;display:flex;gap:4px;flex-wrap:nowrap">
+              <select class="inp" id="ftype" style="width:74px;min-width:74px" title="사내/협력사">
+                <option value=""${fType===''?' selected':''}>전체</option>
+                <option value="내부"${fType==='내부'?' selected':''}>사내</option>
+                <option value="협력사"${fType==='협력사'?' selected':''}>협력사</option>
+              </select>
+              <select class="inp" id="frole" style="width:96px;min-width:96px" title="역할">
+                <option value=""${fRole===''?' selected':''}>역할 전체</option>
+                ${(typeof allRoles==='function'?allRoles():ROLES).map(r=>`<option value="${esc(r)}"${fRole===r?' selected':''}>${esc(r)}</option>`).join('')}
+                <option value="__none"${fRole==='__none'?' selected':''}>역할 없음</option>
+              </select>
+            </div>
+            <div class="toolbar" style="margin-bottom:6px"><input class="inp" id="q" placeholder="이름·ID·부서 검색" style="width:100%"></div>
+            <div class="grid-wrap" style="max-height:520px;overflow:auto"><div id="ulist"></div></div>
+          `}
         </div>
         <div style="flex:1 1 auto;min-width:0" id="detail"></div>
       </div>`;
+    c.querySelector('#tabrole').onclick=()=>{tab='role';draw();};
+    c.querySelector('#tabuser').onclick=()=>{tab='user';draw();};
+    /* 역할 추가 — 이름만 받고 권한은 빈 상태로 만든다(그 뒤 체크해서 [역할 저장]).
+       ★목록의 실체가 '@역할명' 권한행이라, 저장 전까지는 화면에만 존재한다.
+         그래서 만들자마자 빈 행을 하나 심어 저장까지 해 둔다(새로고침해도 남게). */
+    {const ab=c.querySelector('#raddbtn'); if(ab)ab.onclick=async()=>{
+      const nm=(prompt('새 역할 이름을 입력하세요.\n(예: 설비, 물류, 외주관리)')||'').trim();
+      if(!nm)return;
+      if(nm.indexOf('@')===0){alert("역할 이름은 '@' 로 시작할 수 없습니다.");return;}
+      if(roleList().indexOf(nm)>=0||nm==='시스템관리자'){alert(`'${nm}' 역할은 이미 있습니다.`);return;}
+      PERM.perms[ROLE_KEY(nm)]={};                      // 빈 권한행 = 역할 등록
+      progs.forEach(p=>{PERM.perms[ROLE_KEY(nm)][p.id]={view:false,edit:false};});
+      try{await PERM.savePerms([ROLE_KEY(nm)]);}catch(_){}   // 이 역할 행만 저장
+      selRole=nm; tab='role'; draw();
+      alert(`'${nm}' 역할을 만들었습니다.\n\n메뉴별 조회/수정을 체크한 뒤 [역할 저장] 하세요.\n`
+           +`사용자에게 주려면 사용자관리에서 그 역할을 체크합니다.`);
+    };}
+    // 역할 목록 — 각 역할의 인원수와 설정 여부를 함께 보여준다
+    const renderRoles=()=>{
+      const el=c.querySelector('#rlist'); if(!el)return;
+      el.innerHTML=roleList().map(r=>{
+        const n=users.filter(u=>(u.roles||[]).includes(r)&&!(u.roles||[]).includes('시스템관리자')).length;
+        const setted=Object.keys(PERM.perms[ROLE_KEY(r)]||{}).length;
+        const on=(r===selRole), bi=isBuiltin(r);
+        return `<div class="rrow" data-role="${esc(r)}" style="padding:9px 10px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;align-items:center;gap:6px;${on?'background:#f3eefc;border-left:3px solid #7a4ec0':'border-left:3px solid transparent'}">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600">${esc(r)} <span style="color:#8aa0bd;font-weight:400;font-size:12px">${n}명</span>
+              ${bi?'':'<span class="badge" style="background:#efe7fb;color:#7a4ec0;border:none;font-size:10px">추가</span>'}</div>
+            <div style="font-size:11px;color:var(--muted)">${setted?`설정됨 · 프로그램 ${setted}개`:'<span style="color:#c77700">아직 설정 안 함</span>'}</div>
+          </div>
+          ${bi?'':`<button class="btn xs ghost rdel" data-role="${esc(r)}" style="color:#c0392b;padding:1px 6px"
+                     title="추가한 역할을 삭제합니다(기본 역할은 지울 수 없습니다)">✕</button>`}
+        </div>`;}).join('');
+      el.querySelectorAll('.rrow').forEach(x=>x.onclick=(ev)=>{
+        if(ev.target.closest('.rdel'))return;             // 삭제 버튼 클릭은 선택으로 치지 않는다
+        selRole=x.dataset.role;renderRoles();renderDetail();});
+      el.querySelectorAll('.rdel').forEach(b=>b.onclick=async()=>{
+        const r=b.dataset.role;
+        const used=users.filter(u=>(u.roles||[]).includes(r));
+        if(used.length){alert(`'${r}' 역할을 쓰는 사용자가 ${used.length}명 있습니다.\n\n`
+          +`사용자관리에서 그 역할을 먼저 해제한 뒤 삭제하세요.\n`
+          +`(${used.slice(0,5).map(u=>u.nm).join(', ')}${used.length>5?` 외 ${used.length-5}명`:''})`);return;}
+        if(!confirm(`'${r}' 역할을 삭제할까요?\n\n· 이 역할의 기본권한 설정이 지워집니다\n· 이미 사용자에게 적용된 권한은 그대로 남습니다`))return;
+        delete PERM.perms[ROLE_KEY(r)];
+        // 삭제 = 그 행만 지운다. only 에 넣으면 서버가 DELETE 후 넣을 게 없어 사라진다.
+        try{await PERM.savePerms([ROLE_KEY(r)]);}catch(_){}
+        if(selRole===r)selRole=roleList()[0]||'';
+        draw();
+      });
+    };
     const renderList=()=>{
-      const q=(c.querySelector('#q').value||'').toLowerCase();
-      const vis=users.filter(u=>!q||(''+u.id+u.nm+(u.dept||'')+(u.partner||'')).toLowerCase().includes(q));
+      const _q=c.querySelector('#q'); if(!_q)return;      // 역할 탭에는 검색칸이 없다
+      const q=(_q.value||'').toLowerCase();
+      /* 필터 = 구분(사내/협력사) + 역할 + 검색어. 정렬은 이름 기준(2026-09-07 지시).
+         ★localeCompare('ko') — 한글 가나다순. 기본 정렬은 ID순이라 이름과 어긋났다. */
+      const vis=users.filter(u=>{
+        if(fType && (u.type||'내부')!==fType) return false;
+        const rs=u.roles||[];
+        if(fRole==='__none'){ if(rs.length) return false; }
+        else if(fRole && !rs.includes(fRole)) return false;
+        return !q||(''+u.id+u.nm+(u.dept||'')+(u.partner||'')).toLowerCase().includes(q);
+      }).sort((a,b)=>String(a.nm||a.id).localeCompare(String(b.nm||b.id),'ko'));
       c.querySelector('#ucnt').textContent=vis.length;
       c.querySelector('#ulist').innerHTML=vis.map(u=>{const adm=(u.roles||[]).includes('시스템관리자');const on=u.id===selUid;
         return `<div class="urow" data-uid="${esc(u.id)}" style="padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer;${on?'background:#eef4ff;border-left:3px solid var(--brand,#2a6df4)':'border-left:3px solid transparent'}">
@@ -185,7 +294,92 @@ SCREEN.perm=(c)=>{
           <div style="font-size:11px;color:var(--muted)">${esc(u.type||'')}·${esc(u.dept||u.partner||'-')} · ${esc((u.roles||[]).join('/')||'-')}</div></div>`;}).join('')||`<div class="empty" style="padding:24px">해당 사용자 없음</div>`;
       c.querySelectorAll('.urow').forEach(r=>r.onclick=()=>{selUid=r.dataset.uid;renderList();renderDetail();});
     };
+    /* ── 역할별 설정 화면 ──────────────────────────────────────────
+         역할의 기본권한을 직접 편집한다. 저장 위치 = user_perm 의 '@역할명' 행.
+         [역할 적용]을 누르면 그 역할 사용자 전원에게 복사된다(판정은 사용자별 권한이 정본). */
+    const renderRoleDetail=()=>{
+      const box=c.querySelector('#detail');
+      if(!selRole){box.innerHTML='<div class="empty" style="padding:60px">왼쪽에서 역할을 선택하세요.</div>';return;}
+      const rk=ROLE_KEY(selRole);
+      const pm=PERM.perms[rk]=PERM.perms[rk]||{};
+      // 아직 설정 전이면 코드 기본값(ROLE_MOD)을 초기 표시값으로 쓴다
+      const roleHas=(sid)=>(ROLE_MOD[selRole]||[]).includes(_sid2mod(sid));
+      const eV=(sid)=>(pm[sid]&&pm[sid].view!==undefined)?pm[sid].view:roleHas(sid);
+      const eE=(sid)=>(pm[sid]&&pm[sid].edit!==undefined)?pm[sid].edit:roleHas(sid);
+      const cnt=users.filter(u=>(u.roles||[]).includes(selRole)&&!(u.roles||[]).includes('시스템관리자')).length;
+      box.innerHTML=`
+        <div class="sum-box" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <b style="font-size:15px;color:#7a4ec0">${esc(selRole)}</b>
+          <span style="color:var(--muted);font-size:12px">이 역할을 가진 사용자 <b>${cnt}</b>명 · 여기서 정한 값이 그 역할의 기본권한입니다</span>
+          <span style="margin-left:auto"><span class="k">조회</span> <b id="rnv">${progs.filter(p=>eV(p.id)).length}</b> · <span class="k">수정</span> <b id="rne">${progs.filter(p=>eE(p.id)).length}</b> / 전체 ${progs.length}</span>
+        </div>
+        <div class="toolbar">
+          <button class="btn" id="rsave" style="background:#7a4ec0;color:#fff">역할 저장</button>
+          <button class="btn" id="rapply" title="이 역할을 가진 사용자 전원의 권한을 이 값으로 맞춥니다"
+            style="${cnt?'background:#1c47a0;color:#fff':''}">역할 적용 (${cnt}명)</button>
+          <span style="margin-left:10px;font-size:12px;color:#5a6b82">저장=기준만 보관 ·
+            <b style="color:#1c47a0">적용해야 사용자에게 실제로 반영</b>됩니다</span>
+          <div class="spacer"></div>
+          <button class="btn ghost" id="rreset" title="코드 기본값(ROLE_MOD)으로 되돌립니다">기본값</button>
+        </div>
+        <div class="grid-wrap" style="max-height:500px;overflow:auto"><table class="tbl fit"><thead><tr><th>부문</th><th>프로그램</th><th class="center" style="width:64px">조회</th><th class="center" style="width:64px">수정</th></tr></thead><tbody id="rtb"></tbody></table></div>`;
+      const rend=()=>{
+        let html='';
+        MODULES.forEach(m=>{const subs=m.subs||[];subs.forEach((s,idx)=>{
+          html+=`<tr>${idx===0?`<td rowspan="${subs.length}" style="background:#fafbff;font-weight:600;vertical-align:top;white-space:nowrap">${esc(m.nm)}</td>`:''}
+            <td><b>${esc(s.nm)}</b> <span style="color:#ccc;font-size:11px">${esc(s.id)}</span></td>
+            <td class="center"><input type="checkbox" data-p="${s.id}" data-a="view" ${eV(s.id)?'checked':''}></td>
+            <td class="center"><input type="checkbox" data-p="${s.id}" data-a="edit" ${eE(s.id)?'checked':''}></td></tr>`;});});
+        box.querySelector('#rtb').innerHTML=html;
+        box.querySelectorAll('#rtb input').forEach(cb=>cb.onchange=()=>{
+          const pid=cb.dataset.p,a=cb.dataset.a;
+          pm[pid]=pm[pid]||{}; pm[pid][a]=cb.checked;
+          if(a==='edit'&&cb.checked)pm[pid].view=true;      // 수정 주면 조회는 자동
+          if(a==='view'&&!cb.checked)pm[pid].edit=false;    // 조회 빼면 수정도 뺀다
+          rend();
+          box.querySelector('#rnv').textContent=progs.filter(p=>eV(p.id)).length;
+          box.querySelector('#rne').textContent=progs.filter(p=>eE(p.id)).length;
+        });
+      };
+      rend();
+      // 화면에 보이는 값을 전 프로그램에 대해 확정 기록(사용자 저장과 같은 규칙 — :226 경위)
+      const snapAll=()=>{const s=progs.map(p=>({id:p.id,view:eV(p.id),edit:eE(p.id)}));
+        s.forEach(x=>{pm[x.id]={view:x.view,edit:x.edit};}); return s;};
+      box.querySelector('#rsave').onclick=async(ev)=>{
+        const bt=ev.target,t0=bt.textContent; bt.textContent='저장중…'; bt.disabled=true;
+        snapAll();
+        let ok=false; try{const r=await PERM.savePerms([rk]);ok=!r||r.ok!==false&&(r.status?r.ok:true);}catch(_){ok=false;}
+        bt.textContent=t0; bt.disabled=false; renderRoles();
+        alert(ok?`'${selRole}' 역할 기준을 저장했습니다.\n\n실제 사용자에게 반영하려면 [역할 적용]을 누르세요.`
+                :'저장 실패 — 네트워크를 확인하세요.');
+      };
+      box.querySelector('#rapply').onclick=async(ev)=>{
+        const targets=users.filter(u=>(u.roles||[]).includes(selRole)&&!(u.roles||[]).includes('시스템관리자'));
+        if(!targets.length){alert(`'${selRole}' 역할을 가진 사용자가 없습니다.`);return;}
+        const snap=snapAll();
+        const nv2=snap.filter(s=>s.view).length, ne2=snap.filter(s=>s.edit).length;
+        if(!confirm(`'${selRole}' 역할 ${targets.length}명에게 적용합니다.\n\n`
+          +`· 조회 ${nv2}개 · 수정 ${ne2}개\n`
+          +`· 대상: ${targets.slice(0,6).map(x=>x.nm).join(', ')}${targets.length>6?` 외 ${targets.length-6}명`:''}\n\n`
+          +`※그 사람들의 기존 개인 설정은 이 값으로 덮어써집니다.\n`
+          +`  적용 후 [사용자별 설정]에서 개인 예외를 줄 수 있습니다.`))return;
+        const bt=ev.target,t0=bt.textContent; bt.textContent='적용중…'; bt.disabled=true;
+        targets.forEach(t=>{PERM.perms[t.id]=PERM.perms[t.id]||{};
+          snap.forEach(s=>{PERM.perms[t.id][s.id]={view:s.view,edit:s.edit};});});
+        // 대상 사용자 + 역할행만 저장(전체를 다시 넣지 않는다)
+        const ids=targets.map(t=>t.id).concat([rk]);
+        let ok=false; try{const r=await PERM.savePerms(ids);ok=!r||r.ok!==false&&(r.status?r.ok:true);}catch(_){ok=false;}
+        try{buildTree();}catch(_){}
+        bt.textContent=t0; bt.disabled=false; renderRoles();
+        alert(ok?`'${selRole}' 역할 ${targets.length}명에게 적용했습니다.`:'저장 실패 — 네트워크를 확인하세요.');
+      };
+      box.querySelector('#rreset').onclick=()=>{
+        if(!confirm(`'${selRole}' 을 코드 기본값으로 되돌립니다.\n(저장하기 전까지는 화면에만 적용됩니다)`))return;
+        Object.keys(pm).forEach(k=>delete pm[k]); renderRoleDetail();
+      };
+    };
     const renderDetail=()=>{
+      if(tab==='role')return renderRoleDetail();
       const box=c.querySelector('#detail');
       const u=users.find(x=>x.id===selUid);
       if(!u){box.innerHTML='<div class="empty" style="padding:60px">오른쪽에서 사용자를 선택하세요.</div>';return;}
@@ -205,6 +399,19 @@ SCREEN.perm=(c)=>{
         </div>
         <div class="toolbar">
           ${admin?'<span class="badge">시스템관리자 = 전권(설정 불가)</span>':`<button class="btn" id="psave">💾 저장</button>`}
+          ${admin?'':`
+          <!-- ★역할 일괄적용(2026-09-07) — 한 명씩 설정하기엔 계정이 196명이라 무리다.
+                 지금 화면에 보이는 설정을 **같은 역할을 가진 사용자 전원**에게 복사한다.
+                 판정 정본은 여전히 user_perm(사용자별) 이므로 백엔드는 손대지 않는다 —
+                 개인별 예외도 종전처럼 계속 줄 수 있다. -->
+          <span style="margin-left:10px;padding-left:10px;border-left:1px solid var(--line)">
+            <select class="inp" id="pbulkrole" style="width:auto" title="이 역할을 가진 사용자 전원에게 지금 설정을 복사합니다">
+              ${(u.roles||[]).filter(r=>r!=='시스템관리자').map(r=>`<option value="${esc(r)}">${esc(r)} 역할 전체</option>`).join('')
+                || '<option value="">역할 없음</option>'}
+            </select>
+            <button class="btn" id="pbulk" style="background:#7a4ec0;color:#fff"
+              title="지금 화면의 조회/수정 설정을 그 역할 전원에게 그대로 적용합니다">역할 일괄적용</button>
+          </span>`}
           <div class="spacer"></div>
           <button class="btn ${PERM.userId===selUid?'':'ghost'}" id="plogin">${PERM.userId===selUid?'✅ 현재 로그인':'🔓 이 사용자로 로그인'}</button></div>
         <div class="grid-wrap" style="max-height:500px;overflow:auto"><table class="tbl fit"><thead><tr><th>부문</th><th>프로그램</th><th class="center" style="width:64px">조회</th><th class="center" style="width:64px">수정</th></tr></thead><tbody id="ptb"></tbody></table></div>`;
@@ -221,6 +428,39 @@ SCREEN.perm=(c)=>{
       const updCnt=()=>{box.querySelector('#dnv').textContent=progs.filter(p=>effView(p.id)).length;box.querySelector('#dne').textContent=progs.filter(p=>effEdit(p.id)).length;};
       rendGrid();
       box.querySelector('#plogin').onclick=()=>{PERM.setUser(selUid);try{buildTree();updateHeaderUser();}catch(_){}renderList();renderDetail();};
+      /* ★역할 일괄적용 — 지금 화면 설정을 같은 역할 전원에게 복사.
+           「역할 = 기본권한 · 개인 = 추가/예외」 운영을 위한 것이다(대표 지시 2026-09-07).
+           이걸로 역할 기준을 한 번에 세우고, 그 뒤 개인별로 더 주거나 빼면 된다.
+         ★시스템관리자는 대상에서 제외한다 — 어차피 전권이라 덮을 이유가 없고,
+           실수로 관리자 권한을 좁히면 설정 화면 자체에 못 들어간다. */
+      const bulkBtn=box.querySelector('#pbulk');
+      if(bulkBtn)bulkBtn.onclick=async(ev)=>{
+        const role=(box.querySelector('#pbulkrole')||{}).value||'';
+        if(!role){alert('이 사용자에게 역할이 없습니다. 사용자관리에서 역할을 먼저 지정하세요.');return;}
+        const targets=users.filter(x=>(x.roles||[]).includes(role)
+                                   && !(x.roles||[]).includes('시스템관리자'));
+        if(!targets.length){alert(`'${role}' 역할을 가진 사용자가 없습니다.`);return;}
+        const snap=progs.map(p=>({id:p.id,view:effView(p.id),edit:effEdit(p.id)}));
+        const nv2=snap.filter(s=>s.view).length, ne2=snap.filter(s=>s.edit).length;
+        if(!confirm(`'${role}' 역할 ${targets.length}명에게 지금 설정을 적용합니다.\n\n`
+          +`· 조회 ${nv2}개 · 수정 ${ne2}개\n`
+          +`· 대상: ${targets.slice(0,6).map(x=>x.nm).join(', ')}${targets.length>6?` 외 ${targets.length-6}명`:''}\n\n`
+          +`※그 사람들의 기존 개인 설정은 이 값으로 덮어써집니다.\n`
+          +`  적용 후 개인별로 더 주거나 뺄 수 있습니다.`))return;
+        const bt=ev.target, t0=bt.textContent; bt.textContent='적용중…'; bt.disabled=true;
+        // 화면 설정을 대상 전원의 perms 에 그대로 심는다(현재 사용자 포함)
+        targets.forEach(t=>{
+          PERM.perms[t.id]=PERM.perms[t.id]||{};
+          snap.forEach(s=>{PERM.perms[t.id][s.id]={view:s.view,edit:s.edit};});
+        });
+        let ok=false;
+        try{const r=await PERM.savePerms(targets.map(t=>t.id));ok=!r||r.ok!==false&&(r.status?r.ok:true);}catch(_){ok=false;}
+        try{buildTree();}catch(_){}
+        bt.textContent=t0; bt.disabled=false;
+        renderList(); renderDetail();
+        alert(ok?`'${role}' 역할 ${targets.length}명에게 적용했습니다.`
+                :`저장 실패 — 네트워크를 확인하세요(화면에는 반영됨).`);
+      };
       if(!admin){
         box.querySelector('#psave').onclick=async(ev)=>{const bt=ev.target;const t0=bt.textContent;bt.textContent='저장중…';bt.disabled=true;
           /* ★저장 전 '화면에 보이는 값'을 전 프로그램에 대해 확정 기록한다(2026-09-03 신설).
@@ -232,13 +472,16 @@ SCREEN.perm=(c)=>{
              역할은 '신규 사용자의 초기 표시값'으로만 남고 판정 정본은 DB 단일 소스가 된다. */
           const snap=progs.map(p=>({id:p.id,view:effView(p.id),edit:effEdit(p.id)}));   // ★먼저 전부 읽고
           snap.forEach(s=>{pm[s.id]={view:s.view,edit:s.edit};});                        //   그 다음 기록(중간갱신 오염 방지)
-          let ok=false;try{const r=await PERM.savePerms();ok=!r||r.ok!==false&&(r.status?r.ok:true);}catch(_){ok=false;}
+          let ok=false;try{const r=await PERM.savePerms([selUid]);ok=!r||r.ok!==false&&(r.status?r.ok:true);}catch(_){ok=false;}
           if(PERM.userId===selUid){try{buildTree();}catch(_){}}bt.textContent=t0;bt.disabled=false;
           alert(ok?u.nm+' 권한 저장 완료 — 서버 반영(전 PC 동일 적용).':u.nm+' 권한 로컬 저장됨(서버 저장 실패 — 네트워크 확인).');};
       }
     };
-    c.querySelector('#q').onkeyup=renderList;
-    renderList(); renderDetail();
+    const qEl=c.querySelector('#q'); if(qEl)qEl.onkeyup=renderList;
+    {const el=c.querySelector('#ftype'); if(el)el.onchange=()=>{fType=el.value;renderList();};}
+    {const el=c.querySelector('#frole'); if(el)el.onchange=()=>{fRole=el.value;renderList();};}
+    if(tab==='role')renderRoles(); else renderList();
+    renderDetail();
   };
   draw();
 };
@@ -251,6 +494,24 @@ SCREEN.users=(c)=>{
     if(!r.ok)return null; const j=await r.json(); return Array.isArray(j.users)?j.users:null;}catch(e){return null;}};
   let users=[], editMode=false, loadErr='';
   let users_orig=[];   // 서버에 실제로 있는 계정 id — ✕ 가 '신규행 제거'인지 '서버 삭제'인지 가른다
+  let uType='', uRole='';   // 목록 필터 — 구분(사내/협력사) · 역할
+  /* 거래처코드 → 이름 (협력사 칸 표시용). 한 번만 받아 캐시.
+     ★이 화면은 관리자 전용이라 /api/cust/list 호출에 제약이 없다
+       (협력사 포털에서는 COOP_ALLOW 밖이라 못 쓴다 — core.js 쪽 주석 참조). */
+  let CUSTNM={}, CUSTCODE={}, CUSTLIST=[];
+  const loadCustNm=async()=>{
+    try{ const r=await fetch(`${API_BASE}/api/cust/list`);
+      const j=await r.json(); const m={}, rev={}, lst=[];
+      (j.rows||[]).forEach(x=>{
+        const c=String(x.cust_code||'').trim(), n=String(x.cust_name||'').trim();
+        if(!c)return;
+        m[c]=n; lst.push({c,n});
+        // 동명이 있으면 먼저 온 것(코드 오름차순)을 쓴다 — 이름→코드는 1:1 이 아닐 수 있다
+        if(n && !(n in rev)) rev[n]=c;
+      });
+      CUSTNM=m; CUSTCODE=rev; CUSTLIST=lst;
+    }catch(e){}
+  };
   const CT=['내부','협력사'], ST=['사용','정지'];
   const cols=[{f:'id',h:'ID'},{f:'pw',h:'비밀번호',pw:1},{f:'nm',h:'이름'},{f:'type',h:'구분',sel:CT},{f:'dept',h:'부서'},{f:'pos',h:'직책'},{f:'roles',h:'역할',roles:1},{f:'partner',h:'협력사'},{f:'email',h:'이메일'},{f:'tel',h:'연락처'},{f:'status',h:'상태',sel:ST},
     // ★잠금상태(2026-09-07) — 10회 실패하면 잠기고 관리자가 풀어줘야 한다. 읽기전용 표시.
@@ -273,11 +534,27 @@ SCREEN.users=(c)=>{
        <b>비밀번호를 비워두면 기존 비밀번호가 그대로 유지</b>됩니다(바꿀 때만 입력) ·
        <b>⏸</b>=로그인만 막음(계정 유지) · <b>✕</b>=완전삭제(되돌릴 수 없음) ·
        신규 계정은 비밀번호를 비워두면 <b>초기비번 1111</b>이 부여되고 <b>첫 로그인에 본인이 새 비번을 정합니다</b> ·
-       협력사 칸 = <b>거래처코드</b> · 프로그램별 권한은 「권한관리」 ·
+       협력사 칸 = <b>거래처코드 + 거래처명</b>(이름으로 골라도 코드가 채워집니다) · 프로그램별 권한은 「권한관리」 ·
        <b>비밀번호 10회 연속 실패</b> 시 계정이 잠기며 <b>관리자가 [잠금해제]·[비번초기화]</b> 해야 다시 접속됩니다${loadErr?` · <span class="neg">${esc(loadErr)}</span>`:''}</div>
-     <div class="toolbar"><input class="inp" id="q" placeholder="ID·이름·부서·협력사">
+     <div class="toolbar"><input class="inp" id="q" placeholder="ID·이름·부서·협력사" style="width:200px">
+       <!-- ★필터(2026-09-07 지시) — 196명이라 검색만으로는 찾기 어렵다. 구분·역할로 좁힌다.
+              정렬은 이름 가나다순(localeCompare 'ko') — 종전 ID순은 이름과 어긋났다. -->
+       <label class="tl">구분</label>
+       <select class="inp" id="uftype" style="width:78px;min-width:78px">
+         <option value=""${uType===''?' selected':''}>전체</option>
+         <option value="내부"${uType==='내부'?' selected':''}>사내</option>
+         <option value="협력사"${uType==='협력사'?' selected':''}>협력사</option>
+       </select>
+       <label class="tl">역할</label>
+       <select class="inp" id="ufrole" style="width:100px;min-width:100px">
+         <option value=""${uRole===''?' selected':''}>전체</option>
+         ${(typeof allRoles==='function'?allRoles():ROLES).map(r=>`<option value="${esc(r)}"${uRole===r?' selected':''}>${esc(r)}</option>`).join('')}
+         <option value="__none"${uRole==='__none'?' selected':''}>역할 없음</option>
+       </select>
        ${editMode?`<button class="btn" id="add">➕ 추가</button><button class="btn" id="save">💾 저장</button><button class="btn ghost" id="cancel">✖ 취소</button>`:(PERM.canEdit('users')?`<button class="btn" id="edit">✎ 수정</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}
        <div class="spacer"></div><span class="rowcount" id="cnt"></span></div>
+     <!-- 협력사 이름칸 오토컴플리트 — 코드를 외우지 않아도 이름으로 고를 수 있다 -->
+     <datalist id="uc-dl">${CUSTLIST.map(x=>`<option value="${esc(x.n)}">${esc(x.c)}</option>`).join('')}</datalist>
      <div class="grid-wrap" style="max-height:520px;overflow:auto"><table class="tbl fit"><thead><tr>${cols.map(cc=>`<th>${cc.h}</th>`).join('')}${editMode?'<th class="center">정지/삭제</th>':''}</tr></thead><tbody id="tb"></tbody></table></div>`;
     const isAdm=(typeof PERM!=='undefined')&&PERM.isAdmin&&PERM.isAdmin();
     const disp=(cc,u)=>{ if(cc.pw)return u.pw_set?'설정됨':'<span class="neg">미설정</span>';
@@ -291,19 +568,51 @@ SCREEN.users=(c)=>{
                 <button class="btn xs ghost" data-reset="${esc(u.id)}"
                    title="초기비번으로 되돌리고 다음 로그인 때 새 비번을 정하게 합니다">비번초기화</button>`;
       }
+      /* ★협력사 = 코드 + 거래처명(레거시 '외주협력사코드 | 외주협력사명' 두 칸과 같은 정보).
+           코드만 보이면 누구인지 알 수 없어 확인하려면 거래처마스터를 따로 열어야 했다.
+           저장값은 코드 그대로다 — 표시만 덧붙인다. */
+      if(cc.f==='partner'){
+        const code=String(u.partner||'').trim();
+        if(!code)return '';
+        const nm=CUSTNM[code]||'';
+        return `<b>${esc(code)}</b>${nm?` <span style="color:#5a6b82">${esc(nm)}</span>`:''}`;
+      }
       return esc(''+(u[cc.f]||'')); };
     const editCell=(cc,u,i)=>{
       if(cc.lock)return disp(cc,u);           // 잠금은 편집 대상이 아니다(버튼으로만)
       if(cc.sel)return `<select data-i="${i}" data-f="${cc.f}">${cc.sel.map(o=>`<option ${u[cc.f]===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
-      if(cc.roles)return `<div style="min-width:150px">${ROLES.map(r=>`<label style="margin-right:6px;white-space:nowrap;font-size:11px"><input type="checkbox" data-i="${i}" data-role="${esc(r)}" ${(u.roles||[]).includes(r)?'checked':''}>${esc(r)}</label>`).join('')}</div>`;
+      // ★allRoles() — 권한관리에서 추가한 역할도 함께 나온다(코드 상수 ROLES + '@역할' 행)
+      if(cc.roles)return `<div style="min-width:150px">${(typeof allRoles==='function'?allRoles():ROLES).map(r=>`<label style="margin-right:6px;white-space:nowrap;font-size:11px"><input type="checkbox" data-i="${i}" data-role="${esc(r)}" ${(u.roles||[]).includes(r)?'checked':''}>${esc(r)}</label>`).join('')}</div>`;
       // ★신규는 비워두면 서버가 초기비번(1111)을 자동 부여한다 — 첫 로그인에 본인이 바꾼다.
       if(cc.pw)return `<input data-i="${i}" data-f="pw" type="password" value=""
             placeholder="${u.pw_set?'비우면 유지':'비우면 1111'}" title="${u.pw_set?'비워두면 기존 비밀번호가 유지됩니다':'신규 계정 — 비워두면 초기비번 1111 이 부여되고 첫 로그인에 본인이 새 비번을 정합니다'}" style="width:95px">`;
+      /* ★협력사 = [코드][거래처명] 두 칸(레거시 '외주협력사코드 | 외주협력사명'과 같은 모양).
+           · 저장되는 값은 **코드 하나**뿐이다(data-f="partner"). 이름칸은 보조 표시·검색용.
+           · 코드를 치면 이름이 바로 따라오고, 이름칸에서 고르면 코드가 채워진다(양방향).
+           · datalist 로 거래처명 검색 — 코드를 외우지 않아도 된다. */
+      if(cc.f==='partner'){
+        const code=String(u.partner||'').trim();
+        return `<input data-i="${i}" data-f="partner" data-cc="1" value="${esc(code)}"
+                   placeholder="코드" title="거래처코드 — 옆 칸에서 이름으로 찾을 수 있습니다"
+                   style="width:62px;min-width:62px;text-align:center">`
+             + `<input data-i="${i}" data-ccnm="1" list="uc-dl" value="${esc(CUSTNM[code]||'')}"
+                   placeholder="거래처명" title="이름을 고르면 코드가 채워집니다"
+                   style="width:130px;min-width:130px;margin-left:3px">`;
+      }
       return `<input data-i="${i}" data-f="${cc.f}" value="${esc(''+(u[cc.f]||''))}" style="width:${cc.f==='email'?150:95}px">`;
     };
     const rend=()=>{
       const q=(c.querySelector('#q').value||'').toLowerCase();
-      const vis=users.map((u,i)=>({u,i})).filter(({u})=>!q||(''+u.id+u.nm+u.dept+u.partner).toLowerCase().includes(q));
+      /* 필터 = 구분 + 역할 + 검색어. 검색에는 거래처명도 건다(코드를 몰라도 '미래정밀' 로 찾게).
+         ★정렬은 이름 가나다순 — 편집 중에는 정렬하지 않는다(행이 움직이면 입력하던 칸을 놓친다). */
+      let vis=users.map((u,i)=>({u,i})).filter(({u})=>{
+        if(uType && (u.type||'내부')!==uType) return false;
+        const rs=u.roles||[];
+        if(uRole==='__none'){ if(rs.length) return false; }
+        else if(uRole && !rs.includes(uRole)) return false;
+        return !q||(''+u.id+u.nm+u.dept+u.partner+(CUSTNM[String(u.partner||'').trim()]||'')).toLowerCase().includes(q);
+      });
+      if(!editMode) vis=vis.sort((a,b)=>String(a.u.nm||a.u.id).localeCompare(String(b.u.nm||b.u.id),'ko'));
       c.querySelector('#tb').innerHTML=vis.map(({u,i})=>`<tr>${cols.map(cc=>`<td>${editMode?editCell(cc,u,i):disp(cc,u)}</td>`).join('')}${editMode?`<td class="center" style="white-space:nowrap"><button class="btn xs ghost" data-stop="${i}" title="로그인만 막는다(계정은 남음)">${u.status==='정지'?'▶':'⏸'}</button> <button class="btn xs ghost" data-del="${i}" title="계정 완전삭제" style="color:#c0392b">✕</button></td>`:''}</tr>`).join('')||`<tr><td colspan="${cols.length+1}" class="empty">없음</td></tr>`;
       if(editMode){
         /* ★oninput 으로 받는다(2026-09-07 수정) — 종전엔 onchange 뿐이라
@@ -313,8 +622,26 @@ SCREEN.users=(c)=>{
                        무슨 비번을 넣어도 로그인 불가(대표 실사용 오류).
              change 도 함께 건다 — 드롭다운(select)은 change 가 자연스럽다. */
         c.querySelectorAll('#tb input[data-f],#tb select[data-f]').forEach(el=>{
-          const grab=()=>{users[+el.dataset.i][el.dataset.f]=el.value;};
+          const grab=()=>{users[+el.dataset.i][el.dataset.f]=el.value;
+            // 협력사 코드칸을 고치면 옆 이름칸을 즉시 맞춘다(모르는 코드면 비운다)
+            if(el.dataset.cc){
+              const nmEl=c.querySelector(`#tb input[data-ccnm][data-i="${el.dataset.i}"]`);
+              if(nmEl)nmEl.value=CUSTNM[String(el.value).trim()]||'';
+            }};
           el.oninput=grab; el.onchange=grab;});
+        /* ★거래처명 칸 → 코드 역채움. 저장은 **코드칸(data-f=partner)** 만 하므로
+             여기서 users[i].partner 까지 함께 세워야 이름으로 고른 것이 저장된다. */
+        c.querySelectorAll('#tb input[data-ccnm]').forEach(el=>{
+          const sync=()=>{
+            const nm=String(el.value).trim();
+            const code=nm?(CUSTCODE[nm]||''):'';
+            const i=+el.dataset.i;
+            const cdEl=c.querySelector(`#tb input[data-cc][data-i="${i}"]`);
+            if(nm && !code) return;              // 아직 타이핑 중 — 코드를 지우지 않는다
+            if(cdEl)cdEl.value=code;
+            users[i].partner=code;
+          };
+          el.oninput=sync; el.onchange=sync;});
         c.querySelectorAll('#tb input[data-role]').forEach(el=>el.onchange=()=>{const u=users[+el.dataset.i];u.roles=u.roles||[];const r=el.dataset.role;if(el.checked){if(!u.roles.includes(r))u.roles.push(r);}else u.roles=u.roles.filter(x=>x!==r);});
         /* 삭제 — ✕=계정 완전삭제 / ⏸=정지(로그인만 막고 계정은 남김), 2026-09-07 분리.
            종전엔 ✕ 가 '정지 토글'이라 계정이 목록에서 사라지지 않았다(대표 지적). */
@@ -346,7 +673,11 @@ SCREEN.users=(c)=>{
         if(confirm(`${u.id} 계정의 비밀번호를 초기화할까요?\n\n· 초기비번 1111 로 바뀝니다\n· 그 계정의 로그인이 전부 해제됩니다\n· 다음 접속 때 새 비밀번호를 정하게 됩니다`))
           adminAct('resetpw',u,'비밀번호를 초기화했습니다.');});
       const nLock=users.filter(u=>u.locked).length;
-      c.querySelector('#cnt').innerHTML=`${users.length}명 (내부 ${users.filter(u=>u.type==='내부').length}·협력사 ${users.filter(u=>u.type==='협력사').length})`
+      // 필터가 걸려 있으면 '보이는 수 / 전체' 로 — 몇 명이 걸러졌는지 알 수 있게
+      const filt=!!(uType||uRole||q);
+      c.querySelector('#cnt').innerHTML=
+        (filt?`<b>${vis.length}</b>명 / 전체 ${users.length}명`
+             :`${users.length}명 (내부 ${users.filter(u=>u.type==='내부').length}·협력사 ${users.filter(u=>u.type==='협력사').length})`)
         +(nLock?` · <b style="color:#c0392b">잠김 ${nLock}</b>`:'')+` · ${editMode?'✎수정중':'읽기전용'}`;
     };
     if(editMode){
@@ -361,6 +692,8 @@ SCREEN.users=(c)=>{
       c.querySelector('#cancel').onclick=async()=>{users=(await load())||users;editMode=false;draw();};
     } else if(c.querySelector('#edit')) c.querySelector('#edit').onclick=()=>{editMode=true;draw();};
     c.querySelector('#q').onkeyup=rend;
+    {const el=c.querySelector('#uftype'); if(el)el.onchange=()=>{uType=el.value;rend();};}
+    {const el=c.querySelector('#ufrole'); if(el)el.onchange=()=>{uRole=el.value;rend();};}
     rend();
   };
   draw();
@@ -368,7 +701,9 @@ SCREEN.users=(c)=>{
   (async()=>{const u=await load();
     if(u){users=u;users_orig=u.map(x=>({id:x.id}));}
     else loadErr='서버에서 계정을 읽지 못했습니다(권한 또는 연결 확인).';
-    draw();})();
+    draw();
+    await loadCustNm(); draw();   // 거래처명은 뒤늦게 와도 되니 화면을 막지 않는다
+  })();
 };
 SCREEN.setinreq=(c)=>{
   const API=API_BASE;

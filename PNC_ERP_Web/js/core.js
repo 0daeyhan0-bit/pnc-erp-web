@@ -636,6 +636,23 @@ function closeTab(id){
 
 /* ================= 권한(RBAC) ================= */
 const ROLES=['시스템관리자','원가개발','영업','구매/자재','생산','품질','조회전용','협력사'];
+/* ★사용자 추가 역할(2026-09-07) — 기본 8종 외에 현장에서 역할을 더 만들 수 있다.
+     저장 위치 = 권한표(user_perm)의 '@역할명' 행. 역할 목록을 위한 테이블을 따로 두지 않는다:
+       · 역할은 권한을 담기 위해 존재하므로 권한행이 곧 역할의 실체다
+       · perm_save 가 전체 스냅샷 교체라 목록·권한이 항상 함께 움직인다
+     ROLES(코드 상수)는 그대로 두고 합쳐서 쓴다 — 기본 역할은 코드가 보장한다. */
+// 부분 저장용 — 대상 id 의 권한만 골라 보낸다(전송량도 함께 줄인다)
+function _pickPerms(all,ids){const o={};(ids||[]).forEach(k=>{if(all[k])o[k]=all[k];});return o;}
+function allRoles(){
+  const extra=[];
+  try{
+    Object.keys((typeof PERM!=='undefined'&&PERM.perms)||{}).forEach(k=>{
+      if(k.charAt(0)==='@'){const r=k.slice(1);
+        if(r && ROLES.indexOf(r)<0 && extra.indexOf(r)<0) extra.push(r);}
+    });
+  }catch(e){}
+  return ROLES.concat(extra.sort((a,b)=>a.localeCompare(b,'ko')));
+}
 // ★슈퍼 계정(전권) + 개발용 자동 로그인 계정. DEV_AUTOLOGIN을 ''로 비우면 일반 로그인으로 전환.
 /* ★비밀번호 없음 — 대조는 서버(nx.app_user)에서만 한다 */
 const SUPER_USER={id:'super',nm:'슈퍼관리자',type:'내부',dept:'전산',pos:'대표',roles:['시스템관리자'],partner:'',email:'pncind@pncind.co.kr',tel:'',status:'사용'};
@@ -678,8 +695,14 @@ const getUsers=()=>{try{const s=localStorage.getItem('perm_users');if(s)return J
 const PERM={
   userId: localStorage.getItem('perm_userId')||'admin',
   perms: (()=>{try{return JSON.parse(localStorage.getItem('perm_userperm'))||{};}catch(e){return {};}})(),  // 사용자×프로그램×{view,edit}
-  savePerms(){localStorage.setItem('perm_userperm',JSON.stringify(this.perms));
-    try{return fetch(API_BASE+'/api/perm/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({perms:this.perms,by:this.userId})});}catch(e){return Promise.resolve();}},
+  /* ★only = 바뀐 사용자 id 배열(부분 저장). 주면 그 사람들 행만 교체한다.
+       왜 — 한 명을 고쳐도 전체(196명×98개=19,208행)를 다시 넣어 저장이 5분 넘게 걸렸다.
+            서버도 행별 INSERT 라 느렸다(배치로 교체 — sales.perm_save 주석 참조).
+       생략하면 종전대로 전체 스냅샷 교체(하위호환). */
+  savePerms(only){localStorage.setItem('perm_userperm',JSON.stringify(this.perms));
+    const body={perms:only?_pickPerms(this.perms,only):this.perms,by:this.userId};
+    if(only)body.only=only;
+    try{return fetch(API_BASE+'/api/perm/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});}catch(e){return Promise.resolve();}},
   async loadFromServer(){try{const r=await fetch(API_BASE+'/api/perm/all');if(!r.ok)return false;const j=await r.json();if(j&&j.perms){this.perms=j.perms;localStorage.setItem('perm_userperm',JSON.stringify(this.perms));return true;}}catch(e){}return false;},
   // ★계정목록 서버 로드(전 PC 공통) — 로그인 전 호출. 서버값=정본, 시드계정은 항상 병합 보장.
   async loadUsersFromServer(){try{const r=await fetch(API_BASE+'/api/perm/users');if(!r.ok)return false;const j=await r.json();
