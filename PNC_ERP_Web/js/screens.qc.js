@@ -437,7 +437,41 @@ SCREEN.qcspec=(c)=>{
     const saveHdr=async()=>{
       for(const f of HFORM){if(!f.optional&&!String(form[f.k]??'').trim()){alert(f.label+' 은(는) 필수입니다');return;}}
       const b={...form,user:'웹사용자'};Object.keys(b).forEach(k=>{if(k.endsWith('__nm'))delete b[k];});
-      try{const r=await fetch(`${API}/api/qc/spec/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});const j=await r.json();if(j.ok){form=null;await load();}else alert('저장 실패: '+JSON.stringify(j));}catch(e){alert('저장 오류: '+e);}};
+      /* ★신규 저장 후에도 창을 닫지 않고 **첨부를 이어서 올릴 수 있게** 남긴다(2026-09-07).
+           종전엔 저장하면 무조건 form=null 로 닫혀, 첨부 영역(form.id 조건)을 보려면
+           "저장 → 목록에서 다시 찾아 수정으로 열기" 2단계를 거쳐야 했다(사용자 신고).
+         ★업로드 키가 (rev_ymd, rev_no) 라 저장 전에는 올릴 수 없다 — 그래서 '저장 직후'가
+           첨부를 붙일 수 있는 가장 빠른 시점이다. 서버가 준 id 와 화면이 입력한 일자·순번을
+           _ry/_rn 에 채워 넣으면 그 자리에서 바로 첨부가 열린다. */
+      try{const r=await fetch(`${API}/api/qc/spec/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});const j=await r.json();
+        if(j.ok){
+          const wasNew=!form.id;
+          if(wasNew&&j.id){
+            form.id=j.id;
+            form._ry=String(form.rev_ymd||'').replace(/\D/g,'');   // 화면 입력값 → 업로드 키
+            form._rn=String(form.rev_no||'').trim();
+            /* ★신규 화면에서 고른 파일을 **저장 직후 자동 업로드**한다.
+                 저장 전에는 업로드 키(rev_ymd/rev_no)가 없어 보낼 수 없기 때문이다.
+                 draw() 가 input 을 새로 그리므로 **그 전에** File 객체를 붙잡아 둔다. */
+            const _pend=[];
+            {const d=body.querySelector('#hf-dwg'), s=body.querySelector('#hf-spec');
+             if(d&&d.files[0])_pend.push(['SPEC_DWG',d.files[0]]);
+             if(s&&s.files[0])_pend.push(['SPEC_SHEET',s.files[0]]);}
+            for(const [kind,f] of _pend){
+              const fd=new FormData();
+              fd.append('file',f); fd.append('doc_kind',kind);
+              fd.append('item_code',form.item_code||'');
+              fd.append('rev_ymd',form._ry||''); fd.append('rev_no',form._rn||'');
+              fd.append('user',(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹사용자'));
+              try{const u=await(await fetch(`${API}/api/doc/upload`,{method:'POST',body:fd})).json();
+                if(!u.ok)alert('첨부 업로드 실패('+kind+'): '+(u.detail||''));}
+              catch(e){alert('첨부 업로드 오류('+kind+'): '+e);}
+            }
+            await load(); draw();                                   // 목록 갱신 + 첨부 영역 표시
+            const _fb=body.querySelector('#hf-files');
+            if(_fb)_fb.scrollIntoView({block:'center',behavior:'smooth'});
+          }else{form=null;await load();}
+        }else alert('저장 실패: '+JSON.stringify(j));}catch(e){alert('저장 오류: '+e);}};
     const delHdr=async(r)=>{if(!r||!r.ID){alert('nx 등록건만 삭제 가능');return;}if(!confirm('이 시방을 삭제할까요?'))return;
       await fetch(`${API}/api/qc/spec/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[r.ID]})});await load();};
     const addApply=async(mode)=>{if(!sel||!sel.ID){alert('nx 시방을 먼저 선택하세요');return;}
@@ -481,13 +515,20 @@ SCREEN.qcspec=(c)=>{
           <div style="background:#fff;border-radius:10px;box-shadow:0 22px 64px rgba(0,0,0,.32);width:560px;max-width:96vw">
            <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 16px;background:#1c47a0;color:#fff;border-radius:10px 10px 0 0"><b>시방변경 ${form.id?'수정':'신규'}</b><span id="hf-x" style="cursor:pointer;font-size:17px">✕</span></div>
            <div style="padding:12px 16px;max-height:calc(100vh - 170px);overflow:auto"><table style="border-collapse:collapse;width:100%">${HFORM.map(f=>`<tr><td style="padding:5px 10px 5px 0;white-space:nowrap;color:#33507d;font-weight:600;font-size:12px;text-align:right;width:96px">${f.label}${f.optional?'':'<span style="color:#c0392b">*</span>'}</td><td style="padding:4px 0">${mfld(f)}</td></tr>`).join('')}</table>
-             ${form.id?`<div style="margin-top:10px;border-top:1px solid #eef;padding-top:8px">
-               <div style="font-weight:600;color:#33507d;font-size:12px;margin-bottom:6px">📎 첨부파일 <span style="color:#8aa0bd;font-weight:400">(도면/시방서 · nx 등록건)</span></div>
-               <div id="hf-files" style="font-size:12px">불러오는 중...</div>
+             <!-- ★신규 등록에서도 첨부를 고를 수 있다(2026-09-07).
+                    종전엔 form.id 가 있어야만(=저장된 건만) 이 영역이 나와서,
+                    신규는 "저장 → 목록에서 다시 찾아 수정으로 열기 → 첨부" 3단계였다.
+                  ★업로드 키가 (rev_ymd, rev_no) 라 **저장 전에는 서버로 보낼 수 없다**.
+                    그래서 신규에서는 파일만 고르게 두고, [저장] 이 끝나면 그 파일을
+                    자동으로 올린다(saveHdr → _pendingUp). 사용자는 한 번만 누르면 된다. -->
+             <div style="margin-top:10px;border-top:1px solid #eef;padding-top:8px">
+               <div style="font-weight:600;color:#33507d;font-size:12px;margin-bottom:6px">📎 첨부파일
+                 <span style="color:#8aa0bd;font-weight:400">${form.id?'(도면/시방서 · nx 등록건)':'(저장하면 함께 업로드됩니다)'}</span></div>
+               ${form.id?`<div id="hf-files" style="font-size:12px">불러오는 중...</div>`:''}
                <div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap;font-size:12px">
-                 <span style="color:#33507d;font-weight:600">도면</span><input type="file" id="hf-dwg" style="width:150px"><button class="btn" id="hf-dwg-up" style="padding:2px 8px">⬆</button>
-                 <span style="color:#33507d;font-weight:600;margin-left:6px">시방서</span><input type="file" id="hf-spec" style="width:150px"><button class="btn" id="hf-spec-up" style="padding:2px 8px">⬆</button>
-               </div></div>`:''}
+                 <span style="color:#33507d;font-weight:600">도면</span><input type="file" id="hf-dwg" style="width:150px">${form.id?`<button class="btn" id="hf-dwg-up" style="padding:2px 8px">⬆</button>`:''}
+                 <span style="color:#33507d;font-weight:600;margin-left:6px">시방서</span><input type="file" id="hf-spec" style="width:150px">${form.id?`<button class="btn" id="hf-spec-up" style="padding:2px 8px">⬆</button>`:''}
+               </div></div>
            </div>
            <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center"><span style="color:#c0392b;font-size:11px">* 필수항목 제외품목들을 사용해보고 전산담당에게 알려주세요.</span><span><button class="btn" id="hf-save" style="background:#1b6ec2;color:#fff">💾 저장</button> <button class="btn" id="hf-cancel">닫기</button></span></div>
           </div></div>`:''}
@@ -515,9 +556,19 @@ SCREEN.qcspec=(c)=>{
         if(form.id){
           const loadFiles=async()=>{const box=g('#hf-files');if(!box)return;
             try{const j=await(await fetch(`${API}/api/qc/spec/files?rev_ymd=${encodeURIComponent(form._ry||'')}&rev_no=${encodeURIComponent(form._rn||'')}`)).json();
-              box.innerHTML=(j.rows||[]).length?j.rows.map(f=>`<div style="display:flex;gap:8px;align-items:center;padding:2px 0"><span class="bdg ${f.editable?'ok':'off'}">${esc(f.kind)}</span><span class="hff-dl" data-src="${esc(f.src)}" data-key="${esc(f.key)}" style="cursor:pointer;color:#1c47a0;text-decoration:underline">${esc(f.filename)}</span>${f.editable?`<span class="hff-del" data-id="${esc(f.key)}" style="cursor:pointer;color:#c0392b" title="삭제">✖</span>`:''}</div>`).join(''):'<span style="color:#8aa0bd">첨부 없음</span>';
-              box.querySelectorAll('.hff-dl').forEach(a=>a.onclick=()=>window.open(`${API}/api/doc/download?src=${encodeURIComponent(a.dataset.src)}&key=${encodeURIComponent(a.dataset.key)}`,'_blank'));
-              box.querySelectorAll('.hff-del').forEach(x=>x.onclick=async()=>{if(!confirm('첨부 삭제?'))return;await fetch(`${API}/api/doc/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({doc_id:+x.dataset.id})});loadFiles();});}
+              box.innerHTML=(j.rows||[]).length?j.rows.map(f=>`<div style="display:flex;gap:8px;align-items:center;padding:2px 0"><span class="bdg ${f.editable?'ok':'off'}">${esc(f.kind)}</span><span class="hff-dl" data-src="${esc(f.src)}" data-key="${esc(f.key)}" data-fn="${esc(f.filename)}" style="cursor:pointer;color:#1c47a0;text-decoration:underline">${esc(f.filename)}</span>${f.editable?`<span class="hff-del" data-id="${esc(f.key)}" style="cursor:pointer;color:#c0392b" title="삭제">✖</span>`:''}</div>`).join(''):'<span style="color:#8aa0bd">첨부 없음</span>';
+              /* ★window.open → docDownload(fetch+Blob) (2026-09-07 교정).
+                   window.open 은 일반 내비게이션이라 core.js 의 fetch 몽키패치를 타지 않아
+                   Authorization 헤더가 빠지고 **401 "로그인이 필요합니다"** 가 떴다.
+                   설계도면조회는 이미 docDownload(screens.base.js:236)로 고쳐져 있었다 — 같은 함수를 쓴다. */
+              box.querySelectorAll('.hff-dl').forEach(a=>a.onclick=()=>
+                docDownload(API,{src:a.dataset.src,key:a.dataset.key,filename:a.dataset.fn||'file'}));
+              // ★삭제 결과를 확인한다 — 종전엔 ok 를 안 보고 목록만 새로고침해 실패가 조용히 묻혔다.
+              box.querySelectorAll('.hff-del').forEach(x=>x.onclick=async()=>{if(!confirm('첨부 삭제?'))return;
+                try{const j=await(await fetch(`${API}/api/doc/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({doc_id:+x.dataset.id})})).json();
+                  if(!j.ok)alert('삭제 실패: '+((j.errors||[]).join('\n')||j.detail||''));}
+                catch(e){alert('삭제 오류: '+e);}
+                loadFiles();});}
             catch(e){box.innerHTML='<span style="color:#c0392b">파일 조회 실패</span>';}};
           loadFiles();
           const doUp=async(kind,inp)=>{const el=g(inp);if(!el||!el.files[0]){alert('파일을 선택하세요');return;}

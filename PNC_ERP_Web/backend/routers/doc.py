@@ -61,12 +61,21 @@ def doc_list(item_code: str = Query("")):
     # nx.doc(신규) — 있으면 최상단
     nx = _nx(); ncur = nx.cursor()
     try:
+        # ★도면만 — 품질불량 첨부(QC_ERROR)·시방서(SPEC_SHEET)는 여기 나오지 않는다(2026-09-07).
+        #   ① QC_ERROR — 「설계도면조회」에 품질불량관리에서 올린 카톡 사진·md 가 섞여 나왔다
+        #      (실측 10건). doc_kind 필터가 아예 없었고, _DOC_KIND 에도 없어 코드가 그대로 노출됐다.
+        #   ② SPEC_SHEET — 시방서는 **품목시방 탭**(itemspec_list)이 보여준다.
+        #      양쪽에 다 넣었더니 같은 파일이 두 탭에 중복으로 나왔다(사용자 신고).
+        #      이 화면은 레거시 w_pr_master_200 = 도면 조회 자리이므로 도면만 남긴다.
+        _KINDS = ("GENERAL_DWG", "SPEC_DWG")
+        _kph = ",".join("?" * len(_KINDS))
         if item:
-            ncur.execute("""SELECT doc_id,doc_kind,orig_filename,ext,byte_size,insert_user,insert_dt,rev_yymd,rev_no
-                FROM nx.doc WHERE del_flag=0 AND (item_code=? OR orig_filename LIKE ?) ORDER BY insert_dt DESC""", item, like)
+            ncur.execute(f"""SELECT doc_id,doc_kind,orig_filename,ext,byte_size,insert_user,insert_dt,rev_yymd,rev_no
+                FROM nx.doc WHERE del_flag=0 AND doc_kind IN ({_kph})
+                  AND (item_code=? OR orig_filename LIKE ?) ORDER BY insert_dt DESC""", *_KINDS, item, like)
         else:
-            ncur.execute("""SELECT doc_id,doc_kind,orig_filename,ext,byte_size,insert_user,insert_dt,rev_yymd,rev_no
-                FROM nx.doc WHERE del_flag=0 ORDER BY insert_dt DESC""")
+            ncur.execute(f"""SELECT doc_id,doc_kind,orig_filename,ext,byte_size,insert_user,insert_dt,rev_yymd,rev_no
+                FROM nx.doc WHERE del_flag=0 AND doc_kind IN ({_kph}) ORDER BY insert_dt DESC""", *_KINDS)
         for r in ncur.fetchall():
             rows.append({"src": "doc", "key": str(r[0]), "kind": r[1], "kind_nm": _DOC_KIND.get(r[1], r[1]),
                          "filename": r[2], "rev": (f"{r[7]}/{r[8]}" if r[7] else ""), "spec_no": "",
@@ -179,8 +188,23 @@ def doc_download(src: str = Query(...), key: str = Query(...), disp: str = Query
 @router.post("/api/doc/upload")
 async def doc_upload(file: UploadFile = File(...), doc_kind: str = Form("GENERAL_DWG"),
                      item_code: str = Form(""), rev_yymd: str = Form(""), rev_no: str = Form(""),
+                     rev_ymd: str = Form(""),
                      user: str = Form("웹사용자")):
-    """업로드: NAS경로(DOC_STORAGE_PATH) 저장 + nx.doc 메타. sha256 중복검사."""
+    """업로드: NAS경로(DOC_STORAGE_PATH) 저장 + nx.doc 메타. sha256 중복검사.
+
+    ★rev_ymd / rev_yymd 를 **둘 다** 받는다(2026-09-07 교정).
+      실사용 오류 — 시방변경관리에서 올린 도면·시방서가 그 시방 건에 연결되지 않았다.
+      업로드는 200 으로 성공하고 파일도 저장되는데 조회하면 0건이었고, 에러도 안 났다.
+      원인 = **파라미터 이름이 한 글자 달랐다.**
+        · 서버(여기)          rev_yymd   ← y 두 개(DB 컬럼명과 동일)
+        · 화면(screens.qc.js) rev_ymd    ← y 하나
+        · 품질팀 RPA          rev_ymd
+      FastAPI 는 못 받은 Form 을 기본값('')으로 채우므로 조용히 NULL 이 저장됐다.
+      rev_no 는 이름이 같아 정상 저장돼, "번호는 있는데 일자만 NULL" 인 상태가 됐다.
+      (실측 doc_id 13~22 전건 rev_yymd=NULL · rev_no=9907)
+      ⟹ 호출자를 고치지 않고 서버가 두 이름을 모두 받는다 — 이미 배포된 RPA 도 함께 산다.
+    """
+    rev_yymd = (rev_yymd or "").strip() or (rev_ymd or "").strip()
     raw = await file.read()
     if not raw: raise HTTPException(400, "빈 파일입니다.")
     fname = file.filename or "file"
@@ -209,7 +233,16 @@ async def doc_upload(file: UploadFile = File(...), doc_kind: str = Form("GENERAL
 
 @router.post("/api/doc/delete")
 def doc_delete(payload: dict = Body(...)):
-    """삭제 — nx.doc GENERAL_DWG(일반도면)만. 시방도면은 시방변경에서."""
+    """삭제 — nx.doc 의 일반도면·시방도면·시방서. 레거시 BLOB 첨부는 대상 아님.
+
+    ★2026-09-07 — 시방도면/시방서도 지울 수 있게 한다.
+      종전엔 GENERAL_DWG 만 허용하고 "시방도면은 시방변경관리에서 삭제하세요" 로 거부했는데,
+      정작 **시방변경관리 화면이 이 API 를 부른다**(screens.qc.js:520, editable=true 로 ✖ 버튼 표시).
+      즉 안내대로 그 화면에 가도 같은 곳으로 돌아와 거부되는 자기모순이었고,
+      프론트가 응답의 ok 를 안 보고 목록만 새로고침해 **실패가 조용히 묻혔다**.
+      ⟹ 잘못 올린 파일을 지울 방법이 없어 고아 파일이 계속 쌓였다(실측 doc_id 13~22).
+      레거시 BLOB(src='spec')은 여기로 오지 않으므로 영향 없다.
+    """
     did = payload.get("doc_id")
     if not did: return {"ok": False, "errors": ["doc_id 필요"]}
     nx = _nx(); cur = nx.cursor()
@@ -217,8 +250,8 @@ def doc_delete(payload: dict = Body(...)):
         cur.execute("SELECT doc_kind, storage_uri FROM nx.doc WHERE doc_id=? AND del_flag=0", int(did))
         r = cur.fetchone()
         if not r: return {"ok": False, "errors": ["문서 없음"]}
-        if r[0] != "GENERAL_DWG":
-            return {"ok": False, "errors": ["일반도면만 삭제 가능합니다. 시방도면은 시방변경관리에서 삭제하세요."]}
+        if r[0] not in ("GENERAL_DWG", "SPEC_DWG", "SPEC_SHEET"):
+            return {"ok": False, "errors": [f"이 종류({r[0]})는 여기서 삭제할 수 없습니다."]}
         cur.execute("UPDATE nx.doc SET del_flag=1 WHERE doc_id=?", int(did))
         try:
             fp = _os.path.join(DOC_STORAGE_PATH, r[1])
@@ -236,14 +269,22 @@ def itemspec_list(item_code: str = Query("")):
     rows = []
     nx = _nx(); ncur = nx.cursor()
     try:
+        # ★시방변경관리에서 올린 시방서(SPEC_SHEET)도 함께 보인다(2026-09-07).
+        #   이 화면은 「품목시방관리」 — 그 품번의 시방 문서를 모아 보는 자리인데,
+        #   종전엔 ITEM_ATTACH 만 읽어 시방변경관리 첨부가 안 나왔다(사용자 신고).
+        #   ※도면(SPEC_DWG)은 여기 대상이 아니다 — 설계도면 탭에서 본다.
         if item:
-            ncur.execute("""SELECT doc_id,orig_filename,ext,byte_size,insert_user,insert_dt,ISNULL(file_tag,'')
-                FROM nx.doc WHERE del_flag=0 AND doc_kind='ITEM_ATTACH' AND item_code=? ORDER BY insert_dt DESC""", item)
+            ncur.execute("""SELECT doc_id,orig_filename,ext,byte_size,insert_user,insert_dt,ISNULL(file_tag,''),doc_kind
+                FROM nx.doc WHERE del_flag=0 AND doc_kind IN ('ITEM_ATTACH','SPEC_SHEET')
+                  AND item_code=? ORDER BY insert_dt DESC""", item)
         else:
-            ncur.execute("""SELECT doc_id,orig_filename,ext,byte_size,insert_user,insert_dt,ISNULL(file_tag,'')
-                FROM nx.doc WHERE del_flag=0 AND doc_kind='ITEM_ATTACH' ORDER BY insert_dt DESC""")
+            ncur.execute("""SELECT doc_id,orig_filename,ext,byte_size,insert_user,insert_dt,ISNULL(file_tag,''),doc_kind
+                FROM nx.doc WHERE del_flag=0 AND doc_kind IN ('ITEM_ATTACH','SPEC_SHEET')
+                ORDER BY insert_dt DESC""")
         for r in ncur.fetchall():
-            rows.append({"src": "doc", "key": str(r[0]), "atype": r[6], "atype_nm": "신규첨부",
+            _sp = (r[7] == 'SPEC_SHEET')
+            rows.append({"src": "doc", "key": str(r[0]), "atype": r[6],
+                         "atype_nm": ("시방서" if _sp else "신규첨부"),
                          "filename": r[1], "user": r[4] or "", "size": int(r[3] or 0),
                          "dt": (r[5].isoformat() if hasattr(r[5], "isoformat") else ""), "editable": True})
     finally:
@@ -292,13 +333,18 @@ def qc_spec_files(rev_ymd: str = Query(""), rev_no: str = Query("")):
                     out.append({"kind": kind, "src": "spec", "key": f"{ry}|{rn}|{tag}",
                                 "filename": (fn or f"{ry}_{rn}_{kind}.pdf"), "size": int(sz), "editable": False})
         finally: cn.close()
-    nx = _nx(); cur = nx.cursor()
-    try:
-        cur.execute("""SELECT doc_id, doc_kind, orig_filename, byte_size FROM nx.doc
-            WHERE del_flag=0 AND doc_kind IN ('SPEC_DWG','SPEC_SHEET') AND rev_yymd=? AND rev_no=?""",
-            ry, (int(rn) if rn.isdigit() else None))
-        for r in cur.fetchall():
-            out.append({"kind": ("도면" if r[1] == 'SPEC_DWG' else "시방서"), "src": "doc", "key": str(r[0]),
-                        "filename": r[2], "size": int(r[3] or 0), "editable": True})
-    finally: nx.close()
+    # ★키가 온전할 때만 조회한다(2026-09-07 교정).
+    #   종전엔 rn 이 숫자가 아니면 rev_no 에 **None(=SQL NULL)** 을 바인딩했다.
+    #   SQL 3값 논리에서 `rev_no = NULL` 은 UNKNOWN 이라 **항상 0건**이다(IS NULL 이 아니다).
+    #   레거시 블록(위 L306)은 이미 `if ry and rn.isdigit()` 로 막고 있었는데 여기만 빠져 있었다.
+    if ry and rn.isdigit():
+        nx = _nx(); cur = nx.cursor()
+        try:
+            cur.execute("""SELECT doc_id, doc_kind, orig_filename, byte_size FROM nx.doc
+                WHERE del_flag=0 AND doc_kind IN ('SPEC_DWG','SPEC_SHEET') AND rev_yymd=? AND rev_no=?""",
+                ry, int(rn))
+            for r in cur.fetchall():
+                out.append({"kind": ("도면" if r[1] == 'SPEC_DWG' else "시방서"), "src": "doc", "key": str(r[0]),
+                            "filename": r[2], "size": int(r[3] or 0), "editable": True})
+        finally: nx.close()
     return {"rows": out, "cnt": len(out)}
