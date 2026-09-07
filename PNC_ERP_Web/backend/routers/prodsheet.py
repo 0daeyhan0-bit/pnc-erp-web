@@ -7,6 +7,10 @@ from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile,
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _prod_stock_map, stock_changed, _assert_open)
 
 from routers.backflush import _backflush_core, _final_proc_code, _is_inner_prod, _weld_consume
+try:
+    import nx_soyo_engine as _soyo   # 통일 소요엔진(CLAUDE §1-10) — common.py가 _harness를 sys.path에 추가
+except Exception:
+    _soyo = None
 router = APIRouter()
 
 # ===================== 생산전표출력관리 (w_pr_input_490) — 전표 기준 마스터-디테일 =====================
@@ -710,7 +714,19 @@ def prodsheet_issue(payload: dict = Body(...)):
 #   [520 vs 팝업] 520=전량 한번에(바코드 2회 스캔=확인절차, 기록은 1건)
 #                 팝업(526)=부분수량 처리. 잔여 남으면 재스캔 시 "처리/총계"로 이어짐.
 def _bom_expand(cur, item, gpc_like):
-    """BOM 전개 — ★레거시 dw_pr_input_520_2 SQL 이식.
+    """BOM 전개 — ★소요엔진 이관(2026-09-08·CLAUDE §1-10): `nx_soyo_engine.prod_input_soyo`(nx.bom_line) 사용.
+       종전 `_bom_expand_legacy`(pr_m_item_bom 재귀CTE)와 **diff0 검증 후 전환**(bom_line↔레거시 sync 완료 전제,
+       BOM_LINE_LEGACY_SYNC_260908.md). 반환 시그니처·형태 동일 = [(mat_code, work_code, mat_use_qty, gagong_proc_code)].
+       엔진 미가용 시 legacy 폴백(안전)."""
+    if _soyo is None:
+        return _bom_expand_legacy(cur, item, gpc_like)
+    eng = _get_cost_engine()
+    out = _soyo.prod_input_soyo(eng, item, gpc_like)   # {(mat,gpc):(cum_use_qty, work_code)}
+    return [(m, wc, cum, g) for (m, g), (cum, wc) in out.items()]
+
+
+def _bom_expand_legacy(cur, item, gpc_like):
+    """(구·롤백보존) BOM 전개 — ★레거시 dw_pr_input_520_2 SQL 이식.
        가상도번(VIR_ITEM_FLAG='1')은 재귀로 펼치고, 사급부품(SAGUB_FLAG='1')·전개제외는 뺀다.
        ※레거시는 pr_m_item_bom_sub 서브쿼리로 사급을 봤으나 nx에 그 테이블이 없고
          PR_M_ITEM_BOM.SAGUB_FLAG 가 직접 있어 그것을 사용(2026-08-19 확인).

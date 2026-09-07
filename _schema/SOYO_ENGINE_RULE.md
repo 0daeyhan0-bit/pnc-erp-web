@@ -142,7 +142,7 @@ LG BOM(Assembly Pull) 기준 전개. 소스 = `nx.lg_bom_ver`(point-in-time).
 | 우선 | 위치(현행 line) | 무엇 | 엔진 대체 | 비고 |
 |---|---|---|---|---|
 | 1 | `weight_calc.py:311/323`(compute_quote)·`:455/467`(compute_quote_lme) · `coopquote2.py:863`(_dong_weight) · `coopquote.py:756`(_coop_soyo v1) | 협력사 견적/무게·LME **정산금액**(v_cs_bom 재귀) | `weight_explode`/`copper_by_spec` | 금액직결·이중계상 위험 최고. ★§5가 놓친 coopquote2/v1 포함 |
-| 2 | `prodsheet.py:712`(_bom_expand) | 생산실적 재고차감 소요 | **`prod_input_soyo`**(엔진 재현본 존재) | 착수난이도 최저·스왑. caller 1곳(:1508 gpc='%') |
+| 2 | `prodsheet.py:712`(_bom_expand) | 생산실적 재고차감 소요 | **`prod_input_soyo`** | ✅**완료(2026-09-08)**: 래퍼 전환(원본=_bom_expand_legacy 보존)·전제=bom_line↔레거시 sync 완료. 검증 new==legacy diff0(AGF/AJR/AEG 등). feat/single-source-price |
 | 3 | `backflush.py:133/163/198/254` | 재고차감축(중량·다단계) | walker 신설(별도축) | nx.bom L169/206 잔존·단순치환 아님 |
 | 4 | `ready.py:106`(setcheck)·`kitting.py:89/296/832` | 키팅 물량/충당 | explode walker | |
 | 5 | `setin.py:351`(_set_bom_expand)·`procbc.py:74`(_bc_bom) | 세트입고 명세/차감 | prod_input_soyo 계열 | coopplan:1593이 setin 소비 |
