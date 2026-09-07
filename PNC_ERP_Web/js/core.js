@@ -730,6 +730,18 @@ const PERM={
     const pm=(this.perms[this.userId]||{})[sid];
     if(pm){ if(act==='view')return pm.view!==false; return !!pm.edit; }   // ★TEST1이 개별 부여한 권한 우선(override)
     const u=this.currentUser(), roles=u.roles||[], mod=_sid2mod(sid);
+    /* ★역할별 설정(권한관리 → 역할별 설정)에서 정한 값을 먼저 본다 (2026-09-07 신설).
+         저장 위치 = user_perm 의 '@역할명' 행(screens.etc.js ROLE_KEY).
+       왜 — 종전엔 ROLE_MOD(코드 상수)만 보아, 화면에서 역할 권한을 저장해도
+            **실제 로그인 권한이 하나도 바뀌지 않았다**(실사용 신고).
+            게다가 ROLE_MOD 에는 '조회전용'·'협력사' 키가 아예 없어
+            그 역할 사용자는 어떤 화면도 열 수 없었다(undefined → 항상 false).
+       ⟹ 역할행에 그 화면 설정이 있으면 그 값이 곧 역할 기본권한이다.
+          없을 때만 종전 ROLE_MOD 로 넘어간다(기본 역할은 코드가 계속 보장). */
+    for(const r of roles){
+      const rp=(this.perms['@'+r]||{})[sid];
+      if(rp && rp[act]!==undefined) return !!rp[act];
+    }
     // ★협력사는 기준정보 공통조회에서 제외 — 우리 품목·BOM·도면을 볼 이유가 없다(2026-09-03).
     if(act==='view' && COMMON_VIEW.includes(mod)) return !_isCoop(u);
     return roles.some(r=>(ROLE_MOD[r]||[]).includes(mod)); },   // 기본=본인 부서 모듈만 조회·수정(자재는 자재것만). 나머지 부서=숨김

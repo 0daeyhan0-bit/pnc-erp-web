@@ -401,6 +401,12 @@ def build_label_pdf(j: dict) -> bytes:
     return _finish(doc)
 
 
+# ★라벨 갭(라벨과 라벨 사이 간격) — 현장 실측 3mm(2026-09-07).
+#   종전 2mm 로는 프린터가 라벨 시작점을 잘못 잡아 인쇄가 위로 밀리고
+#   빈 라벨이 섞여 나왔다. 용지를 바꾸면 이 값만 고치면 된다.
+LABEL_GAP_MM = 3
+
+
 def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3) -> str:
     """제품스티커 TSPL — TSC/Bixolon 계열 직송용.
 
@@ -413,15 +419,28 @@ def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3) -> str:
     tot = j.get("org_qty") or j.get("qty") or len(labels)
     item = str(j.get("item", ""))
     wi = f"{j.get('worker','')}/{j.get('inspector','')}"
-    out = []
+    # ★★용지 설정은 **작업 전체에 한 번만** 보낸다(2026-09-07 교정).
+    #   실사용 오류 — 라벨이 위쪽 경계를 넘어 잘리고 **빈 라벨이 2장씩 섞여** 나왔다.
+    #   원인 두 가지
+    #     ① GAP 2mm 인데 실물 라벨 간격은 **3mm** 였다(현장 실측).
+    #        갭이 틀리면 프린터가 라벨 시작점을 잘못 잡아 인쇄가 밀린다.
+    #     ② SIZE/GAP 을 **라벨 한 장마다** 다시 보냈다. TSPL 에서 이 두 명령은
+    #        용지 파라미터 재설정이라, 매 장 재설정하면 위치가 어긋나고
+    #        프린터가 용지를 과하게 밀어 빈 라벨이 나온다.
+    #   ⟹ 헤더(SIZE·GAP·DENSITY·SPEED·DIRECTION·CODEPAGE)는 1회,
+    #      장마다 반복하는 것은 CLS ~ PRINT 뿐이다.
+    #   ※그래도 밀리면 프린터 자체 캘리브레이션(전원 켠 뒤 FEED 길게 눌러 용지 자동감지)을
+    #     한 번 해야 한다 — 센서 기준값은 프린터에 저장된다.
+    out = [
+        "SIZE 40 mm,20 mm",
+        f"GAP {LABEL_GAP_MM} mm,0",
+        f"DENSITY {max(0, min(int(darkness), 15))}",
+        f"SPEED {max(1, min(int(speed), 8))}",
+        "DIRECTION 1",
+        "CODEPAGE UTF-8",
+    ]
     for L in labels:
         out += [
-            "SIZE 40 mm,20 mm",
-            "GAP 2 mm,0",
-            f"DENSITY {max(0, min(int(darkness), 15))}",
-            f"SPEED {max(1, min(int(speed), 8))}",
-            "DIRECTION 1",
-            "CODEPAGE UTF-8",
             "CLS",
             # 좌측 QR — cell width 3.
             #   ★실측(2026-09-07): 최악 데이터(한글도번 24자)가 QR 버전3=29모듈이라

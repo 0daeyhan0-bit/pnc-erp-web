@@ -461,14 +461,44 @@ def serve() -> ThreadingHTTPServer:
 
 
 # ───────────────────────────── 설정 창 (tkinter) ─────────────────────────────
+# ★단일 인스턴스 가드 (2026-09-07 신설)
+#   증상 — 트레이 [설정] 을 누를 때마다 설정창이 **새로 하나씩 더** 떴다(실사용 오류).
+#   원인 — on_settings 가 매번 threading.Thread(open_settings) 로 새 tk.Tk() 를 만들었고,
+#          이미 떠 있는지 확인하지 않았다.
+#   ★왜 위험한가 — tkinter 는 프로세스당 Tk() **하나**를 전제로 한다.
+#     여러 개가 동시에 돌면 위젯 값이 엉켜, 프린터 칸이 빈 창에서 [저장]을 누르면
+#     설정파일에 **빈 프린터가 덮어써진다**(그러면 자동출력이 조용히 멈춘다).
+#   ⟹ 이미 열려 있으면 새로 만들지 않고 그 창을 앞으로 가져온다.
+_SETTINGS_WIN = None          # 열려 있는 설정창(tk.Tk) — 닫히면 None
+_SETTINGS_LOCK = threading.Lock()
+
+
 def open_settings() -> None:
+    global _SETTINGS_WIN
     import tkinter as tk
     from tkinter import messagebox, ttk
+
+    with _SETTINGS_LOCK:      # 연타로 두 스레드가 동시에 들어오는 것 차단
+        if _SETTINGS_WIN is not None:
+            try:              # 이미 떠 있다 → 복원 + 최상위로만
+                _SETTINGS_WIN.deiconify()
+                _SETTINGS_WIN.lift()
+                _SETTINGS_WIN.focus_force()
+                return
+            except Exception:
+                _SETTINGS_WIN = None      # 창이 이미 파괴됨 → 새로 만든다
 
     load_cfg()
     printers = list_printers()
 
     root = tk.Tk()
+    _SETTINGS_WIN = root
+    def _on_close():
+        global _SETTINGS_WIN
+        _SETTINGS_WIN = None
+        try: root.destroy()
+        except Exception: pass
+    root.protocol("WM_DELETE_WINDOW", _on_close)
     root.title(f"{APP_NAME} 설정")
     root.resizable(False, False)
     try:
@@ -518,11 +548,16 @@ def open_settings() -> None:
     ttk.Label(fr_ds, text="(1~8)", foreground="#777").pack(side="left", padx=(4, 0))
 
     def do_save(close: bool = True):
-        save_cfg({"kanban_printer": v_kan.get(), "label_printer": v_lab.get(),
+        # ★빈 프린터로 덮어쓰지 않는다(2026-09-07).
+        #   설정창이 여러 개 떠 빈 창에서 저장하면 멀쩡한 설정이 지워져
+        #   자동출력이 **조용히** 멈춘다. 값이 비면 기존 설정을 유지한다.
+        _kan = (v_kan.get() or "").strip() or _cfg.get("kanban_printer", "")
+        _lab = (v_lab.get() or "").strip() or _cfg.get("label_printer", "")
+        save_cfg({"kanban_printer": _kan, "label_printer": _lab,
                   "label_mode": v_mode.get(), "label_darkness": v_dark.get(),
                   "label_speed": v_spd.get(), "silent": True})
         if close:
-            root.destroy()
+            _on_close()          # ★전역(_SETTINGS_WIN)까지 정리하고 닫는다
 
     def do_test(kind: str):
         do_save(close=False)
@@ -551,14 +586,21 @@ def open_settings() -> None:
     ttk.Label(frm, text=f"수신대기 http://127.0.0.1:{PORT}   ·   설정파일 {CFG_PATH}",
               foreground="#888").grid(row=7, column=0, columnspan=3, sticky="w", pady=(12, 0))
 
-    root.mainloop()
+    try:
+        root.mainloop()
+    finally:
+        # ★어떤 경로로 닫히든(X·destroy·예외) 반드시 전역을 비운다.
+        #   안 비우면 죽은 창을 가리켜 다음 [설정]이 영영 안 열린다.
+        _SETTINGS_WIN = None
 
 
 # ───────────────────────────── 테스트 출력물 ─────────────────────────────
 def tspl_test(darkness: int = 8, speed: int = 3) -> bytes:
     """40×20mm 라벨 테스트(TSPL). QR + 텍스트 — 실제 제품스티커와 같은 배치."""
+    # ★GAP 3mm — 현장 실측(2026-09-07). 2mm 로는 프린터가 라벨 시작점을 잘못 잡아
+    #   인쇄가 위쪽 경계를 넘어 잘리고 빈 라벨이 섞여 나왔다(서버 printjob.LABEL_GAP_MM 과 동일 값).
     cmds = [
-        "SIZE 40 mm,20 mm", "GAP 2 mm,0", f"DENSITY {int(darkness)}", f"SPEED {int(speed)}",
+        "SIZE 40 mm,20 mm", "GAP 3 mm,0", f"DENSITY {int(darkness)}", f"SPEED {int(speed)}",
         "DIRECTION 1", "CLS",
         'QRCODE 12,12,L,4,A,0,"PNC-TEST-0001"',
         'TEXT 165,20,"3",0,1,1,"PNC Industry"',

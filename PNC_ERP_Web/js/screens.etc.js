@@ -385,10 +385,26 @@ SCREEN.perm=(c)=>{
       if(!u){box.innerHTML='<div class="empty" style="padding:60px">오른쪽에서 사용자를 선택하세요.</div>';return;}
       const admin=(u.roles||[]).includes('시스템관리자');
       const pm=PERM.perms[selUid]=PERM.perms[selUid]||{};
-      // ★역할(부서) 기본권한 반영 — 실제 로그인 시 권한과 동일하게 표시(자재는 자재만 체크)
-      const roleHas=(sid)=>(u.roles||[]).some(r=>(ROLE_MOD[r]||[]).includes(_sid2mod(sid)));
-      const effView=(sid)=>admin||(pm[sid]&&pm[sid].view!==undefined?pm[sid].view:roleHas(sid));
-      const effEdit=(sid)=>admin||(pm[sid]&&pm[sid].edit!==undefined?pm[sid].edit:roleHas(sid));
+      /* ★역할 기본권한 반영 (2026-09-07 교정)
+           증상 — [역할별 설정]에서 역할 권한을 저장해도 사용자 화면에 반영되지 않았다.
+                  '조회전용' 역할 사용자는 체크가 **하나도** 안 떴다.
+           원인 두 가지
+             ① 사용자 화면이 ROLE_MOD(코드 상수)만 보고, 화면에서 저장한
+                '@역할명' 권한행(user_perm)을 **아예 읽지 않았다**.
+             ② ROLE_MOD 에는 '조회전용'·'협력사' 키가 없다 → undefined → 항상 false.
+           ⟹ '@역할명' 에 설정이 있으면 그것을 우선하고, 없을 때만 ROLE_MOD 로 넘어간다.
+              (역할별 설정에서 만든 값이 곧 그 역할의 기본권한이 된다) */
+      const roleAt=(sid,act)=>{
+        for(const r of (u.roles||[])){
+          const rp=(PERM.perms[ROLE_KEY(r)]||{})[sid];
+          if(rp && rp[act]!==undefined) return !!rp[act];
+        }
+        return null;      // 역할행에 설정 없음 → ROLE_MOD 폴백
+      };
+      const roleMod=(sid)=>(u.roles||[]).some(r=>(ROLE_MOD[r]||[]).includes(_sid2mod(sid)));
+      const roleHas=(sid,act)=>{const v=roleAt(sid,act); return v===null?roleMod(sid):v;};
+      const effView=(sid)=>admin||(pm[sid]&&pm[sid].view!==undefined?pm[sid].view:roleHas(sid,'view'));
+      const effEdit=(sid)=>admin||(pm[sid]&&pm[sid].edit!==undefined?pm[sid].edit:roleHas(sid,'edit'));
       const nv=progs.filter(p=>effView(p.id)).length;
       const ne=progs.filter(p=>effEdit(p.id)).length;
       box.innerHTML=`
@@ -405,9 +421,19 @@ SCREEN.perm=(c)=>{
                  판정 정본은 여전히 user_perm(사용자별) 이므로 백엔드는 손대지 않는다 —
                  개인별 예외도 종전처럼 계속 줄 수 있다. -->
           <span style="margin-left:10px;padding-left:10px;border-left:1px solid var(--line)">
-            <select class="inp" id="pbulkrole" style="width:auto" title="이 역할을 가진 사용자 전원에게 지금 설정을 복사합니다">
-              ${(u.roles||[]).filter(r=>r!=='시스템관리자').map(r=>`<option value="${esc(r)}">${esc(r)} 역할 전체</option>`).join('')
-                || '<option value="">역할 없음</option>'}
+            <!-- ★2026-09-07 — 종전엔 **그 사용자가 가진 역할만** 목록에 넣어,
+                   역할이 없는 계정(부서 미배정 등)에서는 "역할 없음"만 뜨고
+                   일괄적용을 아예 쓸 수 없었다(실사용 신고).
+                   ⟹ 전체 역할을 고를 수 있게 한다. 본인 역할을 위쪽에 모아
+                      기본 선택되게 두어 종전 사용감은 유지한다. -->
+            <select class="inp" id="pbulkrole" style="width:auto" title="선택한 역할을 가진 사용자 전원에게 지금 설정을 복사합니다">
+              ${(()=>{const mine=(u.roles||[]).filter(r=>r!=='시스템관리자');
+                      const rest=roleList().filter(r=>mine.indexOf(r)<0);
+                      const opt=r=>`<option value="${esc(r)}">${esc(r)} 역할 전체</option>`;
+                      let h=mine.map(opt).join('');
+                      if(mine.length&&rest.length)h+='<option disabled>──────────</option>';
+                      h+=rest.map(opt).join('');
+                      return h||'<option value="">역할 없음</option>';})()}
             </select>
             <button class="btn" id="pbulk" style="background:#7a4ec0;color:#fff"
               title="지금 화면의 조회/수정 설정을 그 역할 전원에게 그대로 적용합니다">역할 일괄적용</button>
@@ -436,7 +462,7 @@ SCREEN.perm=(c)=>{
       const bulkBtn=box.querySelector('#pbulk');
       if(bulkBtn)bulkBtn.onclick=async(ev)=>{
         const role=(box.querySelector('#pbulkrole')||{}).value||'';
-        if(!role){alert('이 사용자에게 역할이 없습니다. 사용자관리에서 역할을 먼저 지정하세요.');return;}
+        if(!role){alert('적용할 역할을 선택하세요.\n\n등록된 역할이 없으면 [역할별 설정] 탭에서 먼저 만드세요.');return;}
         const targets=users.filter(x=>(x.roles||[]).includes(role)
                                    && !(x.roles||[]).includes('시스템관리자'));
         if(!targets.length){alert(`'${role}' 역할을 가진 사용자가 없습니다.`);return;}
@@ -483,6 +509,16 @@ SCREEN.perm=(c)=>{
     if(tab==='role')renderRoles(); else renderList();
     renderDetail();
   };
+  /* ★진입 시 서버 계정목록을 다시 받는다(2026-09-07 교정).
+       증상 — 사용자관리에서는 "라인" 검색이 되는데 권한관리에서는 **0명**이 나왔다.
+       원인 = getUsers()(core.js:694)는 localStorage('perm_users')만 읽고,
+              loadUsersFromServer()는 **부팅 때 한 번**만 돈다(boot.js:159).
+              사용자관리 화면은 자체적으로 서버를 다시 부르는데 권한관리는 안 불러,
+              그 사이 다른 PC·마이그레이션으로 늘어난 계정이 이 화면에만 없었다.
+       ⟹ 화면을 열 때 서버에서 받아 localStorage 를 갱신하고 다시 그린다.
+          실패해도 무시한다 — 종전처럼 로컬 목록으로 동작한다(오프라인 내성). */
+  (async()=>{ try{ if(await PERM.loadUsersFromServer()) draw(); }catch(_){}
+  })();
   draw();
 };
 
