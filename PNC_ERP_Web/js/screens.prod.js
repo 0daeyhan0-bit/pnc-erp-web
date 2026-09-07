@@ -4621,7 +4621,9 @@ SCREEN.prodsheet=(host)=>{
         //   "2로 맞춰보고 안 되면 4" 식의 시험이 의미가 있다.
         // ★host 기준으로 찾는다 — 이 자리의 g() 는 오버레이(ov)를 가리켜 #ps-gap 을 못 찾는다.
         {const _e=host.querySelector('#ps-gap'); const _gp=parseFloat((_e&&_e.value)||'')||0;
-         if(_gp)q.set('gap',_gp);}
+         if(_gp)q.set('gap',_gp);
+         const _s=host.querySelector('#ps-shift'); const _sh=parseInt((_s&&_s.value)||'',10)||0;
+         if(_sh)q.set('shift',_sh);}
         return `${API}/api/print/label?${q}`;}))return;
     try{const r=await fetch(`${API}/api/prodsheet/label-print?${qs}`);j=await r.json();}
     catch(e){alert('라벨 조회 실패: '+e);return;}
@@ -4970,6 +4972,14 @@ SCREEN.prodsheet=(host)=>{
        <input class="inp" id="ps-gap" type="number" step="0.5" min="1" max="10" value="3"
               style="width:52px;height:24px;font-size:11px;min-width:52px" title="라벨과 라벨 사이 간격(mm)">
        <span style="font-size:11px;color:#8a94a6">mm</span>
+       <!-- ★세로 보정(2026-09-07) — 갭을 2·3·4 로 바꿔 보정해도 위치가 그대로일 때 쓴다.
+              인쇄 시작점을 직접 위(−)/아래(+)로 민다. 1mm = 8dot.
+              예: 한 칸의 60% 정도 아래로 밀렸으면 -96 부터 시험한다. -->
+       <label class="tl" style="font-size:11px;color:#41546b;margin-left:4px">세로</label>
+       <input class="inp" id="ps-shift" type="number" step="8" min="-200" max="200" value="0"
+              style="width:56px;height:24px;font-size:11px;min-width:56px"
+              title="인쇄 시작점 보정 — 음수=위로, 양수=아래로 (8dot=1mm)">
+       <span style="font-size:11px;color:#8a94a6">dot</span>
        <button class="btn" id="ps-calib" style="height:24px;padding:0 8px;font-size:11px"
                title="라벨이 밀려 찍힐 때 누르세요 — 프린터가 라벨 간격을 다시 측정합니다(라벨 1~2장 사용)">갭 보정</button>
      </div>
