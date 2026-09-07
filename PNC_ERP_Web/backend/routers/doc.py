@@ -61,12 +61,13 @@ def doc_list(item_code: str = Query("")):
     # nx.doc(신규) — 있으면 최상단
     nx = _nx(); ncur = nx.cursor()
     try:
-        # ★도면 계열만 — 품질불량 첨부(QC_ERROR)는 여기 나오면 안 된다(2026-09-07 교정).
-        #   실사용 신고 — 「설계도면조회」에 품질불량관리에서 올린 카톡 사진·md 파일이 섞여 나왔다.
-        #   원인 = doc_kind 필터 없이 nx.doc 전건을 담았다. QC_ERROR 는 _DOC_KIND 에도 없어
-        #          구분칸에 코드가 그대로 노출됐다(실측 QC_ERROR 10건).
-        #   이 화면은 레거시 w_pr_master_200(일반도면·시방도면) 대응이므로 그 세 종류만 보인다.
-        _KINDS = ("GENERAL_DWG", "SPEC_DWG", "SPEC_SHEET")
+        # ★도면만 — 품질불량 첨부(QC_ERROR)·시방서(SPEC_SHEET)는 여기 나오지 않는다(2026-09-07).
+        #   ① QC_ERROR — 「설계도면조회」에 품질불량관리에서 올린 카톡 사진·md 가 섞여 나왔다
+        #      (실측 10건). doc_kind 필터가 아예 없었고, _DOC_KIND 에도 없어 코드가 그대로 노출됐다.
+        #   ② SPEC_SHEET — 시방서는 **품목시방 탭**(itemspec_list)이 보여준다.
+        #      양쪽에 다 넣었더니 같은 파일이 두 탭에 중복으로 나왔다(사용자 신고).
+        #      이 화면은 레거시 w_pr_master_200 = 도면 조회 자리이므로 도면만 남긴다.
+        _KINDS = ("GENERAL_DWG", "SPEC_DWG")
         _kph = ",".join("?" * len(_KINDS))
         if item:
             ncur.execute(f"""SELECT doc_id,doc_kind,orig_filename,ext,byte_size,insert_user,insert_dt,rev_yymd,rev_no
