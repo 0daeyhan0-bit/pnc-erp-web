@@ -1900,8 +1900,21 @@ def sale040_cancel(payload: dict = Body(...)):
     try:
         # ★마감잠금(2026-08-29 결선) — 출하취소는 SA_T_STOCK_MAINT 에 INSERT 하는 **재고 이동**이다.
         #   규칙B: 재고가 조금이라도 움직이면 마감된 기간은 막는다(§0-★ 예외 없음).
+        # ★2026-09-07 — 셀의 날짜가 아니라 **실제 출하일자(SALE_YMD)** 로 판정한다.
+        #   화면 셀 날짜는 계획순 배분값이라(아래 주석 참조) 실제 전표 일자와 다르다.
+        #   그대로 쓰면 마감된 과거분을 열린 날짜로 오판해 통과시킬 수 있다.
         for _c in cells:
-            _y = _d6(str(_c.get("ymd") or "").strip())
+            _wo = str(_c.get("wo") or "").strip()
+            _swo = str(_c.get("swo") or "").strip()
+            _it = str(_c.get("item") or "").strip()
+            if not (_wo and _it):
+                continue
+            cur.execute("""SELECT TOP 1 SALE_YMD FROM nx.SA_T_SALE_DTL
+                            WHERE WORK_ORDER=? AND ISNULL(SPLIT_WORK_ORDER,'')=? AND ITEM_CODE=?
+                              AND ISNULL(FINISH_FLAG,'0')='0'
+                            ORDER BY SALE_YMD DESC""", _wo, _swo, _it)
+            _rr = cur.fetchone()
+            _y = str(_rr[0]).strip() if _rr else ""
             if _y:
                 _assert_open(cur, _y, "SAL", "출하취소")
         done = []
@@ -1909,13 +1922,32 @@ def sale040_cancel(payload: dict = Body(...)):
             wo = str(c.get("wo") or "").strip()
             swo = str(c.get("swo") or "").strip()
             it = str(c.get("item") or "").strip()
-            y = _d6(str(c.get("ymd") or ""))
-            if not (wo and it and y):
+            y = ""      # ★셀 날짜는 쓰지 않는다 — 아래에서 실제 SALE_YMD 로 채운다
+            if not (wo and it):
                 continue
-            cur.execute("""SELECT ISNULL(SUM(SALE_QTY),0) FROM nx.SA_T_SALE_DTL
+            # ★★출하일자를 조건에 쓰지 않는다(2026-09-07 교정).
+            #   실사용 오류: "이전에 잡아둔 출하는 취소가 안 된다"(당일 것만 됐다).
+            #   원인 = 화면 셀의 날짜와 실제 SALE_YMD 가 **다른 축**이다.
+            #     화면(sday, L1731~1742)은 실제 출하일자를 쓰지 않고, 총 출하량을
+            #     **계획일자 순서대로 앞에서부터 채워 넣은** 배분 결과다.
+            #     그래서 7(월) 칸이 채워져 있어도 실제 SALE_YMD 는 260901 일 수 있다.
+            #     (실측: 제번 6IPRG0A4·6IPRG0A5·6IPRG09Y 는 전부 SALE_YMD=260901 인데
+            #      화면은 기준일 260907 로 취소를 보내 0건 → "취소할 출하실적이 없습니다")
+            #     당일 출하만 우연히 계획일=출하일이라 취소가 됐던 것.
+            #   ⟹ 제번(+분할)+도번으로 찾고, **최근 출하분부터** 되돌린다.
+            #      셀 날짜는 어느 행을 고를지의 근거가 되지 못하므로 조건에서 뺀다.
+            #   ※SALE_YMD 는 재고이력(SA_T_STOCK_MAINT)·잔액 복원에 그대로 쓴다 —
+            #     되돌린 행의 실제 일자여야 수불이 맞는다.
+            cur.execute("""SELECT TOP 1 SALE_YMD, ISNULL(SUM(SALE_QTY),0)
+                             FROM nx.SA_T_SALE_DTL
                             WHERE WORK_ORDER=? AND ISNULL(SPLIT_WORK_ORDER,'')=? AND ITEM_CODE=?
-                              AND SALE_YMD=? AND ISNULL(FINISH_FLAG,'0')='0'""", wo, swo, it, y)
-            q = int(float(cur.fetchone()[0] or 0))
+                              AND ISNULL(FINISH_FLAG,'0')='0'
+                            GROUP BY SALE_YMD ORDER BY SALE_YMD DESC""", wo, swo, it)
+            _r = cur.fetchone()
+            if not _r:
+                continue
+            y = str(_r[0]).strip()          # ★실제 출하일자로 교체(이력·마감판정 모두 이 값 기준)
+            q = int(float(_r[1] or 0))
             if q <= 0:
                 continue
             cur.execute("""DELETE FROM nx.SA_T_SALE_DTL
