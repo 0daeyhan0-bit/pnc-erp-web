@@ -436,6 +436,42 @@ def _weld_consume(cro, nx, item, signed_qty, wo, user, do_gate=True):
     def _seq():
         nc.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd6)
         return int(nc.fetchone()[0] or 1)
+
+    def _mat_hist(mat, part, dq, tag_remark):
+        """★생산 수불이력(nx.PR_T_STOCK_MAINT_MAT tag='4') 에도 남긴다 (2026-09-07 신설).
+
+           왜 — 「생산입출고현황」(원본 PR_T_STOCK_MAINT_MAT)이 읽는 곳이 여기다.
+                용접봉 소비는 stock_ledger(tag W) 에만 쓰고 있어서, 화면에서는
+                **소비 이력이 260904 이후 통째로 안 보였다**(실사용 오류).
+                자재(⑦ prodsheet.py:1547)는 이미 이 테이블에 tag='4' 로 쌓고 있다 —
+                용접봉만 빠져 있었다. 같은 축으로 맞춘다.
+           ★자재와 동일하게 (일자·tag4·파트·ITEM·MAT) 키로 **누적**한다.
+             스캔 1건마다 행을 만들면 하루 수백 행이 되어 화면이 못 읽는다.
+           ★잔량(PU_T_MAT_STOCK_WH)은 건드리지 않는다 — 용접봉 재고 정본은
+             stock_ledger 누적(Q1000)이고, 여기서 또 빼면 이중차감이 된다.
+        """
+        try:
+            nc.execute("""SELECT MAINT_SEQ FROM nx.PR_T_STOCK_MAINT_MAT
+                            WHERE MAINT_YMD=? AND MAINT_TAG='4' AND ISNULL(PART_CODE,'')=?
+                              AND ITEM_CODE=? AND MAT_CODE=?""", ymd6, part, item, mat)
+            ex = nc.fetchone()
+            if ex:
+                nc.execute("""UPDATE nx.PR_T_STOCK_MAINT_MAT SET MAINT_QTY=ISNULL(MAINT_QTY,0)+?,
+                                  UPDATE_USER_ID=?, UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW='weld'
+                                WHERE MAINT_YMD=? AND MAINT_SEQ=?""", dq, user, ymd6, int(ex[0]))
+            else:
+                nc.execute("""SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.PR_T_STOCK_MAINT_MAT
+                                WHERE MAINT_YMD=?""", ymd6)
+                _ms = int(nc.fetchone()[0] or 1)
+                nc.execute("""INSERT INTO nx.PR_T_STOCK_MAINT_MAT(MAINT_YMD,MAINT_SEQ,MAINT_TAG,
+                                  PART_CODE,MAT_CODE,MAINT_QTY,MAINT_COST,MAINT_AMT,REMARKS,ITEM_CODE,
+                                  INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,
+                                  UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                                VALUES(?,?,'4',?,?,?,0,0,?,?,?,GETDATE(),'weld',?,GETDATE(),'weld')""",
+                            ymd6, _ms, part, mat, dq, tag_remark, item, user, user)
+        except Exception:
+            pass      # 이력 실패해도 원장(정본)은 남긴다 — stock.py:503 과 동일 규약
+
     weld_consumed = 0.0
     for br, wq in weld.items():
         dq = -(wq * signed_qty)
@@ -445,6 +481,7 @@ def _weld_consume(cro, nx, item, signed_qty, wo, user, do_gate=True):
               GAGONG_PROC_CODE,WORK_ORDER,MAINT_QTY,REMARKS,INSERT_USER_ID,INSERT_DATETIME)
             VALUES('PRD',?,?,'W','Z99990',NULL,?,?,?,?,?,?,GETDATE())""",
             ymd6, _seq(), br, _weld_proc_code(nx, br), (wo or None), dq, '용접봉 생산소비(공정종속)', user)
+        _mat_hist(br, _weld_proc_code(nx, br), dq, '용접봉 생산소비')
         weld_consumed += wq * signed_qty
     ring_consumed = 0.0                            # ★용접링 소비/복원 (−R @ Q1000, 부호수량)
     for rc, rq in ring.items():
@@ -455,6 +492,7 @@ def _weld_consume(cro, nx, item, signed_qty, wo, user, do_gate=True):
               GAGONG_PROC_CODE,WORK_ORDER,MAINT_QTY,REMARKS,INSERT_USER_ID,INSERT_DATETIME)
             VALUES('PRD',?,?,'R','Z99990',NULL,?,?,?,?,?,?,GETDATE())""",
             ymd6, _seq(), rc, WELD_WAREHOUSE, (wo or None), dq, '용접링 생산소비(공정종속)', user)
+        _mat_hist(rc, WELD_WAREHOUSE, dq, '용접링 생산소비')
         ring_consumed += rq * signed_qty
     return {"ok": True, "item": item, "weld_kinds": len(weld), "weld_consumed": round(weld_consumed, 4),
             "ring_kinds": len(ring), "ring_consumed": round(ring_consumed, 4)}
