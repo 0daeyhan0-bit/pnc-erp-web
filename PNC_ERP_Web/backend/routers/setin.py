@@ -352,28 +352,28 @@ _DW6_SQL = """
 WITH CTE_BOM(mat_code, in_cust_code, mat_use_qty, cum_in_cust_code,
              set_except_flag, insp_flag, in_gagong_proc_code) AS (
   SELECT i.item_code,
-         CASE WHEN i.work_code > '' THEN i.work_code ELSE i.in_cust_code END,
+         CASE WHEN i.work_code > '' THEN i.work_code ELSE i.in_cust END,
          1,
          CONVERT(varchar(500),'||' + CASE WHEN i.work_code > '' THEN i.work_code
-                                          ELSE i.in_cust_code END + '|'),
+                                          ELSE i.in_cust END + '|'),
          '0',
          (SELECT insp_flag FROM nx.pr_m_item_sub s WHERE i.item_code = s.item_code),
          CONVERT(varchar(10),'')
-    FROM nx.pr_m_item i
+    FROM nx.item i
    WHERE i.item_code = ?
   UNION ALL
   SELECT b1.mat_code,
-         CASE WHEN m.work_code > '' THEN m.work_code ELSE m.in_cust_code END,
+         CASE WHEN m.work_code > '' THEN m.work_code ELSE m.in_cust END,
          CONVERT(int, CASE WHEN cb.mat_use_qty = 0 THEN 0
                       ELSE CONVERT(NUMERIC(18,5), cb.mat_use_qty * b1.use_qty) END),
          CONVERT(varchar(500), cb.cum_in_cust_code + '|'
-                 + CASE WHEN m.work_code > '' THEN m.work_code ELSE m.in_cust_code END + '|'),
+                 + CASE WHEN m.work_code > '' THEN m.work_code ELSE m.in_cust END + '|'),
          ISNULL(b1.set_except_flag,'0'),
          (SELECT insp_flag FROM nx.pr_m_item_sub s WHERE m.item_code = s.item_code),
          b1.in_gagong_proc_code
     FROM CTE_BOM cb
     JOIN nx.pr_m_item_bom b1 ON cb.mat_code = b1.item_code
-    JOIN nx.pr_m_item m      ON b1.mat_code = m.item_code
+    JOIN nx.item m      ON b1.mat_code = m.item_code
    WHERE ISNULL(b1.except_flag,'0') <> '1'
      AND NOT EXISTS (SELECT '2' FROM nx.pr_m_mat WHERE mat_code = b1.mat_code)
 )
@@ -428,7 +428,7 @@ def _apply_sagub(cur, ymd, cust, mats, user, win, ref=""):
                      FROM nx.pr_m_item_bom b WITH(NOLOCK)
                      JOIN nx.pr_m_item_bom_sub c WITH(NOLOCK)
                        ON b.item_code=c.item_code AND b.mat_code=c.mat_code
-                     JOIN nx.pr_m_item a WITH(NOLOCK) ON b.mat_code=a.item_code
+                     JOIN nx.item a WITH(NOLOCK) ON b.mat_code=a.item_code
                     WHERE b.item_code=? AND c.sagub_flag='1'
                     GROUP BY b.mat_code) AS S
                ON (T.MAT_CODE=S.mat_code AND T.CUST_CODE=S.cust_code)
@@ -454,7 +454,7 @@ def _apply_sagub(cur, ymd, cust, mats, user, win, ref=""):
                    b.use_qty * ? * -1, ?, ?, ?, ?,
                    ?, GETDATE(), ?, ?, GETDATE(), ?
               FROM nx.pr_m_item_bom b WITH(NOLOCK)
-              JOIN nx.pr_m_item a WITH(NOLOCK) ON b.mat_code=a.item_code
+              JOIN nx.item a WITH(NOLOCK) ON b.mat_code=a.item_code
              WHERE b.item_code=? AND b.sagub_flag='1'
         """, ymd, sseq, cust, qty, ref, mat_code, ymd, 0,
              user, win, user, win, mat_code)
@@ -490,12 +490,12 @@ def setstock_manual_prep(cust: str = Query(""), item: str = Query("")):
         #   pr_m_item.in_cust_code = 화면거래처 AND work_code = '' → '직납품'
         cur.execute(f"""SELECT TOP 500 m.item_code, ISNULL(i.item_name,'') itemnm,
                                SUM(m.maint_qty) stock_qty,
-                               MAX(CASE WHEN ISNULL(pi.IN_CUST_CODE,'')=m.cust_code
-                                         AND ISNULL(pi.WORK_CODE,'')=''
+                               MAX(CASE WHEN ISNULL(pi.in_cust,'')=m.cust_code
+                                         AND ISNULL(pi.work_code,'')=''
                                         THEN '1' ELSE '0' END) direct
                           FROM nx.set_stock_maint m WITH(NOLOCK)
                           LEFT JOIN nx.item i WITH(NOLOCK) ON i.item_code=m.item_code
-                          LEFT JOIN nx.pr_m_item pi WITH(NOLOCK) ON pi.ITEM_CODE=m.item_code
+                          LEFT JOIN nx.item pi WITH(NOLOCK) ON pi.item_code=m.item_code
                           {where}
                          GROUP BY m.item_code, i.item_name
                          ORDER BY m.item_code""", *p)
@@ -1204,7 +1204,7 @@ def setinsp_list(request: Request, frm: str = Query(""), to: str = Query(""),
     try:
         cur.execute("""SELECT TOP {} m.maint_ymd, m.maint_seq, RTRIM(ISNULL(m.maint_tag,'')),
                   RTRIM(ISNULL(m.cust_code,'')), ISNULL(RTRIM(c.CUST_DESC),''),
-                  RTRIM(ISNULL(m.item_code,'')), ISNULL(RTRIM(i.ITEM_DESC),''),
+                  RTRIM(ISNULL(m.item_code,'')), ISNULL(RTRIM(i.item_name),''),
                   CAST(ISNULL(m.maint_qty,0) AS float), RTRIM(ISNULL(m.sheet_no,'')),
                   RTRIM(ISNULL(m.status,'')), RTRIM(ISNULL(m.derived_flag,'0')),
                   CONVERT(varchar(19), m.insert_datetime, 120),
@@ -1212,7 +1212,7 @@ def setinsp_list(request: Request, frm: str = Query(""), to: str = Query(""),
                   CONVERT(varchar(19), q.status_dt, 120), ISNULL(RTRIM(q.status_user),'')
              FROM nx.set_stock_maint m WITH(NOLOCK)
              LEFT JOIN nx.CM_M_CUST c WITH(NOLOCK) ON RTRIM(c.CUST_CODE)=RTRIM(m.cust_code)
-             LEFT JOIN nx.PR_M_ITEM i WITH(NOLOCK) ON RTRIM(i.ITEM_CODE)=RTRIM(m.item_code)
+             LEFT JOIN nx.item i WITH(NOLOCK) ON RTRIM(i.item_code)=RTRIM(m.item_code)
              LEFT JOIN nx.set_input_req q WITH(NOLOCK)
                     ON RTRIM(ISNULL(q.barcode_no,''))=RTRIM(ISNULL(m.sheet_no,''))
                    AND RTRIM(ISNULL(q.item_code,''))=RTRIM(ISNULL(m.item_code,''))

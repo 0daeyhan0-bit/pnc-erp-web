@@ -177,7 +177,7 @@ def matexpect(axis: str = Query("prod"), frm: str = Query(""), to: str = Query("
     try:
         itnm, cust = _name_maps(cur)
         # 자재 매입처(정본 in_cust) — 실적귀속 (설계 §4)
-        cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(in_cust_code,'') FROM nx.PR_M_ITEM")
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(in_cust,'') FROM nx.item")
         incust = {r[0]: str(r[1]).strip() for r in cur.fetchall()}
         # ★분류 = 매입유형 (확정입고집계표 정본): 업체 CUST_TYPE(cust맵) + mgmt_vendor_gubun override
         try:
@@ -461,7 +461,7 @@ def _matbuy_exp(fr6, to6, frm, to):
         itnm, cust = _name_maps(cur)
         ov = _ovmap(cur)
         rawset = _rawmat_set(cur)
-        cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(in_cust_code,'') FROM nx.PR_M_ITEM")
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(in_cust,'') FROM nx.item")
         incust = {r[0]: str(r[1]).strip() for r in cur.fetchall()}
         agg = {}
 
@@ -596,7 +596,7 @@ def _matbuy_act(fr6, to6, frm, to):
         itnm, cust = _name_maps(cur)
         ov = _ovmap(cur)
         rawset = _rawmat_set(cur)
-        cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(in_cust_code,'') FROM nx.PR_M_ITEM")
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(in_cust,'') FROM nx.item")
         incust = {r[0]: str(r[1]).strip() for r in cur.fetchall()}
         cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(LTRIM(RTRIM(cut_gubun)),'') FROM nx.item")
         cutg = {r[0]: r[1] for r in cur.fetchall()}

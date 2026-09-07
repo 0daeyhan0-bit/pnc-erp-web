@@ -628,8 +628,9 @@ def _step5_item(cur):
     #   그대로 쓰면 유령 ASSY 차단이 풀린다. 실측 2026-09-03 — _known 을 nx.item 으로 바꿨더니
     #   AJR30133610(웹 등록·라이브 미등록·모델/주문정보 없음)이 되살아나
     #   plan_item_dtl 15행 → plan_part_dtl 60행 → plan_part_mat **315키**로 번졌다.
-    #   ⟹ 등록여부는 라이브에서 직접 읽는다(라이브는 읽기전용 §1-1, 조회는 허용).
-    cur.execute("SELECT ITEM_CODE FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM")
+    #   ⟹ 등록여부 = nx.item(클린 정본·단일데이터셋 2026-09-08). 종전 미러 PR_M_ITEM(컷오버후 write-dead)에서 전환.
+    #     nx.item이 미러보다 1,249품목 더 완전(SUB/신규)이라 유령 오판 감소·in_cust diff0.
+    cur.execute("SELECT item_code FROM PARTNER_ERP_TEST3.nx.item")
     _known = set(str(r[0]).strip() for r in cur.fetchall())
     cur.execute("""IF OBJECT_ID('nx.plan_item_dtl') IS NULL CREATE TABLE nx.plan_item_dtl(
         PLAN_YMD varchar(6),WORK_ORDER varchar(20),SPLIT_WORK_ORDER varchar(30),C_ITEM_CODE varchar(20),

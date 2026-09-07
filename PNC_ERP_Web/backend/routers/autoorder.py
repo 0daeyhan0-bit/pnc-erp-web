@@ -48,7 +48,7 @@ def _mat_requirement(cur, line, cr, vendor, item, gubun):
     if vendor.strip():
         w.append("s.VENDOR_CODE=?"); p.append(vendor.strip())
     if item.strip():
-        w.append("(s.MAT_CODE LIKE ? OR EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM i2 WHERE i2.ITEM_CODE COLLATE DATABASE_DEFAULT=s.MAT_CODE COLLATE DATABASE_DEFAULT AND i2.ITEM_DESC LIKE ?))")
+        w.append("(s.MAT_CODE LIKE ? OR EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.item i2 WHERE i2.item_code COLLATE DATABASE_DEFAULT=s.MAT_CODE COLLATE DATABASE_DEFAULT AND i2.item_name LIKE ?))")
         p += [f"%{item.strip()}%", f"%{item.strip()}%"]
     if line.strip():
         w.append("EXISTS(SELECT 1 FROM nx.plan_dtl d WHERE d.WORK_ORDER=s.WORK_ORDER AND d.LINE_NO=?)"); p.append(line.strip())
@@ -129,7 +129,7 @@ def _build_preview(line, cr, vendor, item, gubun, asof):
     try:
         for i in range(0, len(codes), 900):
             ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"SELECT LTRIM(RTRIM(ITEM_CODE)), ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT LTRIM(RTRIM(item_code)), ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE item_code IN ({ph})", *ch)
             for r in cur.fetchall():
                 nm[str(r[0]).strip()] = r[1]
         for i in range(0, len(codes), 900):

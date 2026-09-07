@@ -154,13 +154,13 @@ def setinstat_opts():
         cur.execute("""SELECT DISTINCT line_no FROM nx.plan_part_dtl WITH(NOLOCK)
                         WHERE ISNULL(line_no,'')<>'' ORDER BY line_no""")  # noqa
         lines = [str(r[0]).strip() for r in cur.fetchall()]
-        # ★자도번작업처 = 자도번의 매입처(pr_m_item.IN_CUST_CODE) — list 와 동일 기준
-        cur.execute("""SELECT mi.IN_CUST_CODE cd, ISNULL(c.CUST_DESC,'') nm
+        # ★자도번작업처 = 자도번의 매입처(nx.item.in_cust·단일데이터셋 2026-09-08, 미러 in_cust와 diff0) — list 와 동일 기준
+        cur.execute("""SELECT mi.in_cust cd, ISNULL(c.CUST_DESC,'') nm
                          FROM nx.plan_part_mat m WITH(NOLOCK)
-                         JOIN nx.pr_m_item mi WITH(NOLOCK) ON mi.ITEM_CODE=m.mat_code
-                         LEFT JOIN nx.CM_M_CUST c WITH(NOLOCK) ON c.CUST_CODE=mi.IN_CUST_CODE
-                        WHERE ISNULL(mi.IN_CUST_CODE,'')<>''
-                        GROUP BY mi.IN_CUST_CODE, c.CUST_DESC
+                         JOIN nx.item mi WITH(NOLOCK) ON mi.item_code=m.mat_code
+                         LEFT JOIN nx.CM_M_CUST c WITH(NOLOCK) ON c.CUST_CODE=mi.in_cust
+                        WHERE ISNULL(mi.in_cust,'')<>''
+                        GROUP BY mi.in_cust, c.CUST_DESC
                         ORDER BY ISNULL(c.CUST_DESC,'')""")
         custs = [{"code": str(a).strip(), "name": (b or "").strip()} for a, b in cur.fetchall()]
         return {"lines": lines, "custs": custs, "base_ymd": base}
