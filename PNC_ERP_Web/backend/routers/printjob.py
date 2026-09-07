@@ -406,6 +406,20 @@ def build_label_pdf(j: dict) -> bytes:
 #   빈 라벨이 섞여 나왔다. 용지를 바꾸면 이 값만 고치면 된다.
 LABEL_GAP_MM = 3
 
+# ★GAPDETECT — 프린터가 갭을 **실측**해 라벨 시작점을 다시 잡는다(2026-09-07).
+#   GAP 3mm 로 고치고 헤더를 1회로 줄여 빈 라벨은 사라졌으나, 여전히 내용이
+#   라벨 경계를 넘어 밀리는 현상이 남았다(현장 사진 — 아래 한 장만 정상).
+#   좌표는 y=14~130dot 으로 20mm(160dot) 안에 들어가므로 좌표 문제가 아니라
+#   **프린터가 라벨의 시작 위치를 모르는 것**이다.
+#
+#   ★측정값은 프린터 내부(EEPROM)에 저장되므로 **한 번만 하면 된다.**
+#     그래서 매 작업 넣지 않고 **서버 기동 후 첫 출력 1회**만 보낸다 —
+#     라벨 낭비(측정 시 1~2장 배출)를 그 1회로 끝낸다.
+#   ※용지를 바꿨을 때 다시 하려면 백엔드를 재기동하거나
+#     아래 _GAP_DONE 을 False 로 되돌리면 된다.
+LABEL_GAPDETECT = True
+_GAP_DONE = False          # 이번 프로세스에서 이미 측정을 보냈는가
+
 
 def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3) -> str:
     """제품스티커 TSPL — TSC/Bixolon 계열 직송용.
@@ -439,6 +453,10 @@ def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3) -> str:
         "DIRECTION 1",
         "CODEPAGE UTF-8",
     ]
+    global _GAP_DONE
+    if LABEL_GAPDETECT and not _GAP_DONE:
+        out.append("GAPDETECT")      # ★첫 1회만 — 측정값은 프린터에 저장된다
+        _GAP_DONE = True
     for L in labels:
         out += [
             "CLS",
