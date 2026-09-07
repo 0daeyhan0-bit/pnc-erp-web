@@ -5521,6 +5521,11 @@ SCREEN.gongsu=(c)=>{
   const _hm=s=>{s=String(s||'').replace(/\D/g,'').padStart(4,'0');const h=+s.slice(0,2),m=+s.slice(2,4);
     return (h>=0&&h<48&&m>=0&&m<60)?h*60+m:null;};
   const BRK=[[12*60,13*60],[17*60,17*60+30]];        // 점심 · 저녁
+  /* ★시각 표시 — 0800 → 08:00 (레거시 화면과 같은 표기).
+       '0000' 은 값이 아니라 "해당 없음"이라 빈칸으로 둔다 —
+       지원 나간 행은 근무시각이 0000 이고 실제 시간은 지원시작/종료에 들어 있다. */
+  const _whm=v=>{const s=String(v||'').replace(/\D/g,'').padStart(4,'0');
+    return (!v||s==='0000')?'':s.slice(0,2)+':'+s.slice(2,4);};
   const calcHr=(st,et)=>{const a=_hm(st),b=_hm(et);if(a==null||b==null||b<=a)return 0;
     let mi=b-a;
     BRK.forEach(([p,q])=>{mi-=Math.max(0,Math.min(b,q)-Math.max(a,p));});
@@ -5544,6 +5549,13 @@ SCREEN.gongsu=(c)=>{
   let sup={open:false,ymd:iso(T),spart:'',rows:[],saving:false};
   let wkCache=null;                                // 작업자→파트 전체 맵(1회 로드)
   const loadParts=async()=>{try{const r=await fetch(`${API}/api/partmaster/list`);parts=(await r.json()).rows||[];}catch(e){parts=[];}};
+  /* ★부서 드롭다운 = 레거시 근무공수등록 '작업처'와 **같은 순서**로 낸다.
+       /api/partmaster/list 는 파트마스터 화면용이라 WORK_CODE 우선 정렬이고(생산 PART 가 먼저 온다),
+       레거시 드롭다운은 SORT_KEY 순(01라인→02라인→…)이다. 그 API 를 고치면 마스터 화면이
+       흐트러지므로 여기서만 sortkey 로 다시 세운다. */
+  const deptOpts=()=>[...(parts||[])]
+    .sort((a,b)=>((+a.sortkey||9999)-(+b.sortkey||9999))||String(a.code).localeCompare(String(b.code)))
+    .map(p=>`<option value="${esc(p.code)}"${F.dept===p.code?' selected':''}>${esc(p.code)}${p.nm?' · '+esc(p.nm):''}</option>`).join('');
   const load=async()=>{loading=true;draw();
     const qs=new URLSearchParams({from_ymd:F.from,to_ymd:F.to,gubun:F.gubun,dept:F.dept,user:F.user});
     try{const r=await fetch(`${API}/api/gongsu/list?${qs}`);data=await r.json();msg='';}
@@ -5689,12 +5701,18 @@ SCREEN.gongsu=(c)=>{
      <div class="toolbar">
        <label class="tl">근무일</label><input class="inp" type="date" id="gs-from" value="${F.from}"> ~ <input class="inp" type="date" id="gs-to" value="${F.to}">
        <label class="tl">구분</label><input class="inp" id="gs-gubun" value="${esc(F.gubun)}" style="width:60px">
-       <label class="tl">부서</label><input class="inp" id="gs-dept" value="${esc(F.dept)}" style="width:70px">
+       <!-- ★부서 = 드롭다운(레거시 근무공수등록 '작업처'). 이 화면이 이미 쓰는 parts
+              (/api/partmaster/list)를 그대로 재사용 — 아래 지원공수·인원정보호출 셀렉트와 같은 목록이다.
+              코드를 화면에 하드코딩하지 않으므로 파트가 늘어도 자동 반영된다. -->
+       <label class="tl">부서</label><select class="inp" id="gs-dept" style="width:150px">
+         <option value="">전체</option>
+         ${deptOpts()}
+       </select>
        <label class="tl">작업자</label><input class="inp" id="gs-user" value="${esc(F.user)}" style="width:90px">
        <button class="btn" id="gs-search">🔍 조회</button>
        ${ed?`<button class="btn" id="gs-newentry" style="background:#1c7c3a;color:#fff">👥 근무공수등록</button>
              <button class="btn" id="gs-newsup" style="background:#1c47a0;color:#fff" title="어느 파트 사람이 어느 라인으로 지원 갔는지 등록">지원공수등록</button>`:''}
-       <div class="spacer"></div><span class="rowcount">${won(data.cnt)}건 · 공수합 <b>${_wnf(data.sum_hr)}</b>h</span>
+       <div class="spacer"></div><span class="rowcount">${won(data.cnt)}건 · 실근무공수합 <b>${_wnf(data.sum_hr)}</b>h</span>
      </div>
      ${msg?`<div class="page-sub" style="color:${msg.includes('실패')||msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(msg)}</div>`:''}
      ${entry.open?entryPanel():''}
@@ -5702,8 +5720,9 @@ SCREEN.gongsu=(c)=>{
      <div class="grid-wrap" style="max-height:calc(100vh - ${(entry.open||sup.open)?'560':'320'}px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl" style="font-size:12px"><thead><tr>
        <th class="center">구분</th><th class="center">근무일</th><th>부서</th><th>작업자</th><th class="center">라인</th>
-       <th class="center">시작</th><th class="center">종료</th><th class="num">근무h</th><th class="center">지원h</th><th class="center">근태</th><th>비고</th><th class="center">출처</th>${ed?'<th></th>':''}</tr></thead>
-      <tbody>${loading?spinRow(ed?13:12):((data.rows&&data.rows.length)?data.rows.map(r=>(editId&&r.ID===editId)?`<tr style="background:#fffbea">
+       <th class="center">시작</th><th class="center">종료</th><th class="num">근무h</th><th class="center">지원h</th><th class="num">실근무h</th><th class="num">휴게h</th><th class="center">근태</th><th>비고</th>
+       <th class="center">지원시작</th><th class="center">지원종료</th><th class="center">지원파트</th><th class="center">출처</th>${ed?'<th></th>':''}</tr></thead>
+      <tbody>${loading?spinRow(ed?18:17):((data.rows&&data.rows.length)?data.rows.map(r=>(editId&&r.ID===editId)?`<tr style="background:#fffbea">
         <td class="center"><select class="inp ge-gubun" style="width:64px;padding:1px 2px"><option value="근무"${r.gubun!=='지원'?' selected':''}>근무</option><option value="지원"${r.gubun==='지원'?' selected':''}>지원</option></select></td>
         <td class="center"><input class="inp ge-ymd" type="date" value="${esc(_wiso(r.work_ymd))}" style="width:130px;padding:1px 2px"></td>
         <td>${esc(r.dept_nm||r.dept_code)}</td><td>${esc(r.user_id)}</td>
@@ -5712,21 +5731,45 @@ SCREEN.gongsu=(c)=>{
         <td class="center"><input class="inp ge-et" value="${esc(r.end_time||'')}" style="width:48px;padding:1px 2px" placeholder="1700"></td>
         <td class="num"><input class="inp ge-hr" type="number" step="any" value="${r.work_hr??''}" style="width:56px;padding:1px 2px;text-align:right"></td>
         <td class="center"><input class="inp ge-shr" type="number" step="any" value="${r.support_hr??''}" style="width:52px;padding:1px 2px;text-align:right"></td>
+        <!-- 실근무h·휴게h = 계산값(저장 안 함). 편집행에서도 자리를 채워 컬럼 수를 맞춘다 -->
+        <td class="num mut">${_wnf(r.real_hr)}</td>
+        <td class="num mut">${(+r.rest_hr||0)||(+r.sup_rest_hr||0)?_wnf((+r.rest_hr||0)+(+r.sup_rest_hr||0)):''}</td>
         <td class="center"><select class="inp ge-chk" style="width:64px;padding:1px 2px">${HRCHK.map(([v,n])=>`<option value="${v}"${String(r.hr_check||'0')===v?' selected':''}>${n}</option>`).join('')}</select></td>
         <td><input class="inp ge-rmk" value="${esc(r.remarks||'')}" style="width:100%;padding:1px 2px"></td>
+        <td class="center mut">${_whm(r.sup_st)}</td><td class="center mut">${_whm(r.sup_et)}</td>
+        <td class="center mut">${esc(r.sup_part_nm||r.support_line||'')}</td>
         <td class="center"><span style="color:#1c7c3a;font-size:11px">웹</span></td>
         <td class="center" style="white-space:nowrap"><button class="btn ge-save" data-id="${r.ID}" style="padding:1px 6px;background:#1c7c3a;color:#fff">저장</button> <button class="btn ghost ge-cancel" style="padding:1px 5px">✖</button></td></tr>`:`<tr>
         <td class="center">${r.gubun==='지원'?'<span class="bdg" style="background:#e7f0ff;color:#1c47a0">지원</span>':'<span class="bdg ok">근무</span>'}</td>
         <td class="center">${esc(_wymd(r.work_ymd))}</td><td>${esc(r.dept_nm||r.dept_code)}</td><td>${esc(r.user_id)}</td><td class="center">${esc(r.line)}</td>
-        <td class="center">${esc(r.start_time)}</td><td class="center">${esc(r.end_time)}</td><td class="num">${_wnf(r.work_hr)}</td>
+        <td class="center">${_whm(r.start_time)}</td><td class="center">${_whm(r.end_time)}</td><td class="num">${_wnf(r.work_hr)}</td>
         <td class="center">${r.support_hr?_wnf(r.support_hr):''}</td>
+        <!-- ★실근무h = 근무h − 지원h − 휴게 + 지원휴게(백엔드 _real_hr).
+               지원 나간 파트는 음수가 정상이다 — 그만큼 자기 공수에서 빠진다(레거시 동일).
+               음수는 빨강으로 눈에 띄게. -->
+        <td class="num"${(+r.real_hr||0)<0?' style="color:#c0392b;font-weight:700"':''}>${_wnf(r.real_hr)}</td>
+        <td class="num mut">${(+r.rest_hr||0)||(+r.sup_rest_hr||0)?_wnf((+r.rest_hr||0)+(+r.sup_rest_hr||0)):''}</td>
         <td class="center">${r.hr_check_nm==='정상'?'':`<span style="color:#c0392b">${esc(r.hr_check_nm)}</span>`}</td>
         <td class="bcap" title="${esc(r.remarks)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.remarks)}</td>
+        <!-- ★지원시작·종료·지원파트 (레거시 동일 컬럼). 지원 나간 행은 근무시각이 0000 이라
+               실제 시간이 여기 들어 있다 — 이걸 안 보여주면 "몇 시에 지원 갔는지"를 알 수 없다. -->
+        <td class="center mut">${_whm(r.sup_st)}</td>
+        <td class="center mut">${_whm(r.sup_et)}</td>
+        <td class="center">${esc(r.sup_part_nm||r.support_line||'')}</td>
         <td class="center">${r.editable?'<span style="color:#1c7c3a;font-size:11px">웹</span>':'<span style="color:#8aa0bd;font-size:11px">📁이력</span>'}</td>
-        ${ed?`<td class="center" style="white-space:nowrap">${r.editable&&r.ID?`<button class="btn ghost gs-edit" data-id="${r.ID}" style="padding:1px 6px;color:#2f6db3">✎</button> <button class="btn ghost gs-del" data-id="${r.ID}" style="padding:1px 6px;color:#c0392b">🗑</button>`:''}</td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?13:12}" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>`;
+        ${ed?`<td class="center" style="white-space:nowrap">${r.editable&&r.ID?`<button class="btn ghost gs-edit" data-id="${r.ID}" style="padding:1px 6px;color:#2f6db3">✎</button> <button class="btn ghost gs-del" data-id="${r.ID}" style="padding:1px 6px;color:#c0392b">🗑</button>`:''}</td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?18:17}" class="empty">조회 결과 없음</td></tr>`)}</tbody>
+      ${(data.rows&&data.rows.length)?`<tfoot><tr style="position:sticky;bottom:0;background:#eef3fa;font-weight:700;border-top:2px solid #9fb3c8">
+        <td class="center" colspan="7">합계 ${won(data.cnt)}건</td>
+        <td class="num">${_wnf(data.sum_work_hr)}</td>
+        <td class="center">${_wnf(data.sum_support_hr)}</td>
+        <td class="num"${(+data.sum_hr||0)<0?' style="color:#c0392b"':''}>${_wnf(data.sum_hr)}</td>
+        <td colspan="${ed?8:7}"></td></tr></tfoot>`:''}
+      </table></div>`;
     const g=id=>body.querySelector(id);
     g('#gs-search').onclick=()=>{F.from=g('#gs-from').value;F.to=g('#gs-to').value;F.gubun=g('#gs-gubun').value;F.dept=g('#gs-dept').value;F.user=g('#gs-user').value;load();};
-    ['#gs-gubun','#gs-dept','#gs-user'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter')g('#gs-search').click();};});
+    ['#gs-gubun','#gs-user'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter')g('#gs-search').click();};});
+    // 부서는 드롭다운 — 고르는 즉시 조회(입력칸이 아니라 Enter 를 기다릴 이유가 없다)
+    {const el=g('#gs-dept');if(el)el.onchange=()=>{F.dept=el.value;load();};}
     const nb=g('#gs-newentry');if(nb)nb.onclick=()=>{if(!entry.open){entry.part='';entry.rows=[];}entry.open=!entry.open;draw();};   // 열 때마다 투입파트=전체로 초기화
     /* ★지원공수등록 열기 — 작업자 목록을 먼저 받아 두어야 지원자칸 자동완성·파트 자동채움이 된다. */
     const sb=g('#gs-newsup');if(sb)sb.onclick=async()=>{

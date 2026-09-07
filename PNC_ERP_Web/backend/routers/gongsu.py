@@ -17,6 +17,26 @@ _HRCHK = {"1": "연차", "2": "오전반차", "8": "오후반차", "3": "조퇴"
 #   '8'(레거시 미사용)=오후반차 로 배정. 시간규칙 오전 0800~1200 / 오후 1300~1700(각 4h).
 def _hrchk(v):
     return _HRCHK.get(str(v or "").strip(), "정상")
+
+
+def _real_hr(r):
+    """실근무공수 = 근무h − 지원h − 휴게h + 지원휴게h  (레거시 w_pr_worktime_001 실측 역산)
+
+       ★지원을 **나간** 파트에서 음수가 되는 것이 정상이다(대표 확정 2026-09-07:
+         "지원시간만큼 자기공수에서는 -2H이 되어야 해 / 다른파트에서 업무지원을 받았으면 추가").
+         레거시는 DB 에 음수를 저장하지 않는다 — 화면이 이 식으로 계산해 보여준다.
+
+       실측 근거(라이브 260903 S11):
+         · SEQ133/136 지원나감: 근무0 − 지원3.5 − 휴게0 + 지원휴게0.16 = −3.34 → 화면 −3.3
+         · SEQ25 잔업+지원   : 근무11.5 − 지원3.5 = 8.0                    → 화면 8.0
+         · SEQ45  지원받음   : 근무1.0 − 지원0                             → 화면 1.0
+         · 파트 합계 76.1 재현
+    """
+    try:
+        return round(float(r.get("work_hr") or 0) - float(r.get("support_hr") or 0)
+                     - float(r.get("rest_hr") or 0) + float(r.get("sup_rest_hr") or 0), 2)
+    except Exception:
+        return 0.0
 def _gongsu_web_rows(from_ymd, to_ymd, dept, gubun, user):
     """웹 편집행 (nx.hr_work_info) — editable."""
     nx = _nx(); cur = nx.cursor()
@@ -32,7 +52,11 @@ def _gongsu_web_rows(from_ymd, to_ymd, dept, gubun, user):
               ISNULL(h.user_id,'') user_id, ISNULL(h.line,'') line,
               ISNULL(h.start_time,'') start_time, ISNULL(h.end_time,'') end_time, ISNULL(h.work_hr,0) work_hr,
               ISNULL(h.support_line,'') support_line, ISNULL(h.support_hr,0) support_hr, ISNULL(h.hr_check,'0') hr_check,
+              ISNULL(h.rest_work_hr,0) rest_hr, ISNULL(h.support_rest_hr,0) sup_rest_hr,
+              ISNULL(h.support_start,'') sup_st, ISNULL(h.support_end,'') sup_et,
+              COALESCE(NULLIF(GS.GAGONG_PROC_DESC,''), h.support_line, '') sup_part_nm,
               ISNULL(h.remarks,'') remarks FROM nx.hr_work_info h
+              LEFT JOIN nx.PR_M_PROC_GAGONG GS ON GS.GAGONG_PROC_CODE COLLATE DATABASE_DEFAULT=h.support_line COLLATE DATABASE_DEFAULT
               LEFT JOIN nx.PR_M_PROC_GAGONG G ON G.GAGONG_PROC_CODE COLLATE DATABASE_DEFAULT=h.dept_code COLLATE DATABASE_DEFAULT
             WHERE {' AND '.join(w)}""", *p)
         cols = [d[0] for d in cur.description]
@@ -40,6 +64,9 @@ def _gongsu_web_rows(from_ymd, to_ymd, dept, gubun, user):
         for r in rows:
             r["src"] = "nx"; r["editable"] = True
             r["work_hr"] = float(r["work_hr"] or 0); r["support_hr"] = float(r["support_hr"] or 0)
+            r["rest_hr"] = float(r.get("rest_hr") or 0)
+            r["sup_rest_hr"] = float(r.get("sup_rest_hr") or 0)
+            r["real_hr"] = _real_hr(r)
             r["hr_check_nm"] = _hrchk(r["hr_check"])
         return rows
     finally:
@@ -62,15 +89,23 @@ def _gongsu_mirror_rows(from_ymd, to_ymd, dept, gubun, user):
               COALESCE(NULLIF(D.DEPT_DESC,''), G.GAGONG_PROC_DESC, A.DEPT_CODE) dept_nm,
               ISNULL(A.USER_ID,'') user_id, ISNULL(A.CUST_CODE,'') line, ISNULL(A.START_TIME,'') start_time,
               ISNULL(A.END_TIME,'') end_time, ISNULL(A.WORK_HR,0) work_hr, ISNULL(A.SUPPORT_LINE,'') support_line,
-              ISNULL(A.SUPPORT_HR,0) support_hr, ISNULL(A.HR_CHECK_POINT,'0') hr_check, ISNULL(A.REMARKS,'') remarks
+              ISNULL(A.SUPPORT_HR,0) support_hr, ISNULL(A.HR_CHECK_POINT,'0') hr_check,
+              ISNULL(A.REST_WORK_HR,0) rest_hr, ISNULL(A.SUPPORT_REST_WORK_HR,0) sup_rest_hr,
+              ISNULL(A.SUPPORT_START_TIME,'') sup_st, ISNULL(A.SUPPORT_END_TIME,'') sup_et,
+              COALESCE(NULLIF(GS.GAGONG_PROC_DESC,''), A.SUPPORT_LINE, '') sup_part_nm,
+              ISNULL(A.REMARKS,'') remarks
             FROM PARTNER_ERP_TEST3.nx.HR_M_WORK_INFO A LEFT JOIN PARTNER_ERP_TEST3.nx.HR_M_DEPT D ON D.DEPT_CODE=A.DEPT_CODE
               LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG G ON G.GAGONG_PROC_CODE COLLATE DATABASE_DEFAULT=A.DEPT_CODE COLLATE DATABASE_DEFAULT
+              LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG GS ON GS.GAGONG_PROC_CODE COLLATE DATABASE_DEFAULT=A.SUPPORT_LINE COLLATE DATABASE_DEFAULT
             WHERE {' AND '.join(w)} ORDER BY A.WORK_YMD DESC, A.DEPT_CODE, A.MAINT_SEQ""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         for r in rows:
             r["src"] = "legacy"; r["ID"] = None; r["editable"] = False
             r["work_hr"] = float(r["work_hr"] or 0); r["support_hr"] = float(r["support_hr"] or 0)
+            r["rest_hr"] = float(r.get("rest_hr") or 0)
+            r["sup_rest_hr"] = float(r.get("sup_rest_hr") or 0)
+            r["real_hr"] = _real_hr(r)
             r["remarks"] = str(r["remarks"]).strip(); r["hr_check_nm"] = _hrchk(r["hr_check"])
         return rows
     finally:
@@ -87,7 +122,13 @@ def gongsu_list(from_ymd: str = Query(""), to_ymd: str = Query(""), dept: str = 
     if src != "nx":
         rows += _gongsu_mirror_rows(from_ymd, to_ymd, dept, gubun, user)
     rows.sort(key=lambda r: (str(r.get("work_ymd") or ""), 1 if r["src"] == "nx" else 0), reverse=True)
-    return {"rows": rows, "cnt": len(rows), "sum_hr": sum(r["work_hr"] + r["support_hr"] for r in rows)}
+    return {"rows": rows, "cnt": len(rows),
+            # ★합계 = 실근무공수 합(레거시 '실근무공수 합계' 와 같은 축).
+            #   종전 work_hr+support_hr 는 지원을 **더해서** 이중계상이었다 —
+            #   지원 나간 쪽은 빠지고 받은 쪽은 근무h 에 이미 들어 있다.
+            "sum_hr": round(sum(r.get("real_hr", 0) for r in rows), 2),
+            "sum_work_hr": round(sum(r["work_hr"] for r in rows), 2),
+            "sum_support_hr": round(sum(r["support_hr"] for r in rows), 2)}
 
 @router.get("/api/gongsu/persons")
 def gongsu_persons(part: str = Query("", description="파트(GAGONG_PROC_CODE), 빈값=전체"),
@@ -282,6 +323,10 @@ def gongsu_support_save(payload: dict = Body(...)):
         if hr <= 0: continue
         valid.append({"worker": wkr, "org": org, "st": st, "et": et, "hr": hr,
                       "rest": _sup_rest(hr), "remarks": str(r.get("remarks", "")).strip()[:200]})
+    # ★비고 기본문구 — 레거시와 같은 말로 남긴다(대표 지시 2026-09-07 "비고 란에 지원감 이렇게").
+    #   실측(라이브 260903): 받은 행 '생산 파트 업무지원' / 나간 행 '다른 파트 업무지원'.
+    #   사용자가 비고를 직접 적었으면 그 말을 존중하고, 비었을 때만 채운다.
+    RMK_IN, RMK_OUT = "생산 파트 업무지원", "다른 파트 업무지원"
     if not valid: return {"ok": False, "detail": "저장할 행이 없습니다(지원자·파트·시간 확인)."}
 
     nx = _nx(); cur = nx.cursor()
@@ -291,14 +336,17 @@ def gongsu_support_save(payload: dict = Body(...)):
         sheet = int(cur.fetchone()[0] or 0) + 1
         ins = 0
         for v in valid:
-            # ① 받은파트 행 — 그 파트의 공수가 올라간다
+            # ① 받은파트 행 — 그 파트의 공수가 올라간다(근무h +, 실근무 +)
+            #   ★org_work_code = **그 행의 부서**(=받은 파트). 레거시 실측이 그렇다:
+            #     짝 6843 에서 dept=S4 행의 ORG_WORK_CODE 도 S4, dept=S11 행은 S11.
+            #     종전엔 두 행 모두 원소속(v["org"])을 넣어 받은쪽 행이 자기 부서와 어긋났다.
             cur.execute("""INSERT INTO nx.hr_work_info
                 (gubun,work_ymd,dept_code,user_id,line,start_time,end_time,work_hr,
                  support_line,support_start,support_end,support_hr,hr_check,remarks,upd_user,
                  support_sheet_no,org_work_code,rest_work_hr,support_rest_hr)
                 VALUES('지원',?,?,?,?,?,?,?,?,'','',0,'0',?,?,?,?,?,0)""",
                 ymd, sup_part, v["worker"], sup_part, v["st"], v["et"], v["hr"],
-                v["org"], v["remarks"], uuser, sheet, v["org"], v["rest"])
+                v["org"], (v["remarks"] or RMK_IN), uuser, sheet, sup_part, v["rest"])
             # ② 원소속 행 — 지원 나간 만큼이 여기 기록된다(조회화면이 차감으로 표시)
             cur.execute("""INSERT INTO nx.hr_work_info
                 (gubun,work_ymd,dept_code,user_id,line,start_time,end_time,work_hr,
@@ -306,7 +354,8 @@ def gongsu_support_save(payload: dict = Body(...)):
                  support_sheet_no,org_work_code,rest_work_hr,support_rest_hr)
                 VALUES('지원',?,?,?,?,'0000','0000',0,?,?,?,?,'0',?,?,?,?,0,?)""",
                 ymd, v["org"], v["worker"], v["org"],
-                sup_part, v["st"], v["et"], v["hr"], v["remarks"], uuser, sheet, v["org"], v["rest"])
+                sup_part, v["st"], v["et"], v["hr"], (v["remarks"] or RMK_OUT),
+                uuser, sheet, v["org"], v["rest"])
             ins += 2
         nx.commit()
         return {"ok": True, "ins": ins, "pairs": len(valid), "sheet_no": sheet}
