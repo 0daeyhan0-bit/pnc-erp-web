@@ -80,7 +80,7 @@ def setstockio_list(
         for i in range(0, len(custs), 500):
             ch = custs[i:i + 500]
             ph = ",".join("?" * len(ch))
-            cur.execute(f"SELECT CUST_CODE, CHARGE_USER_ID FROM nx.CM_M_CUST WITH(NOLOCK) "
+            cur.execute(f"SELECT CUST_CODE, CHARGE_USER_ID FROM nx.v_cm_m_cust WITH(NOLOCK) "
                         f"WHERE CUST_CODE IN ({ph})", *ch)
             for c, n in cur.fetchall():
                 chmap[(c or "").strip()] = (n or "").strip()

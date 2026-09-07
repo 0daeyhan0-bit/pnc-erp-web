@@ -736,13 +736,13 @@ def gagong_jeohist(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
               ISNULL(ic.PRINT_USER_ID,'') prtuser
             FROM PARTNER_ERP_TEST3.nx.PR_T_INDI_CUTTING ic
             LEFT JOIN PARTNER_ERP_TEST3.nx.item ma ON ma.ITEM_CODE=ic.MAT_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST mac ON mac.CUST_CODE=ma.in_cust
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust mac ON mac.CUST_CODE=ma.in_cust
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK maw ON maw.WORK_CODE=ma.WORK_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.item ia ON ia.ITEM_CODE=ic.ITEM_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST iac ON iac.CUST_CODE=ia.in_cust
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust iac ON iac.CUST_CODE=ia.in_cust
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK iaw ON iaw.WORK_CODE=ia.WORK_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.item aa ON aa.ITEM_CODE=ic.ASSY_ITEM_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST aac ON aac.CUST_CODE=aa.in_cust
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust aac ON aac.CUST_CODE=aa.in_cust
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK aaw ON aaw.WORK_CODE=aa.WORK_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG wh ON wh.GAGONG_PROC_CODE=ic.WH_GAGONG_PROC_CODE
             LEFT JOIN (SELECT BOX_NO, COUNT(*) proc_n FROM PARTNER_ERP_TEST3.nx.PR_T_INDI_CUTTING_PROC_GAGONG GROUP BY BOX_NO) pn ON pn.BOX_NO=ic.BOX_NO
@@ -891,7 +891,7 @@ def gagong_sheet_lookup(jado: str = Query("")):
         w = cur.fetchone()
         wcd = (w[0] if w and w[0] else '')
         if not wcd and m[6]:
-            cur.execute("SELECT TOP 1 ISNULL(CUST_DESC,'') FROM nx.CM_M_CUST WHERE CUST_CODE=?", m[6])
+            cur.execute("SELECT TOP 1 ISNULL(CUST_DESC,'') FROM nx.v_cm_m_cust WHERE CUST_CODE=?", m[6])
             cc = cur.fetchone()
             wcd = cc[0] if cc else ''
         procs = _sheet_procs(cur, j)

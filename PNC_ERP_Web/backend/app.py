@@ -374,7 +374,7 @@ def _warmup_heavy_queries():
                  from PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH_DAILY t
                  join PARTNER_ERP_TEST3.nx.item m on t.mat_code=m.item_code
                  join PARTNER_ERP_TEST3.nx.pr_m_proc_gagong g on t.gagong_proc_code=g.gagong_proc_code
-                 left join PARTNER_ERP_TEST3.nx.cm_m_cust c on m.in_cust=c.cust_code
+                 left join PARTNER_ERP_TEST3.nx.v_cm_m_cust c on m.in_cust=c.cust_code
                  where t.cust_code='Z99990' and t.STOCK_YMD=(SELECT MAX(STOCK_YMD) FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH_DAILY WHERE cust_code='Z99990')
                  group by t.mat_code""",
             """select t.mat_code, max(m.item_name), sum(t.stock_qty)

@@ -113,7 +113,7 @@ def cost_sil(item: str = Query(..., description="품번"),
             try:
                 for i in range(0, len(codes), 900):
                     ch = codes[i:i + 900]; ph = ",".join("?" * len(ch))
-                    eng.cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
+                    eng.cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE IN ({ph})", *ch)
                     for r in eng.cur.fetchall(): vmap[str(r[0]).strip()] = str(r[1]).strip()
             except Exception:
                 pass
@@ -124,7 +124,7 @@ def cost_sil(item: str = Query(..., description="품번"),
                     try:
                         for i in range(0, len(miss), 900):
                             ch = miss[i:i + 900]; ph = ",".join("?" * len(ch))
-                            c2.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
+                            c2.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE IN ({ph})", *ch)
                             for r in c2.fetchall(): vmap.setdefault(str(r[0]).strip(), str(r[1]).strip())
                     finally:
                         cn.close()
@@ -238,7 +238,7 @@ def cost_nae(item: str = Query(..., description="품번"),
                 ck = codes[i:i+400]; ph = ",".join("?" * len(ck))
                 eng.cur.execute(f"""SELECT it.item_code, ISNULL(pc.CUST_DESC,'')
                     FROM nx.item it
-                    LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST pc ON pc.CUST_CODE = it.in_cust
+                    LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust pc ON pc.CUST_CODE = it.in_cust
                     WHERE it.item_code IN ({ph})""", *ck)
                 for r in eng.cur.fetchall():
                     custm[(r[0] or "").strip()] = (r[1] or "").strip()

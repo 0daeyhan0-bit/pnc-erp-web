@@ -107,7 +107,7 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
             SELECT a.MAT_CODE,
                    CAST(ISNULL(a.USE_QTY,0) AS float) use_qty,
                    ISNULL(CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
-                               ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=m.in_cust) END,'') cust_desc,
+                               ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE cust_code=m.in_cust) END,'') cust_desc,
                    ISNULL(m.item_name,'') nm,
                    ISNULL(a.VIR_ITEM_FLAG,'0') vir,
                    LTRIM(RTRIM(ISNULL(a.GAGONG_PROC_CODE,''))) gpc,
@@ -777,7 +777,7 @@ def ready_bomsheet(item: str = Query(...), gpc: str = Query("")):
         cl = [x for x in custs if x]
         for i in range(0, len(cl), 900):
             ch = cl[i:i+900]; ph = ",".join("?" * len(ch))
-            c2.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
+            c2.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE IN ({ph})", *ch)
             for a, b in c2.fetchall(): cnm[str(a).strip()] = b
         f = lambda v: float(v or 0)
         rows = []

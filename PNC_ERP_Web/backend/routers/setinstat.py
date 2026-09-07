@@ -158,7 +158,7 @@ def setinstat_opts():
         cur.execute("""SELECT mi.in_cust cd, ISNULL(c.CUST_DESC,'') nm
                          FROM nx.plan_part_mat m WITH(NOLOCK)
                          JOIN nx.item mi WITH(NOLOCK) ON mi.item_code=m.mat_code
-                         LEFT JOIN nx.CM_M_CUST c WITH(NOLOCK) ON c.CUST_CODE=mi.in_cust
+                         LEFT JOIN nx.v_cm_m_cust c WITH(NOLOCK) ON c.CUST_CODE=mi.in_cust
                         WHERE ISNULL(mi.in_cust,'')<>''
                         GROUP BY mi.in_cust, c.CUST_DESC
                         ORDER BY ISNULL(c.CUST_DESC,'')""")
@@ -657,7 +657,7 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
                            ON RTRIM(pg.GAGONG_PROC_CODE)=RTRIM(ap.pc)
                     LEFT JOIN nx.PR_M_WORK wi WITH(NOLOCK)
                            ON RTRIM(wi.WORK_CODE)=RTRIM(ISNULL(i.work_code,''))
-                    LEFT JOIN nx.CM_M_CUST ci WITH(NOLOCK)
+                    LEFT JOIN nx.v_cm_m_cust ci WITH(NOLOCK)
                            ON RTRIM(ci.CUST_CODE)=RTRIM(ISNULL(i.in_cust,''))
                    WHERE i.ITEM_CODE IN ({ph})""", *ch)
                 for a, b in cur.fetchall():
@@ -709,7 +709,7 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
         cmap = {}
         if custs:
             ph = ",".join("?" * len(custs))
-            cur.execute(f"""SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM nx.CM_M_CUST WITH(NOLOCK)
+            cur.execute(f"""SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM nx.v_cm_m_cust WITH(NOLOCK)
                              WHERE CUST_CODE IN ({ph})""", *custs)
             cmap = {str(a).strip(): (b or "").strip() for a, b in cur.fetchall()}
 

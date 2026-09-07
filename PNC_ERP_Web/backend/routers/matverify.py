@@ -58,14 +58,14 @@ def _build(ct, fr, to):
         sup = []   # (mat, code, name, ctype, kind, q, amt)
         cu.execute("""SELECT UPPER(LTRIM(RTRIM(a.MAT_CODE))), a.CUST_CODE, MAX(c.CUST_DESC), MAX(ISNULL(c.CUST_TYPE,'')),
               SUM(CONVERT(float,ISNULL(a.MAINT_QTY,0))), SUM(CONVERT(float,ISNULL(a.MAINT_AMT,0)))
-            FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON a.CUST_CODE=c.CUST_CODE
+            FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON a.CUST_CODE=c.CUST_CODE
             WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG IN ('9','S','C','G','H')
             GROUP BY UPPER(LTRIM(RTRIM(a.MAT_CODE))), a.CUST_CODE""", fr, to)
         for m, cc, cnm, cty, q, amt in cu.fetchall():
             sup.append((_U(m), str(cc).strip(), cnm, str(cty or "").strip(), "협력", float(q or 0), float(amt or 0)))
         cu.execute("""SELECT UPPER(LTRIM(RTRIM(a.MAT_CODE))), a.CUST_CODE, MAX(ISNULL(c.CUST_DESC,a.CUST_CODE)),
               SUM(CONVERT(float,ISNULL(a.MAINT_QTY,0))), SUM(CONVERT(float,ISNULL(a.MAINT_AMT*ISNULL(a.EXCHANGE_RATE,1),0)))
-            FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C a LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON a.CUST_CODE=c.CUST_CODE
+            FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C a LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON a.CUST_CODE=c.CUST_CODE
             WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.DIVISION='P'
             GROUP BY UPPER(LTRIM(RTRIM(a.MAT_CODE))), a.CUST_CODE""", fr, to)
         for m, cc, cnm, q, amt in cu.fetchall():

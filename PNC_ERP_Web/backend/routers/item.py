@@ -128,7 +128,7 @@ def itemmaster_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Q
     try:
         dLG = _kindmap(c2, "PR005"); dSG = _kindmap(c2, "PR006"); dGRP = _kindmap(c2, "PR001")
         dCLS = _kindmap(c2, "PR008"); dPK = _kindmap(c2, "PR021"); dUN = _kindmap(c2, "CM002"); dMT = _kindmap(c2, "PR019")
-        c2.execute("SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST")
+        c2.execute("SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust")
         dCust = {str(r[0]).strip(): r[1] for r in c2.fetchall()}
         w = ["1=1"]; p = []
         if q.strip(): w.append("(i.item_code LIKE ? OR i.item_name LIKE ?)"); p += [f"%{q.strip()}%"] * 2

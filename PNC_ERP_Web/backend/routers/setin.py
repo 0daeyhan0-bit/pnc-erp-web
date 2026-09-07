@@ -68,13 +68,13 @@ def setin_list(request: Request, cust: str = Query(""), fr: str = Query(""), to:
               ISNULL(h.deliver_qty,0) deliver_qty,
               STUFF((SELECT ','+d.mat_code FROM nx.set_input_req_dtl d WHERE d.sheet_no=h.sheet_no FOR XML PATH('')),1,1,'') jadolist
             FROM nx.set_input_req h
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.in_cust_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=h.in_cust_code
             LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=h.item_code
             WHERE {where} ORDER BY h.in_cust_code, h.input_ymd, h.sheet_no""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         cur.execute("""SELECT h.in_cust_code, MAX(ISNULL(c.CUST_DESC,'')) nm, COUNT(*) n
-            FROM nx.set_input_req h LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.in_cust_code
+            FROM nx.set_input_req h LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=h.in_cust_code
             WHERE h.remarks='PLAN_COMPOSE' GROUP BY h.in_cust_code ORDER BY COUNT(*) DESC""")
         custs = [{"code": r[0], "nm": r[1], "n": r[2]} for r in cur.fetchall()]
         return {"rows": rows, "cnt": len(rows), "custs": custs}
@@ -165,7 +165,7 @@ def setin_invoice(request: Request, barcode: str = Query(...)):
         cust = rc[0]
         cur.execute("""SELECT ISNULL(BUSINESS_NO,''),ISNULL(CUST_DESC,''),ISNULL(OWNER_NAME,''),
             LTRIM(ISNULL(ADDRESS,'')+' '+ISNULL(ADDRESS_DTL,'')),ISNULL(PHONE_NO,''),ISNULL(FAX_NO,'')
-            FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=?""", cust)
+            FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE=?""", cust)
         s = cur.fetchone() or ('',)*6
         supplier = {"biz": _fmtbiz(s[0]), "nm": (s[1] or '').strip(), "owner": (s[2] or '').strip(), "addr": (s[3] or '').strip(), "tel": (s[4] or '').strip(), "fax": (s[5] or '').strip()}
         cur.execute("""SELECT TOP 1 ISNULL(BUSINESS_NO,''),ISNULL(COMPANY_DESCK,''),ISNULL(OWNER_NAME,''),
@@ -210,7 +210,7 @@ def setstock_list(request: Request, fr: str = Query(""), to: str = Query(""), cu
               ISNULL(c.CUST_DESC,'') custnm, m.item_code, ISNULL(i.item_name,'') itemnm, m.maint_qty, m.sheet_no,
               m.manual_sheet_no, m.status, ISNULL(m.derived_flag,'0') derived_flag, m.insert_datetime,
               ISNULL(RTRIM(i.in_cust),'') direct_cust,
-              ISNULL((SELECT RTRIM(dc.CUST_DESC) FROM PARTNER_ERP_TEST3.nx.CM_M_CUST dc
+              ISNULL((SELECT RTRIM(dc.CUST_DESC) FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust dc
                        WHERE RTRIM(dc.CUST_CODE)=RTRIM(i.in_cust)),'') direct_nm,
               ISNULL((SELECT -SUM(CAST(l.MAINT_QTY AS float)) FROM nx.stock_ledger l WITH(NOLOCK)
                        WHERE l.MAINT_YMD=m.maint_ymd AND l.MAINT_TAG='B'
@@ -218,7 +218,7 @@ def setstock_list(request: Request, fr: str = Query(""), to: str = Query(""), cu
                          AND ISNULL(RTRIM(l.OUT_WH_GUBUN),'')='2'
                          AND l.REMARKS=N'직납품 영업창고 출고'),0) direct_qty
             FROM nx.set_stock_maint m
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.cust_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=m.cust_code
             LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=m.item_code
             WHERE {' AND '.join(w)} ORDER BY m.maint_ymd DESC, m.maint_seq DESC""", *p)
         cols = [d[0] for d in cur.description]
@@ -237,7 +237,7 @@ def setstock_scan(request: Request, barcode: str = Query(...)):
         cur.execute("""SELECT h.item_code, ISNULL(i.item_name,'') itemnm, ISNULL(h.deliver_qty,h.input_req_qty) qty,
               h.in_cust_code, ISNULL(c.CUST_DESC,'') custnm, h.status, ISNULL(h.insp_flag,'0') insp,
               (SELECT COUNT(*) FROM nx.set_input_req_dtl d WHERE d.sheet_no=h.sheet_no) jcnt
-            FROM nx.set_input_req h LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.in_cust_code
+            FROM nx.set_input_req h LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=h.in_cust_code
             LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=h.item_code
             WHERE h.barcode_no=? ORDER BY h.item_code""", bc)
         cols = [d[0] for d in cur.description]
@@ -306,7 +306,7 @@ def setin_stat(fr: str = Query(""), to: str = Query(""), cust: str = Query(""),
                      WHERE g.MAINT_TAG='S' AND g.SET_MAINT_YMD=m.maint_ymd
                        AND g.SET_MAINT_SEQ=m.maint_seq) jado_qty
               FROM nx.set_stock_maint m WITH(NOLOCK)
-              LEFT JOIN nx.CM_M_CUST c WITH(NOLOCK) ON c.CUST_CODE=m.cust_code
+              LEFT JOIN nx.v_cm_m_cust c WITH(NOLOCK) ON c.CUST_CODE=m.cust_code
               LEFT JOIN nx.item i WITH(NOLOCK) ON i.item_code=m.item_code
               {where}
              ORDER BY m.maint_ymd DESC, m.maint_seq""", *p)
@@ -513,7 +513,7 @@ def setstock_manual_prep(cust: str = Query(""), item: str = Query("")):
         custs = []
         try:
             cur.execute("""SELECT RTRIM(CUST_CODE), RTRIM(CUST_DESC)
-                             FROM nx.CM_M_CUST WITH(NOLOCK)
+                             FROM nx.v_cm_m_cust WITH(NOLOCK)
                             WHERE ISNULL(RTRIM(CUST_DESC),'')<>''
                             ORDER BY CUST_DESC""")
             custs = [{"code": str(r[0]).strip(), "nm": str(r[1]).strip()}
@@ -734,7 +734,7 @@ def setadj_list(fr: str = Query(""), to: str = Query(""), cust: str = Query(""),
                    m.maint_qty, ISNULL(m.remarks,'') remarks,
                    ISNULL(m.insert_user_id,'') user_id, m.insert_datetime
               FROM nx.set_stock_maint m WITH(NOLOCK)
-              LEFT JOIN nx.CM_M_CUST c WITH(NOLOCK) ON c.CUST_CODE=m.cust_code
+              LEFT JOIN nx.v_cm_m_cust c WITH(NOLOCK) ON c.CUST_CODE=m.cust_code
               LEFT JOIN nx.item i WITH(NOLOCK) ON i.item_code=m.item_code
              WHERE {' AND '.join(w)}
              ORDER BY m.maint_ymd DESC, m.maint_seq DESC""", *p)
@@ -1211,7 +1211,7 @@ def setinsp_list(request: Request, frm: str = Query(""), to: str = Query(""),
                   ISNULL(RTRIM(q.insp_flag),'0'), RTRIM(ISNULL(q.sheet_no,'')),
                   CONVERT(varchar(19), q.status_dt, 120), ISNULL(RTRIM(q.status_user),'')
              FROM nx.set_stock_maint m WITH(NOLOCK)
-             LEFT JOIN nx.CM_M_CUST c WITH(NOLOCK) ON RTRIM(c.CUST_CODE)=RTRIM(m.cust_code)
+             LEFT JOIN nx.v_cm_m_cust c WITH(NOLOCK) ON RTRIM(c.CUST_CODE)=RTRIM(m.cust_code)
              LEFT JOIN nx.item i WITH(NOLOCK) ON RTRIM(i.item_code)=RTRIM(m.item_code)
              LEFT JOIN nx.set_input_req q WITH(NOLOCK)
                     ON RTRIM(ISNULL(q.barcode_no,''))=RTRIM(ISNULL(m.sheet_no,''))

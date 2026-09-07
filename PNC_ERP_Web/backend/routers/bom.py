@@ -70,7 +70,7 @@ def bom_iteminfo(item: str = Query(...)):
                 d[k] = ("" if v is None else str(v).strip())
         cust = ""
         if d.get("in_cust"):
-            cur.execute("SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=?", d["in_cust"])
+            cur.execute("SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE=?", d["in_cust"])
             rc = cur.fetchone()
             if rc and rc[0]:
                 cust = str(rc[0]).strip()
@@ -112,7 +112,7 @@ def bom_get(item: str = Query(..., description="품번")):
                    ISNULL(ci.in_cust,'') AS in_cust, ISNULL(pc.CUST_DESC,'') AS cust_name
             FROM nx.bom_line l
             LEFT JOIN nx.item ci ON ci.item_code = l.child_item
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST pc ON pc.CUST_CODE = ci.in_cust
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust pc ON pc.CUST_CODE = ci.in_cust
             WHERE l.bom_id = ? ORDER BY l.seq""", bom_id)
         cols = [d[0] for d in cur.description]
         lines = []
@@ -150,7 +150,7 @@ def bom_flatget(item: str = Query(..., description="원본 품번")):
                    ISNULL(pc.CUST_DESC,'') cust_name
             FROM nx.bom_flat f
             LEFT JOIN nx.item i ON i.item_code = f.leaf_code
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST pc ON pc.CUST_CODE = i.in_cust
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust pc ON pc.CUST_CODE = i.in_cust
             WHERE f.item_code = ? ORDER BY f.leaf_code""", item)
         from decimal import Decimal as _Dec
         cols = [d[0] for d in cur.description]
@@ -200,7 +200,7 @@ def item_vendorsearch(q: str = Query("")):
     cn = _nx(); cur = cn.cursor()
     try:
         like = f"%{q.strip()}%"
-        cur.execute("""SELECT TOP 30 c.CUST_CODE, c.CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST c
+        cur.execute("""SELECT TOP 30 c.CUST_CODE, c.CUST_DESC FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust c
             WHERE c.CUST_CODE LIKE ? OR c.CUST_DESC LIKE ? ORDER BY c.CUST_CODE""", like, like)
         return {"rows": [{"code": r[0], "name": r[1]} for r in cur.fetchall()]}
     finally:
@@ -279,7 +279,7 @@ def _bom_tree_route(item, route_id):
         vmap = {}
         for i in range(0, len(vcodes), 900):
             ch = vcodes[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE IN ({ph})", *ch)
             for rr in cur.fetchall(): vmap[str(rr[0]).strip()] = rr[1]
         cur.execute("SELECT ISNULL(item_name,'') FROM nx.item WHERE item_code=?", ritem)
         rr = cur.fetchone(); rootnm = rr[0] if rr else ""
@@ -358,7 +358,7 @@ def _bom_tree_nx(item, real, expandbuy=0):
             cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.item_name,''), ISNULL(m.item_spec,''),
                   ISNULL(m.in_cust,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
                   ISNULL(m.diam,0), ISNULL(m.thick,0), ISNULL(m.length,0)
-                FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
+                FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=m.in_cust
                 WHERE m.ITEM_CODE IN ({inl})""")
             for r in cur.fetchall():
                 info[(r[0] or '').strip()] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
@@ -475,7 +475,7 @@ def bom_tree(item: str = Query(..., description="품번"), real: int = Query(1, 
                 cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.item_name,''), ISNULL(m.item_spec,''),
                       ISNULL(m.in_cust,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
                       ISNULL(m.diam,0), ISNULL(m.thick,0), ISNULL(m.length,0)
-                    FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
+                    FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=m.in_cust
                     WHERE m.ITEM_CODE IN ({ph})""", *chunk)
                 for r in cur.fetchall():
                     info[r[0]] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
@@ -545,7 +545,7 @@ def bom_whereused(item: str = Query(..., description="품번 — 이 품번을 �
             cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.item_name,''), ISNULL(m.item_spec,''),
                   ISNULL(m.in_cust,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
                   ISNULL(m.diam,0), ISNULL(m.thick,0), ISNULL(m.length,0)
-                FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
+                FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=m.in_cust
                 WHERE m.ITEM_CODE IN ({inl})""")
             for r in cur.fetchall():
                 info[(r[0] or '').strip()] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],

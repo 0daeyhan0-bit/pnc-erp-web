@@ -65,7 +65,7 @@ def stock_list(screen: str = Query("adjust"), ymd_from: str = Query(...), ymd_to
             FROM nx.stock_ledger l
             LEFT JOIN nx.item i ON i.item_code = l.MAT_CODE
             LEFT JOIN nx.item mi ON mi.item_code = l.ITEM_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST pc ON pc.CUST_CODE = l.CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust pc ON pc.CUST_CODE = l.CUST_CODE
             LEFT JOIN nx.stock_tag tg ON tg.tag = l.MAINT_TAG
             WHERE l.STOCK_POINT='MAT' AND l.MAINT_YMD BETWEEN ? AND ? AND l.MAINT_TAG IN ('{tags}')
               AND (? = '%%' OR l.MAT_CODE LIKE ? OR l.CUST_CODE LIKE ?)
@@ -575,7 +575,7 @@ def matrecv_po_pending(cust: str = Query(""), item: str = Query(""), sheet: str 
               ISNULL(p.PUR_COST,0) pur_cost, ISNULL(p.MAT_INSPECTION,'') insp,
               (p.PUR_QTY - ISNULL(p.IN_QTY,0) - ISNULL(p.CANCEL_QTY,0) - ISNULL(nx.q,0)) remain
             FROM PARTNER_ERP_TEST3.nx.PU_T_PURCHASE_DTL p
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE=p.CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cu ON cu.CUST_CODE=p.CUST_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.item it ON it.item_code=p.ITEM_CODE
             LEFT JOIN (SELECT PUR_YMD,PUR_SEQ,PUR_SEQ_ROW,SUM(MAINT_QTY) q FROM nx.stock_ledger
                        WHERE MAINT_TAG='9' AND ISNULL(PUR_YMD,'')<>'' GROUP BY PUR_YMD,PUR_SEQ,PUR_SEQ_ROW) nx

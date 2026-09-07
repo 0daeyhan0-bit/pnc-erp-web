@@ -74,7 +74,7 @@ def delivedit_list(request: Request, from_ymd: str = Query(""), to_ymd: str = Qu
     cc = str(cust or "").strip()
     if cc:
         # 코드 또는 거래처명 — 레거시는 코드지만 웹은 §3(이름 우선) 규칙상 둘 다 받는다
-        more.append("""AND (H.in_cust_code=? OR EXISTS(SELECT 1 FROM nx.CM_M_CUST c2 WITH(NOLOCK)
+        more.append("""AND (H.in_cust_code=? OR EXISTS(SELECT 1 FROM nx.v_cm_m_cust c2 WITH(NOLOCK)
                              WHERE c2.CUST_CODE=H.in_cust_code AND c2.CUST_DESC LIKE ?))""")
         p += [cc, f"%{cc}%"]
     if doban.strip():
@@ -112,7 +112,7 @@ def delivedit_list(request: Request, from_ymd: str = Query(""), to_ymd: str = Qu
         cnm = {}; inm = {}
         if ccs:
             ph = ",".join("?" * len(ccs)); lst = list(ccs)
-            cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *lst)
+            cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM nx.v_cm_m_cust WHERE CUST_CODE IN ({ph})", *lst)
             for a, b in cur.fetchall(): cnm[str(a).strip()] = str(b).strip()
         il = [x for x in its if x]
         for i in range(0, len(il), 900):
@@ -301,7 +301,7 @@ def delivedit_print(request: Request, sheet_no: str = Query(...), cc: str = Quer
               MAX(ISNULL(H.barcode_no,''))   -- ★인쇄물에 바코드번호 표기(2026-08-31)
             FROM nx.set_input_req H WITH(NOLOCK)
             LEFT JOIN nx.set_input_req_dtl D WITH(NOLOCK) ON D.sheet_no=H.sheet_no
-            LEFT JOIN nx.CM_M_CUST c WITH(NOLOCK) ON c.CUST_CODE=H.in_cust_code
+            LEFT JOIN nx.v_cm_m_cust c WITH(NOLOCK) ON c.CUST_CODE=H.in_cust_code
             LEFT JOIN nx.item i1 WITH(NOLOCK) ON i1.item_code=H.item_code
             LEFT JOIN nx.item i2 WITH(NOLOCK) ON i2.item_code=D.mat_code
            WHERE {' AND '.join(w)}
@@ -351,7 +351,7 @@ def delivedit_items(request: Request, kind: str = Query("doban"), q: str = Query
         w.append("H.input_ymd BETWEEN ? AND ?"); p += [f6, t6]
     cc = str(cust or "").strip()
     if cc:
-        w.append("""(H.in_cust_code=? OR EXISTS(SELECT 1 FROM nx.CM_M_CUST c2 WITH(NOLOCK)
+        w.append("""(H.in_cust_code=? OR EXISTS(SELECT 1 FROM nx.v_cm_m_cust c2 WITH(NOLOCK)
                       WHERE c2.CUST_CODE=H.in_cust_code AND c2.CUST_DESC LIKE ?))""")
         p += [cc, f"%{cc}%"]
     if q.strip():
@@ -387,7 +387,7 @@ def delivedit_custs(request: Request, q: str = Query("")):
             w = "AND (c.CUST_CODE LIKE ? OR c.CUST_DESC LIKE ?)"
             p = [f"%{q.strip()}%", f"%{q.strip()}%"]
         cur.execute(f"""SELECT TOP 300 c.CUST_CODE, ISNULL(c.CUST_DESC,'')
-                          FROM nx.CM_M_CUST c WITH(NOLOCK)
+                          FROM nx.v_cm_m_cust c WITH(NOLOCK)
                          WHERE EXISTS(SELECT 1 FROM nx.set_input_req h WITH(NOLOCK)
                                        WHERE h.in_cust_code=c.CUST_CODE) {w}
                          ORDER BY c.CUST_DESC""", *p)

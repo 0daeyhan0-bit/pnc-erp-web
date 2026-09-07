@@ -46,7 +46,7 @@ def _basemaster_partner(q):
               ISNULL(FAX_NO,''), ISNULL(ADDRESS,''), ISNULL(DLVY_DAY,0), ISNULL(DLVY_DAY2,0),
               ISNULL(SET_IN_FLAG,'0'), ISNULL(SAGUB_OUT_FLAG,'0'), ISNULL(HEAT_LABEL_FLAG,'0'),
               ISNULL(USE_FLAG,'0'), ISNULL(REMARKS,'')
-            FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE>''{w} ORDER BY CUST_CODE""", *p)
+            FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE>''{w} ORDER BY CUST_CODE""", *p)
         yn = lambda v: 'Y' if str(v).strip() == '1' else ''
         rows = []
         for r in cur.fetchall():

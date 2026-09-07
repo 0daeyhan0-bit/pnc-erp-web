@@ -29,7 +29,7 @@ def sagub_adjust_list(request: Request, fr: str = Query(""), to: str = Query("")
               ISNULL(c.CUST_DESC,'') custnm, l.mat_code, ISNULL(i.item_name,'') matnm,
               l.maint_qty, ISNULL(l.maint_cost,0) maint_cost, ISNULL(l.maint_amt,0) maint_amt,
               ISNULL(l.remarks,'') remarks, ISNULL(l.insert_user_id,'') insert_user_id, l.insert_datetime
-            FROM nx.sagub_maint l LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE=l.cust_code
+            FROM nx.sagub_maint l LEFT JOIN nx.v_cm_m_cust c ON c.CUST_CODE=l.cust_code
             LEFT JOIN nx.item i ON i.ITEM_CODE=l.mat_code
             WHERE {' AND '.join(w)} ORDER BY l.maint_ymd DESC, l.id DESC""", *p)
         cols = ["id", "maint_ymd", "cust_code", "custnm", "mat_code", "matnm", "maint_qty",
@@ -39,7 +39,7 @@ def sagub_adjust_list(request: Request, fr: str = Query(""), to: str = Query("")
             r["maint_qty"] = float(r["maint_qty"] or 0)
             r["insert_datetime"] = str(r["insert_datetime"] or "")[:19]
         cur.execute("""SELECT DISTINCT l.cust_code, ISNULL(c.CUST_DESC,'') nm FROM nx.sagub_maint l
-            LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE=l.cust_code
+            LEFT JOIN nx.v_cm_m_cust c ON c.CUST_CODE=l.cust_code
             WHERE l.maint_tag='B' AND l.cust_code IS NOT NULL ORDER BY 2""")
         custs = [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]
         return {"rows": rows, "custs": custs}
@@ -122,7 +122,7 @@ def sagub_holding_list(request: Request, cust: str = Query(""), mat: str = Query
         cur.execute(f"""SELECT l.cust_code CUST_CODE, ISNULL(c.CUST_DESC,'') custnm, l.mat_code MAT_CODE,
               ISNULL(i.item_name,'') matnm, ISNULL(MAX(i.ITEM_CLASS),'A') item_class,
               SUM(l.maint_qty) STOCK_QTY, MAX(ISNULL(l.insert_user_id,'')) upd_user, MAX(l.insert_datetime) upd_dt
-            FROM nx.sagub_maint l LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE=l.cust_code
+            FROM nx.sagub_maint l LEFT JOIN nx.v_cm_m_cust c ON c.CUST_CODE=l.cust_code
             LEFT JOIN nx.item i ON i.ITEM_CODE=l.mat_code
             WHERE {' AND '.join(w)}
             GROUP BY l.cust_code, c.CUST_DESC, l.mat_code, i.item_name""", *p)
@@ -164,7 +164,7 @@ def sagub_stock_list(cust: str = Query(""), mat: str = Query(""), sign: str = Qu
         elif sign == "-1": hav = "HAVING SUM(l.MAINT_QTY)<0"
         cur.execute(f"""SELECT TOP {int(limit)} l.CUST_CODE cust_code, ISNULL(c.CUST_DESC,'') custnm, l.MAT_CODE mat_code,
               ISNULL(i.item_name,'') matnm, SUM(l.MAINT_QTY) stock_qty, ISNULL(MAX(i.ITEM_CLASS),'A') item_class
-            FROM nx.stock_ledger l LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=l.CUST_CODE
+            FROM nx.stock_ledger l LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=l.CUST_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=l.MAT_CODE
             WHERE {' AND '.join(w)}
             GROUP BY l.CUST_CODE, c.CUST_DESC, l.MAT_CODE, i.item_name
@@ -176,7 +176,7 @@ def sagub_stock_list(cust: str = Query(""), mat: str = Query(""), sign: str = Qu
         if cls:  # J관리/A일반 필터(품목 ITEM_CLASS 기준)
             rows = [r for r in rows if (r.get("item_class") or "A") == cls]
         cur.execute("""SELECT DISTINCT l.CUST_CODE, ISNULL(c.CUST_DESC,'') nm FROM nx.stock_ledger l
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=l.CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=l.CUST_CODE
             WHERE l.STOCK_POINT='SAG' AND l.CUST_CODE IS NOT NULL ORDER BY 2""")
         custs = [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]
         return {"rows": rows, "custs": custs}
@@ -223,7 +223,7 @@ def sagub_output_list(cust: str = Query(""), mat: str = Query(""), fin: str = Qu
               r.req_qty, r.out_qty, ISNULL(r.finish_flag,'0') finish_flag, ISNULL(r.remarks,'') remarks,
               ISNULL(sg.stock_qty,0) sagub_stock, r.insert_user_id, r.insert_datetime
             FROM nx.sagub_output_req r
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=r.cust_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=r.cust_code
             LEFT JOIN PARTNER_ERP_TEST3.nx.item pi ON pi.ITEM_CODE=r.item_code
             LEFT JOIN PARTNER_ERP_TEST3.nx.item mi ON mi.ITEM_CODE=r.mat_code
             LEFT JOIN (SELECT cust_code, mat_code, SUM(maint_qty) stock_qty FROM nx.sagub_maint GROUP BY cust_code, mat_code) sg
@@ -232,7 +232,7 @@ def sagub_output_list(cust: str = Query(""), mat: str = Query(""), fin: str = Qu
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         cur.execute("""SELECT DISTINCT r.cust_code, ISNULL(c.CUST_DESC,'') nm FROM nx.sagub_output_req r
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=r.cust_code WHERE r.cust_code IS NOT NULL ORDER BY 2""")
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=r.cust_code WHERE r.cust_code IS NOT NULL ORDER BY 2""")
         custs = [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]
         return {"rows": rows, "custs": custs}
     finally:
@@ -806,7 +806,7 @@ def saleout_list(fr: str = Query(""), to: str = Query(""), sheet: str = Query(""
               ABS(ISNULL(m.maint_qty,0)) out_qty, ISNULL(m.maint_cost,0) cost, ABS(ISNULL(m.maint_amt,0)) amt, ABS(ISNULL(m.maint_vat,0)) vat,
               ISNULL(m.remarks,'') remarks, m.insert_user_id reg_user, {upd} upd_user, ISNULL(m.update_datetime,m.insert_datetime) work_dt,
               m.work_order, m.split_work_order, NULL sale_ymd, NULL sale_hms, {pf_col} print_flag
-            FROM {tbl} m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.cust_code
+            FROM {tbl} m LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=m.cust_code
             LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=m.mat_code
             WHERE {where}"""
         web_sel = SEL.format(idcol="m.id", src="web", upd="m.upd_user", pf_col="ISNULL(m.print_flag,'0')",
@@ -836,9 +836,9 @@ def saleout_list(fr: str = Query(""), to: str = Query(""), sheet: str = Query(""
             r["editable"] = 1 if (r.get("src") == "web" and r.get("id") is not None and not r["closed"]) else 0
         cur.execute("""SELECT DISTINCT cust_code, nm FROM (
               SELECT m.cust_code, ISNULL(c.CUST_DESC,'') nm FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT m
-                LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.cust_code WHERE m.MAINT_TAG='5' AND m.cust_code IS NOT NULL
+                LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=m.cust_code WHERE m.MAINT_TAG='5' AND m.cust_code IS NOT NULL
               UNION SELECT m.cust_code, ISNULL(c.CUST_DESC,'') FROM nx.saleout_maint m
-                LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.cust_code WHERE m.maint_tag='5' AND m.cust_code IS NOT NULL) u
+                LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=m.cust_code WHERE m.maint_tag='5' AND m.cust_code IS NOT NULL) u
             ORDER BY nm""")
         custs = [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]
         totqty = sum(float(r["out_qty"] or 0) for r in rows)
@@ -984,7 +984,7 @@ def saleout_save(payload: dict = Body(...)):
 @router.get("/api/saleout/slipinfo")
 def saleout_slipinfo(cust: str = Query("")):
     """★출고증(거래명세표) 머리글 정보 — 공급자(자사) + 공급받는자(거래처).
-       거래처 상세(등록번호·대표자·주소·업태/종목)는 nx.CM_M_CUST 에서 가져온다.
+       거래처 상세(등록번호·대표자·주소·업태/종목)는 nx.v_cm_m_cust 에서 가져온다.
        (웹 정본 nx.partner 는 코드·명·구분 4컬럼뿐이라 명세표에 필요한 항목이 없다.)"""
     def _biz(v):
         v = "".join(ch for ch in str(v or "") if ch.isdigit())
@@ -1012,7 +1012,7 @@ def saleout_slipinfo(cust: str = Query("")):
                 cur.execute("""SELECT TOP 1 ISNULL(BUSINESS_NO,''), ISNULL(CUST_DESC,''),
                          ISNULL(OWNER_NAME,''), LTRIM(ISNULL(ADDRESS,'')+' '+ISNULL(ADDRESS_DTL,'')),
                          ISNULL(BUSI_TYPE,''), ISNULL(BUSI_KIND,''), ISNULL(PHONE_NO,''), ISNULL(FAX_NO,'')
-                      FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE RTRIM(CUST_CODE)=?""", c)
+                      FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE RTRIM(CUST_CODE)=?""", c)
                 r = cur.fetchone()
                 if r:
                     buy = {"biz": _biz(r[0]), "nm": (r[1] or "").strip(), "owner": (r[2] or "").strip(),
@@ -1079,7 +1079,7 @@ def sagub_stock(cust: str = Query(""), mat: str = Query(""), nonzero: int = Quer
                    m.mat_code, ISNULL(i.item_name,'') itemnm,
                    SUM(CONVERT(float,m.maint_qty)) bal, COUNT(*) cnt
               FROM nx.sagub_maint m
-              LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.cust_code
+              LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=m.cust_code
               LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=m.mat_code
               {where}
              GROUP BY m.cust_code, ISNULL(c.CUST_DESC,''), m.mat_code, ISNULL(i.item_name,'')

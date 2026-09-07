@@ -47,7 +47,7 @@ def qc_opt(kind: str = Query("part"), q: str = Query("")):
             cur.execute("""SELECT TOP 50 MACH_CODE, ISNULL(MACH_DESC,'') FROM PARTNER_ERP_TEST3.nx.QA_M_MACHINE
                 WHERE ISNULL(USE_FLAG,'1')='1' AND (MACH_CODE LIKE ? OR MACH_DESC LIKE ?) ORDER BY MACH_DESC""", like, like)
         elif kind == "partner":
-            cur.execute("""SELECT TOP 50 CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST
+            cur.execute("""SELECT TOP 50 CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust
                 WHERE CUST_CODE LIKE ? OR CUST_DESC LIKE ? ORDER BY CUST_DESC""", like, like)
         elif kind == "line":
             cur.execute("SELECT TOP 50 LINE_NO code, LINE_NO nm FROM PARTNER_ERP_TEST3.nx.PR_M_LINE_NO WHERE LINE_NO LIKE ? ORDER BY LINE_NO", like)
@@ -104,7 +104,7 @@ def qc_error_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
                 FROM PARTNER_ERP_TEST3.nx.QA_T_ERROR e LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=e.ITEM_CODE
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=e.PROC_CODE
                 LEFT JOIN PARTNER_ERP_TEST3.nx.QA_M_MACHINE m ON m.MACH_CODE=e.MACH_CODE
-                LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=e.WORK_CUST_CODE WHERE {wl}{dedup}""")
+                LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=e.WORK_CUST_CODE WHERE {wl}{dedup}""")
         if src in ("all", "nx"):
             parts.append(f"""SELECT 'nx' src, CAST(n.id AS NVARCHAR(20)) key_id, ISNULL(n.error_tag,'') tag,
                 ISNULL(n.cust_line,'') cust_line, ISNULL(n.division,'') division, ISNULL(n.pg_reg,'') pg_reg,
@@ -122,7 +122,7 @@ def qc_error_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
                 FROM PARTNER_ERP_TEST3.nx.qc_error n LEFT JOIN PARTNER_ERP_TEST3.nx.item i2 ON i2.ITEM_CODE=n.item_code
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg2 ON pg2.GAGONG_PROC_CODE=n.proc_code
                 LEFT JOIN PARTNER_ERP_TEST3.nx.QA_M_MACHINE m2 ON m2.MACH_CODE=n.mach_code
-                LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c2 ON c2.CUST_CODE=n.partner_code WHERE {wn}""")
+                LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c2 ON c2.CUST_CODE=n.partner_code WHERE {wn}""")
         plist = []
         for part in parts: plist += pv
         sql = "SELECT TOP 3000 * FROM (\n" + "\nUNION ALL\n".join(parts) + "\n) q ORDER BY error_ymd DESC, key_id DESC"
@@ -571,7 +571,7 @@ def qc_iqc_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str = 
             ISNULL(h.LINE,'') line, ISNULL(h.INSP_QTY,0) insp_qty, ISNULL(h.ERR_TEXT,'') err_text,
             ISNULL(h.RESULT_OK,0) ok
             FROM PARTNER_ERP_TEST3.nx.QA_T_CUST_IQC_HEAD h LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=h.ITEM_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=h.CUST_CODE
             WHERE {' AND '.join(w)} ORDER BY h.OQC_YMD DESC, h.OQC_SEQ DESC""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]

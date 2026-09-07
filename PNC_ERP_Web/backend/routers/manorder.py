@@ -16,7 +16,7 @@ def manorder_charges():
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute("""SELECT LTRIM(RTRIM(ISNULL(C.CHARGE_USER_ID,''))) uid, COUNT(DISTINCT C.CUST_CODE) ncust
-          FROM PARTNER_ERP_TEST3.nx.CM_M_CUST C
+          FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust C
           JOIN PARTNER_ERP_TEST3.nx.item M ON M.in_cust=C.CUST_CODE AND ISNULL(M.item_status,'1') IN ('1','2')
           WHERE LTRIM(RTRIM(ISNULL(C.CHARGE_USER_ID,'')))<>''
           GROUP BY LTRIM(RTRIM(ISNULL(C.CHARGE_USER_ID,''))) ORDER BY COUNT(DISTINCT C.CUST_CODE) DESC""")
@@ -69,7 +69,7 @@ def manorder_vendors(q: str = Query(""), charge: str = Query(""), only_plan: int
         order = "MAX(C.CUST_DESC)" if ch and not q.strip() else "COUNT(M.item_code) DESC"
         cur.execute(f"""SELECT TOP 200 C.CUST_CODE, MAX(C.CUST_DESC) nm, MAX(C.CUST_TYPE) ct,
              COUNT(M.item_code) items, MAX(LTRIM(RTRIM(ISNULL(C.CHARGE_USER_ID,'')))) charge
-          FROM PARTNER_ERP_TEST3.nx.CM_M_CUST C JOIN PARTNER_ERP_TEST3.nx.item M ON M.in_cust=C.CUST_CODE AND ISNULL(M.item_status,'1') IN ('1','2')
+          FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust C JOIN PARTNER_ERP_TEST3.nx.item M ON M.in_cust=C.CUST_CODE AND ISNULL(M.item_status,'1') IN ('1','2')
           WHERE {' AND '.join(where)}
           GROUP BY C.CUST_CODE HAVING COUNT(M.item_code)>0
           ORDER BY {order}""", *params)
@@ -205,7 +205,7 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
             r["coop_stock"] = csm.get(str(r["ic"]).strip().upper(), 0.0)
         cn2 = _conn(); c2 = cn2.cursor()
         try:
-            c2.execute("SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=?", cc)
+            c2.execute("SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE=?", cc)
             rr = c2.fetchone(); nm = rr[0] if rr else cc
         finally:
             cn2.close()

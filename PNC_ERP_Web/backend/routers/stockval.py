@@ -36,7 +36,7 @@ def stockval_list(ym: str = Query(""), incust: str = Query("")):
         cur.execute("""SELECT ISNULL(M.in_cust,'') incust, MAX(ISNULL(C.CUST_DESC,'')) nm,
               COUNT(DISTINCT W.MAT_CODE) items, SUM(W.STOCK_QTY) qty, SUM(W.STOCK_AMT) amt
             FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH W JOIN PARTNER_ERP_TEST3.nx.item M ON M.item_code=W.MAT_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON C.CUST_CODE=M.in_cust
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust C ON C.CUST_CODE=M.in_cust
             WHERE W.STOCK_YYMM=? GROUP BY M.in_cust HAVING SUM(W.STOCK_AMT)<>0
             ORDER BY SUM(W.STOCK_AMT) DESC""", y)
         cols = [d[0] for d in cur.description]

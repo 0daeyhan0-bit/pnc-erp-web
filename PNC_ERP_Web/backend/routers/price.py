@@ -57,7 +57,7 @@ def price_history(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
           SELECT TOP 3000 H.item, ISNULL(i.item_name,'') nm, H.tag, H.cust, ISNULL(c.CUST_DESC,'') cust_nm,
                  H.mkt, H.curr, H.apply_ymd, H.cost, H.mat, H.procc, H.oth, H.rate, H.prev, H.usr,
                  H.idt, H.remarks
-          FROM H LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=H.item LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=H.cust
+          FROM H LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=H.item LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=H.cust
           WHERE {' AND '.join(w)} ORDER BY H.apply_ymd DESC, H.idt DESC""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -90,7 +90,7 @@ def price_search(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Quer
         # 거래처 필터: 해당 거래처(코드=오토컴플리트값 / 명칭 LIKE) 단가가 있는 품목만 (AND)
         cust_cond = "EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.price_item x WHERE x.item_code=i.ITEM_CODE"
         if cust.strip():
-            cust_cond += " AND (x.vendor_code=? OR EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.CM_M_CUST c WHERE c.CUST_CODE=x.vendor_code AND c.CUST_DESC LIKE ?))"
+            cust_cond += " AND (x.vendor_code=? OR EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust c WHERE c.CUST_CODE=x.vendor_code AND c.CUST_DESC LIKE ?))"
             p2 = [cust.strip(), f"%{cust.strip()}%"]
         else:
             p2 = []
@@ -131,7 +131,7 @@ def price_item(item: str = Query("")):
         cur.execute(f"""SELECT CASE h.price_type WHEN 'TAGS' THEN 'S' WHEN 'TAGE' THEN 'E' ELSE '1' END COST_TAG, ISNULL(h.vendor_code,'') cust, ISNULL(c.CUST_DESC,'') cust_nm,
               h.apply_ymd COST_APPLY_YMD, ISNULL(h.currency,'') curr, ISNULL(h.main_flag,'') main_flag, ISNULL(h.mkt,'') mkt,
               h.price ITEM_COST, h.mat_cost MAT_COST, h.proc_cost PROC_COST, h.other_cost OTHER_COST, ISNULL(h.remarks,'') remarks
-            FROM PARTNER_ERP_TEST3.nx.price_item h LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.vendor_code
+            FROM PARTNER_ERP_TEST3.nx.price_item h LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=h.vendor_code
             WHERE h.item_code=? ORDER BY h.apply_ymd DESC, h.price_type, h.vendor_code""", item)
         cols = [d[0] for d in cur.description]
         rows = []
@@ -180,7 +180,7 @@ def item_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Query("
     try:
         dLG = _kindmap(cur, "PR005"); dSG = _kindmap(cur, "PR006"); dPK = _kindmap(cur, "PR021")
         dUN = _kindmap(cur, "CM002"); dMT = _kindmap(cur, "PR019")
-        cur.execute("SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST")
+        cur.execute("SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust")
         dCust = {str(r[0]).strip(): r[1] for r in cur.fetchall()}
         w = ["1=1"]; p = []
         if q.strip(): w.append("(i.ITEM_CODE LIKE ? OR i.item_name LIKE ?)"); p += [f"%{q.strip()}%"] * 2
@@ -457,7 +457,7 @@ def price_inversion(ym: str = Query(""), q: str = Query(""), limit: int = Query(
         ymv = "".join(ch for ch in (ym or "") if ch.isdigit())[:4]
         if len(ymv) != 4:
             cur.execute("SELECT FORMAT(GETDATE(),'yyMM')"); ymv = str(cur.fetchone()[0])
-        cur.execute("SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM nx.CM_M_CUST")
+        cur.execute("SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM nx.v_cm_m_cust")
         dCust = {str(r[0]).strip(): r[1] for r in cur.fetchall()}
         dSG = _kindmap(cur, "PR006")
         lim = max(1, min(int(limit), 8000))

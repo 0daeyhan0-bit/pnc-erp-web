@@ -64,7 +64,7 @@ def sagubledger_list(request: Request, cust: str = Query(""), mat: str = Query("
               SUM(CASE WHEN l.maint_qty>0 THEN l.maint_qty ELSE 0 END) sent,
               SUM(CASE WHEN l.maint_qty<0 THEN -l.maint_qty ELSE 0 END) used, SUM(l.maint_qty) bal
             FROM nx.sagub_maint l
-            LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE=l.cust_code
+            LEFT JOIN nx.v_cm_m_cust c ON c.CUST_CODE=l.cust_code
             LEFT JOIN nx.item i ON i.item_code=l.mat_code
             WHERE {' AND '.join(w)}
             GROUP BY l.cust_code, c.CUST_DESC, l.mat_code, i.item_name""", *p)

@@ -1896,7 +1896,7 @@ def _attach_item_info(cur, rows, to6=None):
                                ISNULL(i.unit,''), ISNULL(i.sgroup,''), ISNULL(i.in_cust,''),
                                ISNULL(c.cust_desc,''), ISNULL(c.cust_type,'')
                           FROM nx.item i
-                          LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE = i.in_cust
+                          LEFT JOIN nx.v_cm_m_cust c ON c.CUST_CODE = i.in_cust
                          WHERE UPPER(i.item_code) IN ({ph})""", *part)
         for cd, nm, sp, un, sg, ic, cnm, ct in cur.fetchall():
             info[cd] = (nm, sp, un, sg, ic, cnm, ct)

@@ -1315,7 +1315,7 @@ def _coop_check(cur):
                      FROM nx.plan_part_mat a
                     WHERE ISNULL(a.mat_work_center_code,'')<>''
                       AND NOT EXISTS(SELECT 1 FROM nx.PR_M_WORK w WHERE w.WORK_CODE=a.mat_work_center_code)
-                      AND NOT EXISTS(SELECT 1 FROM nx.CM_M_CUST c WHERE c.CUST_CODE=a.mat_work_center_code)
+                      AND NOT EXISTS(SELECT 1 FROM nx.v_cm_m_cust c WHERE c.CUST_CODE=a.mat_work_center_code)
                     GROUP BY ISNULL(a.mat_work_center_code,'') ORDER BY 2 DESC""")
     unmapped = [{"wc": r[0], "n": int(r[1])} for r in cur.fetchall()]
     return {"coop_lines": int(n or 0), "coop_wc": int(wc or 0),
@@ -1474,7 +1474,7 @@ def planrev_modelbom_hist(ymd: str = Query(""), model: str = Query(""), item: st
             FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM a WITH(NOLOCK)
             LEFT JOIN PARTNER_ERP_TEST3.nx.item i WITH(NOLOCK) ON i.item_code=a.C_ITEM_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w WITH(NOLOCK) ON w.WORK_CODE=i.WORK_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu WITH(NOLOCK) ON cu.CUST_CODE=i.in_cust
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cu WITH(NOLOCK) ON cu.CUST_CODE=i.in_cust
             {} ORDER BY a.INSERT_DATETIME DESC, a.MODEL_NO, a.C_ITEM_CODE""".format(
             max(1, min(int(limit or 300), 3000)), wh), *p)
         rows = [{"model": r[0], "item": r[1], "make_ymd": r[2], "to_ymd": r[3], "use_qty": float(r[4] or 0),

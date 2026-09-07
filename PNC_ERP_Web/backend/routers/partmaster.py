@@ -54,7 +54,7 @@ def partmaster_list(q: str = Query(""), grp: str = Query("")):
               ISNULL(g.UPDATE_USER_ID,'') uid, g.UPDATE_DATETIME udt
             FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE=g.WORK_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=g.IN_CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=g.IN_CUST_CODE
             WHERE {' AND '.join(w)} ORDER BY g.WORK_CODE, g.SORT_KEY, g.GAGONG_PROC_CODE""", *p)
         cols = [d[0] for d in cur.description]; rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         for r in rows:

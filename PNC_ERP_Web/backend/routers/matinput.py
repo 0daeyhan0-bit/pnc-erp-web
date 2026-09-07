@@ -96,7 +96,7 @@ def matinput_list(base_ymd: str = Query(""), days: int = Query(4),
         cc = str(cust or "").strip()
         if cc:
             w.append("""(RTRIM(m.mat_work_center_code)=? OR EXISTS(
-                          SELECT 1 FROM nx.CM_M_CUST c2 WITH(NOLOCK)
+                          SELECT 1 FROM nx.v_cm_m_cust c2 WITH(NOLOCK)
                            WHERE c2.CUST_CODE=RTRIM(m.mat_work_center_code)
                              AND RTRIM(c2.CUST_DESC)=?))""")
             p += [cc, cc]
@@ -177,7 +177,7 @@ def matinput_list(base_ymd: str = Query(""), days: int = Query(4),
             --   **수량이 배수로 부풀었다**(2026-09-01 실측 432→832).
             LEFT JOIN nx.item i1 WITH(NOLOCK) ON i1.item_code=m.assy_item_code
             LEFT JOIN nx.item i2 WITH(NOLOCK) ON i2.item_code=m.mat_code
-            LEFT JOIN nx.CM_M_CUST c WITH(NOLOCK) ON c.CUST_CODE=RTRIM(m.mat_work_center_code)
+            LEFT JOIN nx.v_cm_m_cust c WITH(NOLOCK) ON c.CUST_CODE=RTRIM(m.mat_work_center_code)
            WHERE {' AND '.join(w)}
            ORDER BY m.mat_code, m.assy_item_code, {_DCOL}, m.work_order""", *p)
         raw = []
@@ -298,7 +298,7 @@ def matinput_opts():
         cur.execute("""SELECT DISTINCT RTRIM(ISNULL(m.mat_work_center_code,'')) cc,
                               ISNULL(c.CUST_DESC,'') nm
                          FROM nx.plan_part_mat m WITH(NOLOCK)
-                         JOIN nx.CM_M_CUST c WITH(NOLOCK)
+                         JOIN nx.v_cm_m_cust c WITH(NOLOCK)
                            ON c.CUST_CODE=RTRIM(m.mat_work_center_code)
                         WHERE ISNULL(m.mat_work_center_code,'')<>''
                           AND ISNULL(c.CUST_DESC,'')<>'' ORDER BY 2""")

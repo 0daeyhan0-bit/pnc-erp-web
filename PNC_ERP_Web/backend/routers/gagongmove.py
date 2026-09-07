@@ -17,7 +17,7 @@ def gagong_move580_opts():
                        ORDER BY SORT_KEY, GAGONG_PROC_CODE""")
         parts = [{"code": r[0], "nm": r[1] or r[0]} for r in cur.fetchall()]
         cur.execute("""SELECT DISTINCT c.CUST_CODE, c.CUST_DESC FROM PARTNER_ERP_TEST3.nx.item m
-                       JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
+                       JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=m.in_cust
                        WHERE ISNULL(m.in_cust,'')<>'' ORDER BY c.CUST_DESC""")
         sagubs = [{"code": r[0], "nm": r[1] or r[0]} for r in cur.fetchall()]
         return {"parts": parts, "sagubs": sagubs}
@@ -446,7 +446,7 @@ def gagong_move580_sheets(from_ymd: str = Query(""), to_ymd: str = Query(""),
             LEFT JOIN PARTNER_ERP_TEST3.nx.item mi ON mi.ITEM_CODE=u.MAT_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB su ON su.ITEM_CODE=u.MAT_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=u.PR_PART_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cc ON cc.CUST_CODE=u.SAGUB_CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cc ON cc.CUST_CODE=u.SAGUB_CUST_CODE
             ORDER BY u.MAINT_GROUP_SEQ DESC, u.MAINT_SEQ""", *p)
         cols = [d[0] for d in cur.description]
         rows = []
@@ -490,7 +490,7 @@ def gagong_move580_print(group_from: int = Query(...), group_to: int = Query(Non
             ) u
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB su ON su.ITEM_CODE=u.MAT_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=u.PR_PART_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cc ON cc.CUST_CODE=u.SAGUB_CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cc ON cc.CUST_CODE=u.SAGUB_CUST_CODE
             ORDER BY u.MAINT_GROUP_SEQ, u.MAINT_SEQ""", group_from, gt)
         cols = [d[0] for d in cur.description]
         raw = [dict(zip(cols, r)) for r in cur.fetchall()]

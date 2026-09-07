@@ -235,13 +235,13 @@ def plan_sourcing(mode: str = Query("gubun"), gubun: str = Query(""), vendor: st
             if mode == "vendor":
                 cur.execute(f"""SELECT s.SUPPLY_GUBUN, s.VENDOR_CODE, ISNULL(cu.CUST_DESC,'') vname,
                     COUNT(DISTINCT s.MAT_CODE) mats, SUM(s.QTY) qty FROM nx.plan_mat_source s
-                    LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON s.VENDOR_CODE COLLATE DATABASE_DEFAULT=cu.CUST_CODE COLLATE DATABASE_DEFAULT
+                    LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cu ON s.VENDOR_CODE COLLATE DATABASE_DEFAULT=cu.CUST_CODE COLLATE DATABASE_DEFAULT
                     WHERE {wh} GROUP BY s.SUPPLY_GUBUN, s.VENDOR_CODE, cu.CUST_DESC ORDER BY SUM(s.QTY) DESC""", p)
             elif mode == "detail":
                 cur.execute(f"""SELECT TOP 2000 s.WORK_ORDER, s.MAT_CODE, ISNULL(it.item_name,'') mname, s.SUPPLY_GUBUN,
                     s.VENDOR_CODE, ISNULL(cu.CUST_DESC,'') vname, s.QTY, s.SOURCE FROM nx.plan_mat_source s
                     LEFT JOIN PARTNER_ERP_TEST3.nx.item it ON s.MAT_CODE COLLATE DATABASE_DEFAULT=it.ITEM_CODE COLLATE DATABASE_DEFAULT
-                    LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON s.VENDOR_CODE COLLATE DATABASE_DEFAULT=cu.CUST_CODE COLLATE DATABASE_DEFAULT
+                    LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cu ON s.VENDOR_CODE COLLATE DATABASE_DEFAULT=cu.CUST_CODE COLLATE DATABASE_DEFAULT
                     WHERE {wh} ORDER BY s.QTY DESC""", p)
             else:  # gubun
                 cur.execute(f"""SELECT s.SUPPLY_GUBUN, COUNT(DISTINCT s.MAT_CODE) mats, SUM(s.QTY) qty,
@@ -816,7 +816,7 @@ def plan_part(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Quer
                   SUM(CAST(pp.PART_PLAN_QTY AS float)) q
                 FROM nx.plan_part_mat pp
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE COLLATE DATABASE_DEFAULT=pp.MAT_WORK_CENTER_CODE COLLATE DATABASE_DEFAULT
-                LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE COLLATE DATABASE_DEFAULT=pp.MAT_WORK_CENTER_CODE COLLATE DATABASE_DEFAULT
+                LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cu ON cu.CUST_CODE COLLATE DATABASE_DEFAULT=pp.MAT_WORK_CENTER_CODE COLLATE DATABASE_DEFAULT
                 LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE COLLATE DATABASE_DEFAULT=pp.MAT_CODE COLLATE DATABASE_DEFAULT
                 WHERE {' AND '.join(w)}
                 GROUP BY pp.PLAN_YMD, pp.ASSY_ITEM_CODE, pp.MAT_CODE, pp.MAT_WORK_CENTER_CODE,

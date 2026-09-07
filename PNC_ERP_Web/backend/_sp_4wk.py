@@ -234,7 +234,7 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 					a.c_item_code as c_item_code,
 
-					isnull((case when c.in_cust>'' then (select cust_desc from PARTNER_ERP_TEST3.nx.cm_m_cust WITH (NOLOCK) where cust_code=c.in_cust)
+					isnull((case when c.in_cust>'' then (select cust_desc from PARTNER_ERP_TEST3.nx.v_cm_m_cust WITH (NOLOCK) where cust_code=c.in_cust)
 
 																	else (select top 1 b1.gagong_proc_desc from PARTNER_ERP_TEST3.nx.pr_m_item_proc_gagong a1
 

@@ -26,7 +26,7 @@ _SALE_MAGAM = """WITH MAGAM(CUST_CODE,JUN_YYMM,JUN_MAGAM_DAY,MAGAM_DAY) AS (
   SELECT CUST_CODE, format(dateadd(MONTH,-1,convert(date,'{ym}'+'01',12)),'yyMM') JUN_YYMM,
     ISNULL((SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=A.CUST_CODE AND APPLY_YYMM<=format(dateadd(MONTH,-1,convert(date,'{ym}'+'01',12)),'yyMM') ORDER BY APPLY_YYMM DESC),'31') JUN_MAGAM_DAY,
     ISNULL((SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=A.CUST_CODE AND APPLY_YYMM<='{ym}' ORDER BY APPLY_YYMM DESC),'31') MAGAM_DAY
-  FROM PARTNER_ERP_TEST3.nx.CM_M_CUST A)"""
+  FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust A)"""
 
 def _sale_win():
     return "A.MAINT_YMD > mg.JUN_YYMM+mg.JUN_MAGAM_DAY AND A.MAINT_YMD <= '{ym}'+mg.MAGAM_DAY"
@@ -81,7 +81,7 @@ def salemagam_list(request: Request, ym: str = Query(""), gubun: str = Query("")
             SUM(CASE WHEN S.gubun=N'판매' THEN S.amt ELSE 0 END) amt_sale,
             SUM(CASE WHEN S.gubun=N'반품' THEN S.amt ELSE 0 END) amt_return,
             SUM(CASE WHEN S.gubun=N'수출' THEN S.amt ELSE 0 END) amt_export
-          FROM ({_sale_src(dc, dc5)}) S JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON S.cc=C.CUST_CODE{gwhere}
+          FROM ({_sale_src(dc, dc5)}) S JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust C ON S.cc=C.CUST_CODE{gwhere}
           GROUP BY S.cc HAVING SUM(S.amt)<>0 ORDER BY SUM(S.amt) DESC""")
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -211,7 +211,7 @@ def salemagam_carryover(ym: str = Query(""), cc: str = Query("")):
         else:
             cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
               SELECT A.CUST_CODE cc, MAX(C.CUST_DESC) nm, SUM(-A.MAINT_QTY) qty, SUM(-A.MAINT_AMT) amt, COUNT(DISTINCT A.MAT_CODE) items
-              FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+              FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
               WHERE A.MAINT_TAG='5' AND A.MAINT_YMD>='{y}00' AND A.MAINT_YMD<='{y}99' AND {carry}
               GROUP BY A.CUST_CODE HAVING SUM(-A.MAINT_AMT)<>0 ORDER BY SUM(-A.MAINT_AMT) DESC""")
             cols = [d[0] for d in cur.description]
@@ -316,7 +316,7 @@ def salemagam_lines(request: Request, ym: str = Query(""), basis: str = Query("m
             MAX(ISNULL(M.item_name,'')) nm, MAX(ISNULL(M.item_spec,'')) spec, MAX(ISNULL(M.UNIT,'')) unit,
             A.MAINT_COST cost, A.MAINT_YMD ymd, SUM(-A.MAINT_QTY) q, SUM(-A.MAINT_AMT) amt
           FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A
-            JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON A.CUST_CODE=C.CUST_CODE
+            JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust C ON A.CUST_CODE=C.CUST_CODE
             JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE
           WHERE {' AND '.join(where)}
@@ -371,7 +371,7 @@ def salemagam_custsearch(q: str = Query("")):
     cn = _conn(); cur = cn.cursor()
     try:
         like = f"%{q.strip()}%"
-        cur.execute("""SELECT TOP 30 CUST_CODE, CUST_DESC, CUST_TYPE FROM PARTNER_ERP_TEST3.nx.CM_M_CUST
+        cur.execute("""SELECT TOP 30 CUST_CODE, CUST_DESC, CUST_TYPE FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust
                        WHERE CUST_CODE LIKE ? OR CUST_DESC LIKE ? ORDER BY CUST_DESC, CUST_CODE""", like, like)
         return {"rows": [{"cc": r[0], "nm": r[1], "ct": r[2]} for r in cur.fetchall()]}
     finally:

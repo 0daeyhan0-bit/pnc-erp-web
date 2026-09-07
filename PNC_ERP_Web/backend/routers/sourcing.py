@@ -39,7 +39,7 @@ def procgroup_vendors(q: str = Query("")):
     cn = _conn(); cur = cn.cursor()
     try:
         like = f"%{q}%"
-        cur.execute("""SELECT TOP 40 CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST
+        cur.execute("""SELECT TOP 40 CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust
             WHERE CUST_CODE LIKE ? OR CUST_DESC LIKE ? ORDER BY CUST_DESC""", like, like)
         return {"rows": [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]}
     finally:
@@ -59,7 +59,7 @@ def procgroup_get(base: str = Query(...), ymd: str = Query("")):
         # 실제 생산단은 아래 nk>0(현재유효 BOM 보유)로 자동 선별 → (CI적용)/예상가 더미 자동제외.
         cur.execute("""SELECT i.ITEM_CODE, ISNULL(i.item_name,''), ISNULL(i.in_cust,''),
               ISNULL(cu.CUST_DESC,''), ISNULL(i.MAKE_TYPE,''), ISNULL(i.ITEM_STATUS,'')
-            FROM PARTNER_ERP_TEST3.nx.item i LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE=i.in_cust
+            FROM PARTNER_ERP_TEST3.nx.item i LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cu ON cu.CUST_CODE=i.in_cust
             WHERE i.ITEM_CODE LIKE ?""", base + '%')
         vs = []
         for ic, nm, cc, cnm, mk, st in cur.fetchall():
@@ -562,7 +562,7 @@ def _route_baseline_lines(item):
               CASE WHEN EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.v_cs_bom bb WHERE LTRIM(RTRIM(bb.ITEM_CODE))=LTRIM(RTRIM(b.MAT_CODE))) THEN 1 ELSE 0 END has_bom
             FROM PARTNER_ERP_TEST3.nx.v_cs_bom b
             LEFT JOIN PARTNER_ERP_TEST3.nx.item m ON m.ITEM_CODE=b.MAT_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=m.in_cust
             WHERE b.ITEM_CODE=? AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101'
               AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1'
               AND b.MAT_CODE NOT LIKE 'RAC%' ORDER BY b.BOM_SEQ""", item.strip())
@@ -691,7 +691,7 @@ def _custnm_map(cur, codes):
     codes = sorted({str(c).strip() for c in codes if str(c or "").strip()})
     for i in range(0, len(codes), 900):
         ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
-        cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
+        cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE IN ({ph})", *ch)
         for r in cur.fetchall(): m[str(r[0]).strip()] = r[1]
     return m
 
@@ -2388,7 +2388,7 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
             ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
             cur.execute(f"""SELECT LTRIM(RTRIM(m.ITEM_CODE)), ISNULL(m.item_name,''), ISNULL(m.item_spec,''), ISNULL(m.MAKE_TYPE,''),
                   ISNULL(m.in_cust,''), ISNULL(c.CUST_DESC,'')
-                FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
+                FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=m.in_cust
                 WHERE m.ITEM_CODE IN ({ph})""", *ch)
             for r in cur.fetchall():
                 info[str(r[0]).strip()] = {"nm": r[1], "spec": r[2], "mk": str(r[3]).strip(), "cust": str(r[4]).strip(), "custnm": r[5]}
