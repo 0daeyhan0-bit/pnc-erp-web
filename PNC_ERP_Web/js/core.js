@@ -3082,6 +3082,7 @@ function wrCrud(host, cfg){
        <button class="btn" id="wr-search">🔍 조회</button>
        ${ed?`<button class="btn" id="wr-new" style="background:#1c7c3a;color:#fff">➕ 신규</button>
        <button class="btn" id="wr-del">🗑 선택삭제</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
+       <button class="btn" id="wr-xls" style="background:#1c7c3a;color:#fff" title="화면 그대로 엑셀로 저장">엑셀</button>
        <div class="spacer"></div><span class="rowcount">${nf(d.cnt||0)}건${cfg.sum?(' · '+cfg.sum(d)):''}</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${(st.msg.includes('실패')||st.msg.includes('오류'))?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
@@ -3141,6 +3142,56 @@ function wrCrud(host, cfg){
     const g=id=>host.querySelector(id);
     const doSearch=()=>{st.F.from=g('#wr-from').value;st.F.to=g('#wr-to').value;qfRead(host,cfg.filters,st.F,'wr-f-');load();};
     g('#wr-search').onclick=doSearch;
+    /* ★엑셀 — wrCrud 를 쓰는 **모든 화면**에 공통 적용(품질불량관리·시방변경 등).
+         화면 표를 그대로 뽑으므로 화면마다 컬럼을 따로 정의할 필요가 없고,
+         cfg.cols 가 바뀌어도 자동으로 따라간다.
+       ★첫칸(체크박스)·끝칸(작업 버튼)은 데이터가 아니라 뺀다.
+       ★HTML→.xls 가 아니라 downloadXLS(진짜 xlsx) — HTML 방식은 색이 버려진다. */
+    {const xb=g('#wr-xls'); if(xb)xb.onclick=()=>{
+      const tbl=host.querySelector('.grid-wrap table');
+      if(!tbl||!d.rows||!d.rows.length)return alert('내려받을 자료가 없습니다.');
+      // 투명(rgba 0)을 안 거르면 색 없는 셀이 #000000(검정)이 되어 표가 새까맣게 나온다
+      const rgb2hex=s=>{const m=/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?/.exec(s||'');
+        if(!m)return '';
+        if(m[4]!==undefined&&parseFloat(m[4])===0)return '';
+        const h=(+m[1]<<16|+m[2]<<8|+m[3]).toString(16).padStart(6,'0').toUpperCase();
+        return (h==='FFFFFF')?'':'#'+h;};
+      const mid=a=>a.slice(1,a.length-1);          // 체크박스칸·작업칸 제거
+      const cellOf=td=>{const cs=getComputedStyle(td);
+        const t=(td.innerText||'').trim();
+        const bg=rgb2hex(cs.backgroundColor), fg=rgb2hex(cs.color);
+        const num=(t!==''&&/^-?[\d,]+(\.\d+)?$/.test(t))?Number(t.replace(/,/g,'')):null;
+        return {v:(num===null||isNaN(num))?t:num, bg:bg||'',
+                fg:(fg&&fg!=='#000000')?fg:'', b:(+cs.fontWeight>=600)?1:0,
+                al:td.classList.contains('num')?'right':(td.classList.contains('center')?'center':'left')};};
+      const hr=tbl.tHead.rows[0];
+      const xcols=mid([...hr.cells]).map(th=>({h:(th.innerText||'').trim(),
+                     w:Math.max(60,Math.round(th.getBoundingClientRect().width))}));
+      const xrows=[];
+      for(const tr of tbl.tBodies[0].rows){
+        if(tr.querySelector('td.empty'))continue;
+        xrows.push(mid([...tr.cells]).map(cellOf));
+      }
+      const T2=new Date(),p2=n=>String(n).padStart(2,'0');
+      const stamp=`${String(T2.getFullYear()).slice(2)}${p2(T2.getMonth()+1)}${p2(T2.getDate())}`
+                 +`${p2(T2.getHours())}${p2(T2.getMinutes())}`;
+      /* 시트/파일명 = 화면 제목. cfg.xlsName 이 있으면 그걸 우선 쓴다.
+         제목 요소는 wrShell 이 host 바깥(형제)에 그리므로 문서에서 가장 가까운 것을 찾는다.
+         이모지·부제(작은 회색 글씨)는 빼고 앞머리 단어만 쓴다. */
+      let ttl=cfg.xlsName||'';
+      if(!ttl){
+        const pg=host.closest('.content')||document;
+        const te=pg.querySelector('.page-title');
+        // firstChild 텍스트만 = <span> 부제 제외. 이모지·기호 제거.
+        ttl=te?String(te.firstChild&&te.firstChild.nodeValue||te.textContent||'')
+                 .replace(/[^가-힣A-Za-z0-9()\s-]/g,'').trim():'';
+      }
+      const nm=(String(ttl||'조회결과').replace(/[\\/:*?"<>|]/g,'').trim()||'조회결과').slice(0,40);
+      downloadXLS(`${nm}_${stamp}`,xcols,xrows,
+        {sheet:nm.slice(0,28),
+         title:`${nm} — ${cfg.dateLabel||'기간'} ${st.F.from} ~ ${st.F.to}`,
+         sub:`${nf(d.cnt||0)}건${cfg.sum?(' · '+String(cfg.sum(d)).replace(/<[^>]*>/g,'')):''}`});
+    };}
     if(ed){g('#wr-new').onclick=()=>{st.form=cfg.newRow(st.F);render();};
       g('#wr-del').onclick=()=>del([...st.sel]);}
     host.querySelectorAll('.wr-chk').forEach(ch=>ch.onclick=()=>{const id=ch.dataset.id;ch.checked?st.sel.add(id):st.sel.delete(id);});  // ★ID는 문자열 유지(웹행 ID='YMD-SEQ' 복합키, +변환시 NaN)

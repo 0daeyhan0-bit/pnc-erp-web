@@ -2199,12 +2199,55 @@ SCREEN.partresult=(c)=>{
        <label class="tl">작업자</label><input class="inp" id="pt-worker" value="${esc(F.worker)}" style="width:72px">
        <label class="tl">조회종류</label><select class="inp" id="pt-gubun" style="width:172px">${gubunOpts}</select>
        <button class="btn" id="pt-search">🔍 조회</button>
+       <button class="btn" id="pt-xls" style="background:#1c7c3a;color:#fff" title="화면 그대로 엑셀로 저장(합계행 포함)">엑셀</button>
        <div class="spacer"></div><span class="rowcount">${nf(data.cnt)}건 · 생산수량 <b>${nf(data.sum_qty)}</b> · ${stLbl} <b>${stVal}</b></span>
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       ${grid}</div>`;
     const g=id=>c.querySelector(id);
+    /* ★엑셀 — 화면 표를 그대로 뽑는다(410·키팅·공수등록과 같은 방식).
+         이 화면은 조회종류(COLS)에 따라 컬럼이 통째로 바뀌는데, 표에서 읽으므로
+         모드가 바뀌어도 코드를 안 고쳐도 된다. 합계행(tfoot)도 셀 수가 본문과 같아 그대로 실린다.
+       ★HTML→.xls 가 아니라 core.js downloadXLS(진짜 xlsx) — HTML 방식은 색이 버려진다. */
+    {const xb=g('#pt-xls'); if(xb)xb.onclick=()=>{
+      const tbl=c.querySelector('.grid-wrap table');
+      if(!tbl||!data.rows||!data.rows.length)return alert('내려받을 자료가 없습니다.');
+      // 투명(rgba 0)을 안 거르면 색 없는 셀이 #000000(검정)이 되어 표가 새까맣게 나온다
+      const rgb2hex=s=>{const m2=/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?/.exec(s||'');
+        if(!m2)return '';
+        if(m2[4]!==undefined&&parseFloat(m2[4])===0)return '';
+        const h=(+m2[1]<<16|+m2[2]<<8|+m2[3]).toString(16).padStart(6,'0').toUpperCase();
+        return (h==='FFFFFF')?'':'#'+h;};
+      const cellOf=(td,al)=>{const cs=getComputedStyle(td);
+        const t=(td.innerText||'').trim();
+        const bg=rgb2hex(cs.backgroundColor), fg=rgb2hex(cs.color);
+        const num=(t!==''&&/^-?[\d,]+(\.\d+)?$/.test(t))?Number(t.replace(/,/g,'')):null;
+        return {v:(num===null||isNaN(num))?t:num, bg:bg||'',
+                fg:(fg&&fg!=='#000000')?fg:'', b:(+cs.fontWeight>=600)?1:0,
+                al:al||(td.classList.contains('num')?'right':(td.classList.contains('center')?'center':'left'))};};
+      const hr=tbl.tHead.rows[0];
+      const xcols=[...hr.cells].map(th=>({h:(th.innerText||'').trim(),
+                     w:Math.max(60,Math.round(th.getBoundingClientRect().width))}));
+      const xrows=[];
+      for(const tr of tbl.tBodies[0].rows){
+        if(tr.querySelector('td.empty'))continue;
+        xrows.push([...tr.cells].map(td=>cellOf(td)));
+      }
+      const xfoot=tbl.tFoot?[...tbl.tFoot.rows].map(tr=>[...tr.cells].map(td=>{
+        const o=cellOf(td); o.b=1; o.bg=o.bg||'#EEF2F7'; return o;})):[];
+      const T2=new Date(),p=n=>String(n).padStart(2,'0');
+      const stamp=`${String(T2.getFullYear()).slice(2)}${p(T2.getMonth()+1)}${p(T2.getDate())}`
+                 +`${p(T2.getHours())}${p(T2.getMinutes())}`;
+      const pnm=F.part?((parts.find(x=>x.code===F.part)||{}).name||F.part):'전체';
+      const gnm=(GUBUNS.find(([v])=>v===m)||[,''])[1];
+      downloadXLS(`파트별생산실적_${pnm}_${stamp}`,xcols,xrows,
+        {sheet:'파트별 생산실적현황',
+         title:`파트별 생산실적현황 — 생산기간 ${F.from} ~ ${F.to} · 파트 ${pnm} · ${gnm}`,
+         sub:`${nf(data.cnt)}건 · 생산수량 ${nf(data.sum_qty)} · ${stLbl} ${stVal}`
+             +`${F.item?' · 도번 '+F.item:''}${F.worker?' · 작업자 '+F.worker:''}`,
+         foot:xfoot});
+    };}
     g('#pt-search').onclick=()=>{F.from=g('#pt-from').value;F.to=g('#pt-to').value;F.part=g('#pt-part').value;F.item=g('#pt-item').value;F.worker=g('#pt-worker').value;F.gubun=g('#pt-gubun').value;load();};
     g('#pt-item').oninput=e=>acItem(e.target.value);
     ['#pt-item','#pt-worker'].forEach(id=>g(id).onkeyup=e=>{if(e.key==='Enter')g('#pt-search').click();});
@@ -5516,9 +5559,15 @@ SCREEN.gongsu=(c)=>{
   //   근태를 고르면 시작·종료·근무h가 규칙대로 자동세팅되고, 시작/종료를 직접 고치면 근무h 재계산.
   //   잔업 = 정규(8h) + N시간. 저녁휴게 17:00~17:30 뒤부터 시작하므로 종료 = 17:30 + N.
   //   레거시 미사용 코드 20~25 배정(4~7·10~14 는 레거시 사용중이라 회피).
-  const HRCHK=[['0','정상'],['1','연차'],['2','오전반차'],['8','오후반차'],['3','조퇴'],
+  /* ★결근 = '7' — 새 코드를 배정하지 않고 **레거시 코드를 그대로 쓴다**(2026-09-07 확정).
+       레거시 근무공수등록(w_pr_worktime_010) 드롭다운에 이미 '결근'이 있다.
+       실측 역산: 코드7 = 0000~0000 · 근무h 0 · 4,707건, 비고에 '결근'·'병가'·'퇴사'·'예비군'.
+         (코드1 도 0000~0000 이지만 비고가 '월차'·'반차'·'라인휴무' 계열 → 우리 화면의 '연차'와 같은 축)
+       ⟹ 여기서 새 코드를 만들면 레거시와 값이 갈려 같은 결근이 두 코드로 쌓인다. */
+  const HRCHK=[['0','정상'],['1','연차'],['2','오전반차'],['8','오후반차'],['3','조퇴'],['7','결근'],
                ['20','잔업1'],['21','잔업1.5'],['22','잔업2'],['23','잔업2.5'],['24','잔업3'],['25','잔업3.5']];
   const HRPRE={'0':['0800','1700'],'1':['0000','0000'],'2':['0800','1200'],'8':['1300','1700'],
+               '7':['0000','0000'],                       // 결근 = 출근 안 함 → 근무h 0
                '20':['0800','1830'],'21':['0800','1900'],'22':['0800','1930'],
                '23':['0800','2000'],'24':['0800','2030'],'25':['0800','2100']};   // 조퇴는 수기
   // 시작~종료 → 근무h. 정규 08:00~17:00, 휴게 = 점심 12:00~13:00 + 저녁 17:00~17:30.
@@ -5718,6 +5767,7 @@ SCREEN.gongsu=(c)=>{
        <button class="btn" id="gs-search">🔍 조회</button>
        ${ed?`<button class="btn" id="gs-newentry" style="background:#1c7c3a;color:#fff">👥 근무공수등록</button>
              <button class="btn" id="gs-newsup" style="background:#1c47a0;color:#fff" title="어느 파트 사람이 어느 라인으로 지원 갔는지 등록">지원공수등록</button>`:''}
+       <button class="btn" id="gs-xls" style="background:#1c7c3a;color:#fff" title="화면 그대로 엑셀로 저장(합계행 포함)">엑셀</button>
        <div class="spacer"></div><span class="rowcount">${won(data.cnt)}건 · 실근무공수합 <b>${_wnf(data.sum_hr)}</b>h</span>
      </div>
      ${msg?`<div class="page-sub" style="color:${msg.includes('실패')||msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(msg)}</div>`:''}
@@ -5772,6 +5822,56 @@ SCREEN.gongsu=(c)=>{
         <td colspan="${ed?8:7}"></td></tr></tfoot>`:''}
       </table></div>`;
     const g=id=>body.querySelector(id);
+    /* ★엑셀 — 화면 표를 그대로 뽑는다(410·키팅과 같은 방식).
+         컬럼을 따로 정의하지 않으므로 항목이 늘거나 순서가 바뀌어도 자동으로 따라간다.
+         색(실근무 음수=빨강)·합계행(tfoot)도 화면 그대로 실린다.
+       ★HTML→.xls 가 아니라 core.js downloadXLS(진짜 xlsx) — HTML 방식은 색이 버려진다. */
+    {const xb=g('#gs-xls'); if(xb)xb.onclick=()=>{
+      const tbl=body.querySelector('.grid-wrap table');
+      if(!tbl||!data.rows||!data.rows.length)return alert('내려받을 자료가 없습니다.');
+      // 투명(rgba 0)을 안 거르면 색 없는 셀이 #000000(검정)이 되어 표가 새까맣게 나온다
+      const rgb2hex=s=>{const m=/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?/.exec(s||'');
+        if(!m)return '';
+        if(m[4]!==undefined&&parseFloat(m[4])===0)return '';
+        const h=(+m[1]<<16|+m[2]<<8|+m[3]).toString(16).padStart(6,'0').toUpperCase();
+        return (h==='FFFFFF')?'':'#'+h;};
+      const cellOf=td=>{const cs=getComputedStyle(td);
+        const t=(td.innerText||'').trim();
+        const bg=rgb2hex(cs.backgroundColor), fg=rgb2hex(cs.color);
+        // '-2' 같은 음수도 숫자로 넣어야 엑셀에서 합계가 된다
+        const num=(t!==''&&/^-?[\d,]+(\.\d+)?$/.test(t))?Number(t.replace(/,/g,'')):null;
+        return {v:(num===null||isNaN(num))?t:num, bg:bg||'',
+                fg:(fg&&fg!=='#000000')?fg:'', b:(+cs.fontWeight>=600)?1:0, al:'center'};};
+      const hr=tbl.tHead.rows[0];
+      // 편집권한이 있으면 마지막이 수정/삭제 버튼칸(헤더 빈칸)이다 — 데이터가 아니라 뺀다.
+      //   ★인덱스로 자르지 않고 '마지막 1칸'만 떼어낸다(빈 헤더가 또 생겨도 오작동 없게).
+      const cut=(ed && (hr.cells[hr.cells.length-1].innerText||'').trim()==='') ? 1 : 0;
+      const keep=a=>cut?a.slice(0,a.length-cut):a;
+      const cols=keep([...hr.cells]).map(th=>({h:(th.innerText||'').trim(),
+                     w:Math.max(60,Math.round(th.getBoundingClientRect().width))}));
+      const rows=[];
+      for(const tr of tbl.tBodies[0].rows){
+        if(tr.querySelector('td.empty'))continue;
+        rows.push(keep([...tr.cells]).map(cellOf));
+      }
+      // ★합계행은 colspan 이 있어 셀 수가 본문과 다르다 — keep(인덱스 기준)을 쓰면 어긋난다.
+      //   데이터에서 직접 만든다(화면 tfoot 과 같은 값).
+      const foot=[[{v:`합계 ${data.cnt}건`,al:'center',b:1,bg:'#EEF2F7',cs:7},
+                   {v:Number(data.sum_work_hr||0),al:'center',b:1,bg:'#EEF2F7'},
+                   {v:Number(data.sum_support_hr||0),al:'center',b:1,bg:'#EEF2F7'},
+                   {v:Number(data.sum_hr||0),al:'center',b:1,bg:'#EEF2F7',
+                    fg:((+data.sum_hr||0)<0?'#C0392B':'')}]];
+      const T=new Date(),p=n=>String(n).padStart(2,'0');
+      const stamp=`${String(T.getFullYear()).slice(2)}${p(T.getMonth()+1)}${p(T.getDate())}`
+                 +`${p(T.getHours())}${p(T.getMinutes())}`;
+      const dnm=F.dept?((parts.find(x=>x.code===F.dept)||{}).nm||F.dept):'전체';
+      downloadXLS(`공수등록_${dnm}_${stamp}`,cols,rows,
+        {sheet:'공수등록',
+         title:`공수등록 — 근무일 ${F.from} ~ ${F.to} · 부서 ${dnm}`,
+         sub:`${data.cnt}건 · 실근무공수합 ${_wnf(data.sum_hr)}h`
+             +`${F.gubun?' · 구분 '+F.gubun:''}${F.user?' · 작업자 '+F.user:''}`,
+         foot});
+    };}
     g('#gs-search').onclick=()=>{F.from=g('#gs-from').value;F.to=g('#gs-to').value;F.gubun=g('#gs-gubun').value;F.dept=g('#gs-dept').value;F.user=g('#gs-user').value;load();};
     ['#gs-gubun','#gs-user'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter')g('#gs-search').click();};});
     // 부서는 드롭다운 — 고르는 즉시 조회(입력칸이 아니라 Enter 를 기다릴 이유가 없다)
