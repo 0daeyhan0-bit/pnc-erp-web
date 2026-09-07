@@ -421,7 +421,7 @@ LABEL_GAPDETECT = True
 _GAP_DONE = False          # 이번 프로세스에서 이미 측정을 보냈는가
 
 
-def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3) -> str:
+def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3, gap: float = 0) -> str:
     """제품스티커 TSPL — TSC/Bixolon 계열 직송용.
 
     ★프린터가 QR·텍스트를 직접 그리므로 래스터(PDF)보다 훨씬 선명하고 빠르다.
@@ -447,7 +447,8 @@ def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3) -> str:
     #     한 번 해야 한다 — 센서 기준값은 프린터에 저장된다.
     out = [
         "SIZE 40 mm,20 mm",
-        f"GAP {LABEL_GAP_MM} mm,0",
+        # ★gap 인자가 오면 그 값으로 — 실물 갭이 3mm 가 아닐 때 화면에서 2·3·4 를 시험해볼 수 있게.
+        f"GAP {(f'{float(gap):g}' if 0.5 <= float(gap or 0) <= 20 else LABEL_GAP_MM)} mm,0",
         f"DENSITY {max(0, min(int(darkness), 15))}",
         f"SPEED {max(1, min(int(speed), 8))}",
         "DIRECTION 1",
@@ -504,7 +505,8 @@ def print_kanban(box_no: str = Query(..., description="간판번호(콤마로 �
 def print_label(print_seq: str = Query(...), start_no: int = Query(0), end_no: int = Query(0),
                 worker: str = Query(""), inspector: str = Query(""),
                 mode: str = Query("pdf", description="pdf | tspl"),
-                darkness: int = Query(8), speed: int = Query(3)):
+                darkness: int = Query(8), speed: int = Query(3),
+                gap: float = Query(0, description="갭 mm — 0이면 기본값(LABEL_GAP_MM)")):
     """제품스티커 인쇄물. mode=pdf 면 PDF(base64), mode=tspl 이면 TSPL 명령어 문자열."""
     j = prodsheet_label_print(print_seq=print_seq, start_no=start_no, end_no=end_no,
                               worker=worker, inspector=inspector)
@@ -513,25 +515,30 @@ def print_label(print_seq: str = Query(...), start_no: int = Query(0), end_no: i
     doc = f"제품스티커 {j.get('item','')} ({j.get('qty',0)}장)"
     if str(mode).lower() == "tspl":
         return {"ok": True, "kind": "label", "mode": "tspl", "cnt": j.get("qty", 0), "doc": doc,
-                "tspl": build_label_tspl(j, darkness, speed)}
+                "tspl": build_label_tspl(j, darkness, speed, gap)}
     return {"ok": True, "kind": "label", "mode": "pdf", "cnt": j.get("qty", 0), "doc": doc,
             "pdf": base64.b64encode(build_label_pdf(j)).decode("ascii")}
 
 
 @router.get("/api/print/label/calib")
-def print_label_calib():
+def print_label_calib(gap: float = Query(0, description="갭 mm — 0이면 기본값(LABEL_GAP_MM)")):
     """라벨 갭 보정(수동) — 프린터가 라벨 간격을 실측해 시작점을 다시 잡는다.
 
     ★왜 필요한가 — 인쇄가 라벨 경계를 넘어 밀리는 것은 좌표 문제가 아니라
       **프린터가 라벨의 시작 위치를 모르는 것**이다. 갭 센서 기준값은
       프린터 내부(EEPROM)에 저장되므로 **한 번만 보정하면 계속 유지**된다.
     ★출력물 없이 GAPDETECT 만 보낸다 — 측정 과정에서 라벨 1~2장이 배출된다.
-    ★화면(생산전표출력관리)의 [갭 보정] 버튼이 이걸 부른다.
-      에이전트를 다시 깔지 않아도 현장에서 바로 보정할 수 있게 하기 위함이다.
+    ★gap 을 주면 그 값으로 보정한다(2026-09-07 추가).
+      실물 갭을 자로 재기 어려워 2·3·4mm 를 바꿔가며 맞춰보게 하기 위함이다.
+      GAP 값이 실제와 다르면 프린터가 시작점을 계속 잘못 잡는다.
     """
-    cmds = ["SIZE 40 mm,20 mm", f"GAP {LABEL_GAP_MM} mm,0", "GAPDETECT"]
-    return {"ok": True, "kind": "label", "mode": "tspl", "cnt": 0,
-            "doc": "라벨 갭 보정", "tspl": "\r\n".join(cmds) + "\r\n"}
+    g = float(gap or 0)
+    if not (0.5 <= g <= 20):      # 이상값이면 기본값으로 — 잘못된 입력이 용지를 낭비하지 않게
+        g = float(LABEL_GAP_MM)
+    gs = (f"{g:g}")
+    cmds = ["SIZE 40 mm,20 mm", f"GAP {gs} mm,0", "GAPDETECT"]
+    return {"ok": True, "kind": "label", "mode": "tspl", "cnt": 0, "gap": g,
+            "doc": f"라벨 갭 보정 ({gs}mm)", "tspl": "\r\n".join(cmds) + "\r\n"}
 
 
 # ───────────────────── 에이전트 배포(다운로드) ─────────────────────

@@ -4617,6 +4617,11 @@ SCREEN.prodsheet=(host)=>{
     if(await tryAgent('label',ag=>{
         const q=new URLSearchParams(qs);
         q.set('mode',(ag&&ag.label_mode)==='tspl'?'tspl':'pdf');
+        // ★화면에서 정한 갭(mm)을 함께 보낸다 — 보정과 실제 출력이 같은 값을 써야
+        //   "2로 맞춰보고 안 되면 4" 식의 시험이 의미가 있다.
+        // ★host 기준으로 찾는다 — 이 자리의 g() 는 오버레이(ov)를 가리켜 #ps-gap 을 못 찾는다.
+        {const _e=host.querySelector('#ps-gap'); const _gp=parseFloat((_e&&_e.value)||'')||0;
+         if(_gp)q.set('gap',_gp);}
         return `${API}/api/print/label?${q}`;}))return;
     try{const r=await fetch(`${API}/api/prodsheet/label-print?${qs}`);j=await r.json();}
     catch(e){alert('라벨 조회 실패: '+e);return;}
@@ -4958,6 +4963,13 @@ SCREEN.prodsheet=(host)=>{
        <!-- ★갭 보정(2026-09-07) — 라벨이 밀려 찍힐 때 누른다.
               프린터가 라벨 간격을 실측해 시작점을 다시 잡는다. 측정값은 프린터에
               저장되므로 **한 번만 누르면 계속 유지**된다(측정 중 라벨 1~2장 배출). -->
+       <!-- ★갭 값을 바꿔가며 시험할 수 있게(2026-09-07). 실물 갭을 자로 재기 어려워
+              2·3·4mm 를 넣어보며 맞추는 편이 빠르다. 값이 실제와 다르면 프린터가
+              라벨 시작점을 계속 잘못 잡는다. 여기서 정한 값은 실제 출력에도 함께 쓰인다. -->
+       <label class="tl" style="font-size:11px;color:#41546b">갭</label>
+       <input class="inp" id="ps-gap" type="number" step="0.5" min="1" max="10" value="3"
+              style="width:52px;height:24px;font-size:11px;min-width:52px" title="라벨과 라벨 사이 간격(mm)">
+       <span style="font-size:11px;color:#8a94a6">mm</span>
        <button class="btn" id="ps-calib" style="height:24px;padding:0 8px;font-size:11px"
                title="라벨이 밀려 찍힐 때 누르세요 — 프린터가 라벨 간격을 다시 측정합니다(라벨 1~2장 사용)">갭 보정</button>
      </div>
@@ -5037,7 +5049,8 @@ SCREEN.prodsheet=(host)=>{
        if(!confirm('라벨 갭 보정을 실행합니다.\n\n프린터가 라벨 간격을 측정하며 라벨 1~2장이 빈 채로 나옵니다.\n측정값은 프린터에 저장되어 계속 유지됩니다.\n\n진행할까요?'))return;
        const t0=cb.textContent; cb.disabled=true; cb.textContent='보정 중…';
        try{
-         const j=await(await fetch(`${API}/api/print/label/calib`)).json();
+         const _gp=parseFloat((g('#ps-gap')||{}).value||'')||0;
+         const j=await(await fetch(`${API}/api/print/label/calib?gap=${encodeURIComponent(_gp)}`)).json();
          if(!j.ok||!j.tspl)throw new Error(j.detail||'보정 명령 생성 실패');
          await PRN_AGENT.send('label',{tspl:j.tspl,doc:j.doc,copies:1});
          alert('갭 보정을 실행했습니다.\n\n라벨을 한 장 뽑아 위치가 맞는지 확인하세요.');
