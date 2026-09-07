@@ -795,6 +795,24 @@ def _assert_can_close(cur, user, what="마감"):
     raise HTTPException(403, f"{what} 권한이 없습니다({u}) — 시스템관리자 또는 '마감관리' 수정권한이 필요합니다.")
 
 
+def _assert_reopen(cur, user):
+    """★마감 해제(reopen)는 수퍼관리자(시스템관리자)만 (CLOSE_REDESIGN #3).
+       확정을 되돌리는 행위라 일반 마감권한(user_perm 'close')으로는 불가 — deny by default."""
+    u = str(user or "").strip()
+    if not u:
+        raise HTTPException(403, "마감 해제 권한을 확인할 수 없습니다 — 사용자 정보가 없습니다.")
+    try:
+        cur.execute("SELECT roles FROM nx.app_user WHERE user_id=? AND ISNULL(status,'사용')='사용'", u)
+        r = cur.fetchone()
+        if r and r[0]:
+            import json as _json
+            if "시스템관리자" in (_json.loads(r[0]) or []):
+                return "시스템관리자"
+    except Exception:
+        pass
+    raise HTTPException(403, f"마감 해제는 수퍼관리자(시스템관리자)만 가능합니다({u}).")
+
+
 # ===================== 생산(PRD) · 영업(SAL) 스냅샷 — C2 (2026-08-27) =====================
 # ★소스 선택 근거: nx.stock_ledger 는 PRD/ASY 가 0행(§4-C 실측) → 원장으로는 스냅샷을 만들 수 없다.
 #   대신 게이팅 캐논 §4-C 표가 정본으로 지정한 **레거시 재현 recipe** 를 그대로 쓴다.
@@ -1401,7 +1419,7 @@ def close_cancel(payload: dict = Body(...)):
     user = str(payload.get("user", "") or "web").strip()
     cn = _nx_tx(); cur = cn.cursor()      # ★원자성: 스냅샷 제거 + 잠금해제 동시
     try:
-        _assert_can_close(cur, user, "마감 해제")
+        _assert_reopen(cur, user)   # ★재개는 수퍼관리자만(CLOSE_REDESIGN #3)
         _ledger_cache_clear()      # ★확정값이 바뀌므로 수불장 캐시를 버린다
         if not _is_closed(cur, d, t, p):
             raise HTTPException(409, f"{DOMAINS[d]} {p} 는 마감 상태가 아닙니다.")
