@@ -547,7 +547,15 @@ def perm_users_save(request: Request, payload: dict = Body(...)):
             pw = str(x.get("pw") or "")
             roles = _json.dumps(x.get("roles") or [], ensure_ascii=False)
             # partner 가 이름으로 들어오면 거래처코드로 바꾼다(이름은 동명·개명에 깨진다)
-            pc = str(x.get("partner_code") or x.get("partner") or "").strip() or None
+            # ★화면이 편집하는 필드는 'partner' 다 — 그것을 **먼저** 본다(2026-09-07 교정).
+            #   종전엔 partner_code 를 먼저 봤는데, 목록 API(:515)가 partner_code 와 partner 를
+            #   **둘 다** 내려주므로 화면에서 partner 만 고쳐도 안 고쳐진 partner_code(옛 값)가
+            #   이겨서 **기존 계정의 협력사 변경이 영영 저장되지 않았다**
+            #   (실사용 오류: 협력사1을 2368→2148 로 바꿔도 계속 2368).
+            #   신규 계정은 partner_code 가 없어 정상 저장돼 증상이 안 보였다.
+            #   ※'partner' 키가 아예 없는 호출(다른 경로)만 partner_code 로 넘어간다.
+            _pcv = x.get("partner") if ("partner" in x) else x.get("partner_code")
+            pc = str(_pcv or "").strip() or None
             if pc and not pc.isdigit():
                 cur.execute("SELECT cust_code FROM nx.cust WHERE LTRIM(RTRIM(cust_name))=?", pc)
                 hit = cur.fetchall()

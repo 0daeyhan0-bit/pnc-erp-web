@@ -5547,7 +5547,12 @@ SCREEN.coopmatplan=(c)=>{
      </div>
      ${msg?`<div class="page-sub" style="flex:0 0 auto;color:#c0392b;font-weight:600">${esc(msg)}</div>`:''}
      ${data.note?`<div class="page-sub" style="flex:0 0 auto;color:#c77700">${esc(data.note)}</div>`:''}
-     <div class="grid-wrap" style="flex:1 1 auto;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+     <!-- ★표 아래 여백 제거 = flex:0 1 auto + max-height:100% (확정 해법, 커밋 4787a13).
+            flex:1 1 auto 로 두면 행이 적을 때도 표를 화면 끝까지 늘려, 그 늘어난 빈 영역이
+            여백으로 보인다(2026-09-07 지적: 하단에 큰 공백).
+            0 1 auto = 짧으면 내용만큼 · 길면 max-height 안에서 스크롤.
+          ★#app·.content·pg-* 의 높이 체인은 건드리지 말 것 — 만지면 더 나빠진다(c52de04). -->
+     <div class="grid-wrap" style="flex:0 1 auto;min-height:0;max-height:100%;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl" id="cm-tbl" style="font-size:11.5px"><thead><tr>
         <th>납품업체</th>
         ${isDtl()?'<th>자도번</th><th class="num">사용수</th>':''}
@@ -5591,5 +5596,10 @@ SCREEN.coopmatplan=(c)=>{
       catch(e){}
     }
   };
-  (async()=>{ await loadWc(); draw(); if(F.cust) load(); })();
+  /* ★진입 시 자동조회 하지 않는다 — 조회는 항상 [조회] 버튼으로(2026-09-07 대표 지시
+       "바로 조회가 되는데 조회버튼 클릭하면 되게 해줘").
+       협력사는 soloFix 로 작업처가 자동으로 채워지므로, 종전엔 F.cust 가 세팅되자마자
+       무거운 쿼리(2,558행·수초)가 진입만으로 돌아 화면이 한참 멈춰 있었다.
+       협력사계획현황(:3186)이 이미 같은 규칙이다 — 두 화면을 맞춘다. */
+  (async()=>{ await loadWc(); draw(); })();
 };

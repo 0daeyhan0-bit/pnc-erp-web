@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ko">
 <head>
 <meta charset="utf-8">
@@ -292,8 +292,8 @@
   var DB = {items:[], itemDetail:{}, priceItems:[], priceBuyHist:{}, priceSaleHist:{},
             stock:[], lineNames:{}, custTypeNames:{}};
 </script>
-<script src="js/core.js?v=260906coopmat3"></script>
-<script src="js/screens.etc.js?v=260906coopmat3"></script>
+<script src="js/core.js?v=260907coop3"></script>
+<script src="js/screens.etc.js?v=260907coop2"></script>
 <!-- ★매입/매출 마감현황(2026-09-06) — SCREEN.purmagam·salemagam 이 여기 정의돼 있다.
      포털 기존 4화면(partnerplan·deliv420·delivedit·sagubledger)은 전부 screens.etc.js 라
      종전엔 이 파일이 필요 없었다. 마감현황을 추가하면서 함께 로드한다. -->
@@ -508,13 +508,16 @@ async function load(){
      내부 직원이면 전 거래처 조회. 레거시와 같은 방식이라 화면은 손대지 않는다. */
 function tabs(){
   const staff = (T.me||{}).utype !== '협력사';
+  // ↓ 발주현황(일반) 메뉴를 되살릴 때 쓰는 판정. 지금은 그 메뉴가 꺼져 있어 미사용이다(아래 참조).
   const isPartner = !!((T.me||{}).partner_code);
   const isCutting = !!((T.me||{}).is_cutting);
   const t=[{v:'home',n:'홈'}];
   t.push({v:'pplan', n:'협력사 계획현황',      scr:'partnerplan'});
   t.push({v:'pmat',  n:'협력사 자재계획현황',   scr:'coopmatplan'});
-  // ★일반협력사만 발주현황(일반). 절삭협력사(is_cutting)는 계획현황을 쓴다.
-  if(isPartner && !isCutting) t.push({v:'order', n:'협력사 발주현황(일반)'});
+  /* ★「협력사 발주현황(일반)」 메뉴 제거 (2026-09-07 대표 지시 "지금은 사용 안 해").
+       화면 코드(viewOrder·loadOrder·/api/coopporder/*)는 **그대로 둔다** — 다시 쓸 때
+       이 한 줄만 되살리면 된다. 지우면 순소요(계획−재고−기발주) 계산 로직까지 사라진다.
+     if(isPartner && !isCutting) t.push({v:'order', n:'협력사 발주현황(일반)'}); */
   t.push({v:'deliv', n:'거래명세서 발행',      scr:'deliv420'});
   t.push({v:'dedit', n:'거래명세표 수정',      scr:'delivedit'});
   // ★「협력사사급재고관리」는 뺐다(2026-09-03) — 사급 수불장과 같은 원장(nx.sagub_maint)을
