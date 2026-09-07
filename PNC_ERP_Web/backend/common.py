@@ -105,8 +105,10 @@ class _ROConn:
     def __getattr__(self, n): return getattr(self._cn, n)
 
 def _conn():
+    # ★컷오버(2026-09-07): 레거시 PARTNER_ERP 은퇴 → nx(PARTNER_ERP_TEST3) 접속. RO 가드 유지.
+    #   레거시 대조가 필요한 소수 쿼리(총평균 등)는 3부분명 PARTNER_ERP_ORG.dbo.X 로 개별 지정.
     cs = (f'DRIVER={{SQL Server}};SERVER={db_client.DB_SERVER},{db_client.DB_PORT};'
-          f'DATABASE=PARTNER_ERP;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD};ApplicationIntent=ReadOnly')
+          f'DATABASE=PARTNER_ERP_TEST3;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD};ApplicationIntent=ReadOnly')
     return _ROConn(pyodbc.connect(cs, autocommit=True))
 
 def _num(x):

@@ -14,9 +14,9 @@ from fastapi import APIRouter, Query
 live_router = APIRouter(prefix="/api/live", tags=["live"])
 
 def _ro():
-    """읽기전용 PARTNER_ERP 커넥션(쓰기 불가)."""
+    """읽기전용 커넥션. ★컷오버(2026-09-07): 레거시 은퇴→nx(PARTNER_ERP_TEST3)."""
     cs = (f'DRIVER={{SQL Server}};SERVER={db_client.DB_SERVER},{db_client.DB_PORT};'
-          f'DATABASE=PARTNER_ERP;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD}')
+          f'DATABASE=PARTNER_ERP_TEST3;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD}')
     return pyodbc.connect(cs, readonly=True)
 
 def _rows(sql, *params):

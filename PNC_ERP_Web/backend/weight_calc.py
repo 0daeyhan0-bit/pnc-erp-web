@@ -61,7 +61,7 @@ def _load_copper_master():
         return _CU_MASTER
 
 def _ro():
-    return pyodbc.connect(f'DRIVER={{SQL Server}};SERVER={db_client.DB_SERVER},{db_client.DB_PORT};DATABASE=PARTNER_ERP;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD}', readonly=True)
+    return pyodbc.connect(f'DRIVER={{SQL Server}};SERVER={db_client.DB_SERVER},{db_client.DB_PORT};DATABASE=PARTNER_ERP_TEST3;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD}', readonly=True)  # ★컷오버: 레거시 은퇴→nx
 
 COPPER = {'CU', '고강도'}
 

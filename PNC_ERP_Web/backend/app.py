@@ -275,7 +275,7 @@ def _conn():
     # ApplicationIntent=ReadOnly: 테스트 연결·SELECT 1 성공 확인됨(2026-07-29). AG 미사용 시 무해(라우팅 힌트).
     #   실질 쓰기차단은 _ROConn/_ROCursor 코드가드. 쓰기는 _nx(PARTNER_ERP_TEST3)에서만 허용.
     cs = (f'DRIVER={{SQL Server}};SERVER={db_client.DB_SERVER},{db_client.DB_PORT};'
-          f'DATABASE=PARTNER_ERP;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD};ApplicationIntent=ReadOnly')
+          f'DATABASE=PARTNER_ERP_TEST3;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD};ApplicationIntent=ReadOnly')  # ★컷오버: 레거시 은퇴→nx
     return _ROConn(pyodbc.connect(cs, autocommit=True))
 
 def _num(x):
