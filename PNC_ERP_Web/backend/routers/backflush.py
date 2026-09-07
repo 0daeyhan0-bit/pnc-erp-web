@@ -335,17 +335,20 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
         _post('RDY', child, -from_rdy * f, 'P4', '백플러시소비(준비)')
         _post('MAT', child, -from_mat * f, 'P4', '백플러시소비(자재)')
         consumed += need
-    weld_consumed = 0.0                            # ★용접봉 소비(−MAT, tag 'W', base RAC, 투입공정): 완성공정 1회 자재와 함께
+    # ★용접봉·용접링은 **생산창고(PRD)** 에서 뺀다 (2026-09-07 교정) —
+    #   창고가 Q1000(생산창고)이므로 재고점도 PRD 여야 게이트(_weld_stock_at)와 짝이 맞는다.
+    #   종전 'MAT' 은 자재창고(IS0001) 축이라 Q1000 재고를 못 보고 못 뺐다.
+    weld_consumed = 0.0                            # 용접봉 소비(−PRD, tag 'W', base RAC, 투입공정)
     for base_rac, wq in weld.items():
         wneed = wq * prod_qty
         if abs(wneed) < 1e-9: continue
-        _post('MAT', base_rac, -wneed * f, 'W', '백플러시 용접봉소비', gpc_over=_weld_proc_code(nx, base_rac))
+        _post('PRD', base_rac, -wneed * f, 'W', '백플러시 용접봉소비', gpc_over=_weld_proc_code(nx, base_rac))
         weld_consumed += wneed
-    ring_consumed = 0.0                            # ★용접링 소비(−MAT, tag 'R', EA, 생산창고 Q1000): 완성공정 1회
+    ring_consumed = 0.0                            # 용접링 소비(−PRD, tag 'R', EA, 생산창고 Q1000)
     for ring_code, rq in ring.items():
         rneed = rq * prod_qty
         if abs(rneed) < 1e-9: continue
-        _post('MAT', ring_code, -rneed * f, 'R', '백플러시 용접링소비', gpc_over=WELD_WAREHOUSE)
+        _post('PRD', ring_code, -rneed * f, 'R', '백플러시 용접링소비', gpc_over=WELD_WAREHOUSE)
         ring_consumed += rneed
     _post(out_sp, item, prod_qty * f, 'P7', f'백플러시 생산입고({out_sp})')   # 생산품 +ASY/+PRD
     nc.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd6)
@@ -364,10 +367,20 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
 
 
 def _weld_stock_at(cur, base_rac, gpc):
-    """생산창고(투입공정 gpc, 예 Q1000) 용접봉 현재고 = SUM(stock_ledger MAT · 그 공정).
-       ★실시간 원장sum(스냅샷 아님). Q1000은 웹전용(matissue 입 · backflush 출)이라 stock_ledger가 정확(§16 예외)."""
+    """생산창고(투입공정 gpc, 예 Q1000) 용접봉 현재고 = SUM(stock_ledger PRD · 그 공정).
+
+       ★재고점 교정 (2026-09-07 대표확정) — 종전 STOCK_POINT='MAT' 은 **항상 0** 이었다.
+         MAT 은 자재창고(IS0001) 전용이고 생산창고(Q1000·S1·S6…)는 PRD 다. 실측 —
+           point=MAT  GPC=IS0001  175,923행 (99.9%)   ← 자재창고
+           point=PRD  GPC=P0001·S1·S6·RAC·Q1000 …    ← 생산파트창고
+           point=MAT  GPC=Q1000   **0행**             ← 게이트가 찾던 조건
+         그래서 생산창고에 용접봉을 아무리 올려도 "재고 0 / 부족" 으로 실적이 거부됐다
+         (재고조정 470 은 PRD 로 넣는다 — prodwrite.py:214).
+       ★MAT 도 함께 보는 폴백은 두지 않는다(§1-9-1 한 개념에 소스는 하나).
+         자재창고 재고를 여기서 세면 불출하지 않은 자재로 실적이 잡힌다.
+    """
     cur.execute("""SELECT ISNULL(SUM(MAINT_QTY),0) FROM nx.stock_ledger
-        WHERE STOCK_POINT='MAT' AND MAT_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')=?""", base_rac, gpc)
+        WHERE STOCK_POINT='PRD' AND MAT_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')=?""", base_rac, gpc)
     return float(cur.fetchone()[0] or 0)
 
 
@@ -430,7 +443,7 @@ def _weld_consume(cro, nx, item, signed_qty, wo, user, do_gate=True):
             continue
         nc.execute("""INSERT INTO nx.stock_ledger(STOCK_POINT,MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,ITEM_CODE,MAT_CODE,
               GAGONG_PROC_CODE,WORK_ORDER,MAINT_QTY,REMARKS,INSERT_USER_ID,INSERT_DATETIME)
-            VALUES('MAT',?,?,'W','Z99990',NULL,?,?,?,?,?,?,GETDATE())""",
+            VALUES('PRD',?,?,'W','Z99990',NULL,?,?,?,?,?,?,GETDATE())""",
             ymd6, _seq(), br, _weld_proc_code(nx, br), (wo or None), dq, '용접봉 생산소비(공정종속)', user)
         weld_consumed += wq * signed_qty
     ring_consumed = 0.0                            # ★용접링 소비/복원 (−R @ Q1000, 부호수량)
@@ -440,7 +453,7 @@ def _weld_consume(cro, nx, item, signed_qty, wo, user, do_gate=True):
             continue
         nc.execute("""INSERT INTO nx.stock_ledger(STOCK_POINT,MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,ITEM_CODE,MAT_CODE,
               GAGONG_PROC_CODE,WORK_ORDER,MAINT_QTY,REMARKS,INSERT_USER_ID,INSERT_DATETIME)
-            VALUES('MAT',?,?,'R','Z99990',NULL,?,?,?,?,?,?,GETDATE())""",
+            VALUES('PRD',?,?,'R','Z99990',NULL,?,?,?,?,?,?,GETDATE())""",
             ymd6, _seq(), rc, WELD_WAREHOUSE, (wo or None), dq, '용접링 생산소비(공정종속)', user)
         ring_consumed += rq * signed_qty
     return {"ok": True, "item": item, "weld_kinds": len(weld), "weld_consumed": round(weld_consumed, 4),

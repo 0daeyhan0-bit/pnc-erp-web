@@ -224,13 +224,64 @@ def dragprod_save(payload: dict = Body(...)):
                                 "reason": "자재 부족: " + ", ".join(short[:4])})
                 continue
 
+            # ── ⓪ 입고처 판정 — ★①보다 먼저 한다(2026-09-07).
+            #   PR_T_PROD_DTL.STOCK_PART_CODE 에 **재고가 실제로 간 파트**를 적어야 하는데
+            #   그 값은 ④의 판정 결과라, 판정을 ① INSERT 앞으로 끌어올렸다.
+            #   (종전엔 ④가 ① 뒤에 있어 STOCK_PART_CODE 를 채울 수가 없었다.)
+            dk, dp = ("ASSY", None)
+            if _prod_dest:
+                # 상위품번 = BOM 상위(화면 '상위도번'과 같은 기준)
+                cur.execute("""SELECT TOP 1 ITEM_CODE FROM nx.pr_m_item_bom WITH(NOLOCK)
+                                WHERE MAT_CODE=? AND ISNULL(EXCEPT_FLAG,'0')<>'1'""", item)
+                _r = cur.fetchone()
+                upper = str(_r[0] or "").strip() if _r else ""
+                dk, dp = _prod_dest(cur, item, upper)
+
             # ── ① 생산실적
+            #   ★STOCK_PART_CODE = 입고처 파트(dp). 실적 파트(PART_CODE)가 아니다.
+            #     「생산입출고현황」(live_api._prodinout:943)은 생산실적 입고를 **이 컬럼으로만**
+            #     집계한다 — 비어 있으면 그 행은 통째로 빠져 잔량에 재고가 있어도 화면이 0이 된다
+            #     (실사용 오류 2026-09-07: AJR32883902-은납 S6 10개가 "결과 없음").
+            #     그리고 넣을 값은 **재고가 간 곳**이어야 잔액테이블과 축이 맞는다.
+            #     실적 파트(S10)를 넣으면 재고는 S6 에 있는데 화면은 S10 에 유령재고를 만든다.
+            #     ※ASSY/자재창고 입고는 생산창고가 아니므로 비워 둔다 — 각각 SA_T_ITEM_STOCK,
+            #       PU_T_STOCK_MAINT 로 잡히고, 여기 채우면 이중계상된다.
+            _spc = dp if (dk == "PART" and dp) else None
             cur.execute("""INSERT INTO nx.PR_T_PROD_DTL
                    (WORK_ORDER,SPLIT_WORK_ORDER,ITEM_CODE,PROD_YMD,PROD_HMS,LINE_NO,
-                    PROD_QTY,PROD_USER_ID,WORK_CODE,PART_CODE,PROD_TAG,FINISH_FLAG,
-                    UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
-                   VALUES(?,'',?,?,?,?,?,?,'',?,'','0',?,GETDATE(),?)""",
-                        wo, item, ymd, hms, line, int(qty), user, part, user, win)
+                    PROD_QTY,PROD_USER_ID,WORK_CODE,PART_CODE,STOCK_PART_CODE,
+                    PROD_TAG,FINISH_FLAG,UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                   VALUES(?,'',?,?,?,?,?,?,'',?,?,'','0',?,GETDATE(),?)""",
+                        wo, item, ymd, hms, line, int(qty), user, part, _spc, user, win)
+            # ── ①-b 공정별 생산실적 (PR_T_PROD_DTL_PROC) ★2026-09-07 신설
+            #   왜 — 「파트별 생산실적현황」(prod.py:154)은 **_PROC 을 읽는다**(PROD_DTL 아님.
+            #   PROD_DTL 로 읽으면 용접 S5 가 누락된다 — prod.py:121 경위).
+            #   레거시 520 은 두 테이블에 다 쓰는데 드래그 실적은 PROD_DTL 에만 써서
+            #   **실적을 잡아도 실적현황이 0건**이었다(실사용 오류 2026-09-07).
+            #   ★PROC_CODE = 파트코드 — 드래그 실적은 파트 단위로 잡는 기능이고
+            #     실적현황도 파트별 집계 화면이라 축이 맞는다(공정 세분은 520 이 한다).
+            #   ★PK(WO+SWO+ITEM+YMD+HMS+WORK_CODE+PROC_CODE+S_WORK_CODE) 충돌 시 **누적**한다 —
+            #     바코드 실적(prodsheet.py:1341-1355)과 같은 방식. 무시하면 같은 초에 두 건이
+            #     들어올 때 수량이 통째로 빠진다.
+            _pk = (wo, item, ymd, hms, part)
+            cur.execute("""SELECT COUNT(*) FROM nx.PR_T_PROD_DTL_PROC
+                            WHERE WORK_ORDER=? AND SPLIT_WORK_ORDER='' AND ITEM_CODE=?
+                              AND PROD_YMD=? AND PROD_HMS=? AND ISNULL(WORK_CODE,'')=''
+                              AND ISNULL(PROC_CODE,'')=? AND ISNULL(S_WORK_CODE,0)=0""", *_pk)
+            if int(cur.fetchone()[0] or 0) == 0:
+                cur.execute("""INSERT INTO nx.PR_T_PROD_DTL_PROC
+                                 (WORK_ORDER,SPLIT_WORK_ORDER,ITEM_CODE,PROD_YMD,PROD_HMS,
+                                  WORK_CODE,PROC_CODE,S_WORK_CODE,LINE_NO,PROD_QTY,PROD_USER_ID,
+                                  PROD_TAG,FINISH_FLAG,UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                               VALUES(?,'',?,?,?,'',?,0,?,?,?,'','0',?,GETDATE(),?)""",
+                            wo, item, ymd, hms, part, line, int(qty), user, user, win)
+            else:
+                cur.execute("""UPDATE nx.PR_T_PROD_DTL_PROC SET PROD_QTY=ISNULL(PROD_QTY,0)+?,
+                                  UPDATE_USER_ID=?, UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW=?
+                                WHERE WORK_ORDER=? AND SPLIT_WORK_ORDER='' AND ITEM_CODE=?
+                                  AND PROD_YMD=? AND PROD_HMS=? AND ISNULL(WORK_CODE,'')=''
+                                  AND ISNULL(PROC_CODE,'')=? AND ISNULL(S_WORK_CODE,0)=0""",
+                            int(qty), user, win, *_pk)
 
             # ── ② BOM 자재 차감 (위치만 다름)
             for mat, use, gpc in boms:
@@ -278,15 +329,16 @@ def dragprod_save(payload: dict = Body(...)):
             #     상위가 업체   → 자재창고 Z99990   (화면 '자재재고')
             #     상위가 사내   → 상위 파트 생산창고 (화면 '생산재고')
             #     상위 없음/자기자신 → 영업창고 ASSY (화면 'ASSY재고')
+            #   ★판정은 ⓪에서 이미 끝났다(dk·dp 재사용) — 여기서 다시 조회하지 않는다.
             dest = "ASSY"
             if _prod_dest:
-                # 상위품번 = BOM 상위(화면 '상위도번'과 같은 기준)
-                cur.execute("""SELECT TOP 1 ITEM_CODE FROM nx.pr_m_item_bom WITH(NOLOCK)
-                                WHERE MAT_CODE=? AND ISNULL(EXCEPT_FLAG,'0')<>'1'""", item)
-                _r = cur.fetchone()
-                upper = str(_r[0] or "").strip() if _r else ""
-                dk, dp = _prod_dest(cur, item, upper)
                 if dk == "PART" and dp:
+                    # ★잔액만 갱신하고 PR_T_STOCK_MAINT_MAT 원장행은 넣지 않는다.
+                    #   이력은 ①의 PR_T_PROD_DTL(STOCK_PART_CODE)로 남는다 —
+                    #   원장행을 또 넣으면 「생산입출고현황」이 이중계상하고,
+                    #   그 화면은 tag='4' 를 '생산사용(출고)'로 보아 부호를 뒤집으므로
+                    #   입고를 tag='4' 로 넣으면 재고가 되레 늘어난다
+                    #   (prodsheet.py:1456-1462 와 같은 규칙·같은 사고이력).
                     _upd(cur, "PR_T_MAT_STOCK_WH",
                          [("MAT_CODE", item), ("PART_CODE", dp)], qty, user, win)
                     dest = "생산창고(%s)" % dp
@@ -343,6 +395,153 @@ def dragprod_save(payload: dict = Body(...)):
         stock_changed()
         return {"ok": True, "ymd": ymd, "done": len(done),
                 "skipped": len(skipped), "rows": done, "skips": skipped}
+    except HTTPException:
+        try: cn.rollback()
+        except Exception: pass
+        raise
+    except Exception as e:
+        try: cn.rollback()
+        except Exception: pass
+        raise HTTPException(500, str(e)[:300])
+    finally:
+        cn.close()
+
+
+# ============ 드래그 실적 취소(원복) — 2026-09-07 신설 ============
+@router.post("/api/dragprod/cancel")
+def dragprod_cancel(payload: dict = Body(...)):
+    """드래그 실적 취소 — save 가 한 일을 **부호 반대로** 되돌린다.
+
+       body {rows:[{item, part, ymd?, qty?}], user?}
+         · ymd 생략 = 오늘 · qty 생략 = 그 날 그 파트에 잡힌 전량
+
+       ★save 와 짝이 맞아야 한다(6곳). 하나라도 빠지면 재고가 어긋난다 —
+         ① PR_T_PROD_DTL          실적행 삭제
+         ①-b PR_T_PROD_DTL_PROC   공정별 실적 차감(0 이면 삭제) ← 실적현황이 읽는 곳
+         ② BOM 자재               W=PU_T_MAT_STOCK / R=PR_T_MAT_STOCK_WH 복원(+)
+         ③ 준비재고(R)            PU_T_READY_STOCK 복원(+)
+         ④ 완성품 입고            입고처에서 차감(−) — save 와 같은 _prod_dest 판정
+         ⑤ 세트재고               (자동복원 대상 아님 — 아래 주석)
+
+       ★세트재고(⑤)는 되돌리지 않는다. _apply_set_stock 이 만든 파생은 역함수가 없고
+         (세트출고 이력·가공세트가 얽힌다) 잘못 되돌리면 이중차감이 난다.
+         세트가 걸린 실적은 세트입고 취소(/api/setstock/cancel)로 별도 처리한다.
+    """
+    rows = payload.get("rows", []) or []
+    user = (str(payload.get("user") or "웹")).strip()[:20]
+    win = "w_pr_input_410_drag"
+    if not rows:
+        return {"ok": False, "detail": "취소할 행이 없습니다."}
+    cn = _nx_tx(); cur = cn.cursor()
+    done, skipped = [], []
+    try:
+        for r in rows:
+            item = str(r.get("item") or "").strip()
+            part = str(r.get("part") or "").strip()
+            ymd = _d6(str(r.get("ymd") or "")) or datetime.now().strftime("%y%m%d")
+            if not item or not part:
+                skipped.append({"item": item, "part": part, "reason": "도번·파트 필요"}); continue
+            _assert_open(cur, ymd, "PRD", "드래그 실적 취소")
+
+            # 취소할 수량 = 지정값 또는 그 날 그 파트에 잡힌 전량(드래그 실적분만)
+            cur.execute("""SELECT ISNULL(SUM(PROD_QTY),0) FROM nx.PR_T_PROD_DTL
+                            WHERE ITEM_CODE=? AND PROD_YMD=? AND ISNULL(PART_CODE,'')=?
+                              AND ISNULL(UPDATE_WINDOW,'')=?""", item, ymd, part, win)
+            have = float(cur.fetchone()[0] or 0)
+            qty = float(r.get("qty") or 0) or have
+            if have <= 0:
+                skipped.append({"item": item, "part": part, "reason": "취소할 드래그 실적이 없습니다"}); continue
+            if qty > have:
+                skipped.append({"item": item, "part": part,
+                                "reason": f"취소수량 {qty:g} > 실적 {have:g}"}); continue
+
+            # ① 실적행 — 전량이면 삭제, 부분이면 수량 차감
+            if abs(qty - have) < 1e-9:
+                cur.execute("""DELETE FROM nx.PR_T_PROD_DTL
+                                WHERE ITEM_CODE=? AND PROD_YMD=? AND ISNULL(PART_CODE,'')=?
+                                  AND ISNULL(UPDATE_WINDOW,'')=?""", item, ymd, part, win)
+            else:
+                cur.execute("""UPDATE TOP(1) nx.PR_T_PROD_DTL SET PROD_QTY=PROD_QTY-?,
+                                  UPDATE_USER_ID=?, UPDATE_DATETIME=GETDATE()
+                                WHERE ITEM_CODE=? AND PROD_YMD=? AND ISNULL(PART_CODE,'')=?
+                                  AND ISNULL(UPDATE_WINDOW,'')=? AND PROD_QTY>=?""",
+                            int(qty), user, item, ymd, part, win, int(qty))
+
+            # ①-b 공정별 실적(실적현황 원천) — 같은 만큼 빼고, 0 이하면 지운다
+            cur.execute("""UPDATE nx.PR_T_PROD_DTL_PROC SET PROD_QTY=ISNULL(PROD_QTY,0)-?,
+                              UPDATE_USER_ID=?, UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW=?
+                            WHERE ITEM_CODE=? AND PROD_YMD=? AND ISNULL(PROC_CODE,'')=?
+                              AND ISNULL(UPDATE_WINDOW,'')=?""",
+                        int(qty), user, win, item, ymd, part, win)
+            cur.execute("""DELETE FROM nx.PR_T_PROD_DTL_PROC
+                            WHERE ITEM_CODE=? AND PROD_YMD=? AND ISNULL(PROC_CODE,'')=?
+                              AND ISNULL(UPDATE_WINDOW,'')=? AND ISNULL(PROD_QTY,0)<=0""",
+                        item, ymd, part, win)
+
+            # 실적처리방법(W/R) — save 와 같은 기준으로 다시 판정
+            cur.execute("""SELECT ISNULL(PROD_RESULT_TYPE,'') FROM nx.PR_M_PROC_GAGONG
+                            WHERE GAGONG_PROC_CODE=?""", part)
+            _t = cur.fetchone()
+            pt = (str(_t[0]).strip() if _t and _t[0] else "")
+
+            # ② BOM 자재 복원(+)
+            boms = _bom_of(cur, item) if _bom_of else []
+            for mat, use, gpc in boms:
+                d = use * qty
+                if pt == "W":
+                    _upd(cur, "PU_T_MAT_STOCK", [("MAT_CODE", mat), ("CUST_CODE", "Z99990")], d, user, win)
+                    _upd(cur, "PU_T_MAT_STOCK_WH",
+                         [("MAT_CODE", mat), ("CUST_CODE", "Z99990"),
+                          ("GAGONG_PROC_CODE", gpc or "IS0001")], d, user, win)
+                else:
+                    _upd(cur, "PR_T_MAT_STOCK_WH", [("MAT_CODE", mat), ("PART_CODE", part)], d, user, win)
+                cur.execute("""INSERT INTO nx.PR_T_STOCK_MAINT_MAT
+                       (MAINT_YMD,MAINT_SEQ,MAINT_TAG,PART_CODE,MAT_CODE,ITEM_CODE,
+                        MAINT_QTY,MAINT_COST,MAINT_AMT,REMARKS,
+                        INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,
+                        UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                       SELECT ?,ISNULL(MAX(MAINT_SEQ),29999)+1,'4',?,?,?,?,0,0,?,
+                              ?,GETDATE(),?,?,GETDATE(),?
+                         FROM nx.PR_T_STOCK_MAINT_MAT WHERE MAINT_YMD=? AND MAINT_SEQ>=30000""",
+                            ymd, part, mat, item, d, "드래그실적 취소(복원)",
+                            user, win, user, win, ymd)
+
+            # ③ 준비재고 복원(R)
+            if pt == "R":
+                _upd(cur, "PU_T_READY_STOCK",
+                     [("ITEM_CODE", item), ("CUST_CODE", "Z99990"), ("PROC_GUBUN", part)],
+                     qty, user, win)
+
+            # ④ 완성품 입고 취소(−) — save 와 **같은 판정**이어야 엉뚱한 창고에서 빠지지 않는다
+            dest = "ASSY"
+            if _prod_dest:
+                cur.execute("""SELECT TOP 1 ITEM_CODE FROM nx.pr_m_item_bom WITH(NOLOCK)
+                                WHERE MAT_CODE=? AND ISNULL(EXCEPT_FLAG,'0')<>'1'""", item)
+                _r2 = cur.fetchone()
+                upper = str(_r2[0] or "").strip() if _r2 else ""
+                dk, dp = _prod_dest(cur, item, upper)
+                if dk == "PART" and dp:
+                    _upd(cur, "PR_T_MAT_STOCK_WH", [("MAT_CODE", item), ("PART_CODE", dp)],
+                         -qty, user, win)
+                    dest = "생산창고(%s)" % dp
+                elif dk == "MAT":
+                    _upd(cur, "PU_T_MAT_STOCK", [("MAT_CODE", item), ("CUST_CODE", "Z99990")],
+                         -qty, user, win)
+                    _upd(cur, "PU_T_MAT_STOCK_WH",
+                         [("MAT_CODE", item), ("CUST_CODE", "Z99990"),
+                          ("GAGONG_PROC_CODE", "IS0001")], -qty, user, win)
+                    dest = "자재창고"
+                else:
+                    _upd(cur, "SA_T_ITEM_STOCK", [("ITEM_CODE", item)], -qty, user, win)
+            else:
+                _upd(cur, "SA_T_ITEM_STOCK", [("ITEM_CODE", item)], -qty, user, win)
+
+            done.append({"item": item, "part": part, "qty": qty, "type": pt,
+                         "bom": len(boms), "dest": dest})
+        cn.commit()
+        stock_changed()
+        return {"ok": True, "done": len(done), "skipped": len(skipped),
+                "rows": done, "skips": skipped}
     except HTTPException:
         try: cn.rollback()
         except Exception: pass
