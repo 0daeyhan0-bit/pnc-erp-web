@@ -1938,11 +1938,15 @@ def sale040_cancel(payload: dict = Body(...)):
             #      셀 날짜는 어느 행을 고를지의 근거가 되지 못하므로 조건에서 뺀다.
             #   ※SALE_YMD 는 재고이력(SA_T_STOCK_MAINT)·잔액 복원에 그대로 쓴다 —
             #     되돌린 행의 실제 일자여야 수불이 맞는다.
+            # ★swo(분할제번)가 비어 와도 찾는다 — 조회는 ISNULL(SPLIT_WORK_ORDER,WORK_ORDER)로
+            #   내려주므로 보통 채워져 있지만, 빈 값이면 종전엔 0건이 나와 또 실패했다.
+            #   DB 실측: SPLIT_WORK_ORDER 는 제번과 같은 값이 들어 있다(6IPRG0A4/[6IPRG0A4]).
             cur.execute("""SELECT TOP 1 SALE_YMD, ISNULL(SUM(SALE_QTY),0)
                              FROM nx.SA_T_SALE_DTL
-                            WHERE WORK_ORDER=? AND ISNULL(SPLIT_WORK_ORDER,'')=? AND ITEM_CODE=?
+                            WHERE WORK_ORDER=? AND ITEM_CODE=?
+                              AND (?='' OR ISNULL(SPLIT_WORK_ORDER,'')=?)
                               AND ISNULL(FINISH_FLAG,'0')='0'
-                            GROUP BY SALE_YMD ORDER BY SALE_YMD DESC""", wo, swo, it)
+                            GROUP BY SALE_YMD ORDER BY SALE_YMD DESC""", wo, it, swo, swo)
             _r = cur.fetchone()
             if not _r:
                 continue

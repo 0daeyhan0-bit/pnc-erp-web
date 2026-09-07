@@ -1974,9 +1974,15 @@ SCREEN.lgsale=(c)=>{
       // 우클릭 확인 = 즉시 처리(재확인 없음)
       g('#s4-ok').disabled=true;
       try{
-        const d=await(await fetch(`${API}/api/sale040/confirm`,{method:'POST',
+        // ★취소와 동일 — 400(마감잠금 등)의 detail 을 읽어 사유를 그대로 보여준다.
+        const r=await fetch(`${API}/api/sale040/confirm`,{method:'POST',
           headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({cells:cells,user:'웹',ymd:st.from})})).json();
+          body:JSON.stringify({cells:cells,user:'웹',ymd:st.from})});
+        let d={}; try{d=await r.json();}catch(_){}
+        if(!r.ok){
+          const why=(d&&(d.detail||d.msg))||('서버 오류 '+r.status);
+          msg('출하처리 실패 — '+why,false); alert('출하처리 실패\n\n'+why); return;
+        }
         if(d.ok){applyLocal(d.done||[],+1);msg('✔ '+d.msg,true);}
         else {msg(d.msg||'출하처리 실패',false);alert('출하처리 실패\n\n'+(d.msg||JSON.stringify(d)));}
       }catch(e){try{console.error('[040 확인] 실패',e);}catch(_){}
@@ -1995,11 +2001,24 @@ SCREEN.lgsale=(c)=>{
       if(!confirm(`[출하취소]\n\n선택 ${out.length}칸의 출하실적을 취소합니다.\n완제품 재고가 복원됩니다. 진행할까요?`))return;
       g('#s4-cancel').disabled=true;
       try{
-        const d=await(await fetch(`${API}/api/sale040/cancel`,{method:'POST',
+        /* ★서버가 왜 거부했는지를 그대로 보여준다(2026-09-07).
+             종전엔 400(HTTPException)이 오면 detail 을 읽지 않고 catch 로 떨어져
+             화면에 "취소 실패" 넉 자만 떴다. 실제 사유는
+             "260901 일마감된 일자입니다 — 생성/수정/삭제 불가" 였는데
+             사용자는 그걸 알 수 없어 버그로 오해했다(실사용 신고).
+           ★마감 차단은 정상 동작이다 — 막는 것이 아니라 **이유를 알리는** 것이 요점. */
+        const r=await fetch(`${API}/api/sale040/cancel`,{method:'POST',
           headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({cells:out,user:'웹'})})).json();
-        if(d.ok){applyLocal(d.done||[],-1);msg('✔ '+d.msg,true);} else msg(d.msg||'취소 실패',false);
-      }catch(e){msg('취소 실패',false);}
+          body:JSON.stringify({cells:out,user:'웹'})});
+        let d={}; try{d=await r.json();}catch(_){}
+        if(!r.ok){                       // 400/500 — FastAPI 는 detail 에 사유를 담는다
+          const why=(d&&(d.detail||d.msg))||('서버 오류 '+r.status);
+          msg('취소 실패 — '+why,false); alert('출하취소 실패\n\n'+why); return;
+        }
+        if(d.ok){applyLocal(d.done||[],-1);msg('✔ '+d.msg,true);}
+        else {msg(d.msg||'취소 실패',false); alert('출하취소 실패\n\n'+(d.msg||'사유 미상'));}
+      }catch(e){const why=(e&&e.message)||e;
+        msg('취소 실패 — '+why,false); alert('출하취소 요청 실패\n\n'+why);}
       finally{const b=c.querySelector('#s4-cancel');if(b)b.disabled=false;}};
 
     // ★버튼 클릭은 화면 진입 시 위임으로 이미 걸려 있다(SCREEN.lgsale 상단).
