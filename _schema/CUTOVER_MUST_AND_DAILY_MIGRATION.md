@@ -39,6 +39,7 @@
 
 | 일시 | 결과 | 비고 |
 |---|---|---|
+| 2026-09-08 07:18~07:21 | **핵심 GREEN·RED 2(무관)** | 컷오버 롤백(2026-09-07) 후 재개 매일마이그. 시작 recon RED 21. delta_sync 21테이블 정합(계획미러 재복사 포함)·perf 생성0/이미30·suffix 1,974·item_sync 정상·geom 0·backdate 7테이블 2,385행. 최종 recon **핵심 미러 전부 MATCH**(PR_M_ITEM_BOM·COST·PLAN_PART_MAT 등), **RED 2개=`PR_T_INDI_CUTTING`·`_PROC_GAGONG`**(UPDATE_DATETIME 없어 백데이트 스킵+07:20 업무개시 신규재단, 드리프트 아님). BOM/계획 작업 목적엔 충분. |
 | 2026-09-01 07:22~07:32 | **부분완료(RED)** | 6단계 전부 실행. delta_sync 성공 96·차이 0·실패 0 · perf 생성 2 · suffix 1,975 · item_sync 정상 · geom_weight 0건 · backdate 2,585행(8테이블 전량). ★마지막 recon 직전 **07:30 업무 개시**(최근 15분 299행 유입) → RED 는 신규 거래 때문이며 드리프트가 아니다. ⟹ 여기서 중단이 맞다(움직이는 데이터를 쫓으면 계속 뒤처진다). ★**결함 1건 수정**: `r_geom_weight.py` 가 갱신대상 0건일 때 executemany 로 크래시(exit=1) — 가드 추가. |
 | 2026-08-31 20:2x (라이브 정지 후 야간) | **GREEN 52/52** | 6단계 완주. delta_sync 성공 96·차이 0·실패 0 · perf_maintain 생성 2/이미28/컬럼없어스킵 3 · sub_desc_suffix 1,975건 재병기(nx.item 변경 0) · r_item_sync 원가필드 32건+신규 1건 · r_geom_weight 11건. ★1차 recon 후 `PU_T_STOCK_MAINT` 만 RED(2607 25행) → **2-d 백데이트 픽업 신설**로 해소. ★부수 발견 = 웹 입력분 소실 위험(매일유의 참조·현재 피해 0). |
 
