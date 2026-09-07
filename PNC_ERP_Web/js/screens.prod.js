@@ -918,8 +918,33 @@ SCREEN.partplan=(c)=>{
           r.finish=(+r.finish||0)+qty;
         });
       };
+      /* ★재고 컬럼도 함께 옮긴다 (2026-09-07 지적: "실적잡으면 바로 변경은 좋은데
+           데이터는 그대로 남아있네").
+         bump 는 계획/완료 수치만 갱신해서, 실적 직후 화면이 재고는 옛 값을 들고 있었다
+         (준비재고 31 이 이미 0 으로 빠졌는데 화면엔 31, 생산재고는 빈칸).
+         재조회하면 맞게 나오지만 그 사이 화면이 실제와 어긋난다.
+         ★재고는 **도번 단위 공유값**이라 bump 와 매칭 기준이 다르다 —
+           bump 는 wo 까지 같아야 하지만 재고는 같은 도번의 모든 행이 같은 값을 쓴다.
+           그래서 wo 를 보지 않고 도번(+파트)으로 반영한다.
+         ★서버가 판정한 입고처(dest)를 그대로 따른다. 클라이언트가 다시 판정하면
+           서버와 어긋나 유령재고가 생긴다 —
+           '생산창고(S6)' → prod_stock+ · '자재창고' → mat_stock+ · 'ASSY' → assy_stock+ */
+      const moveStock=(x)=>{
+        const item=String(x.item||''); if(!item)return;
+        const q=+x.qty||0; if(!q)return;
+        const dest=String(x.dest||'');
+        const fld=dest.indexOf('생산창고')===0?'prod_stock'
+                 :dest.indexOf('자재창고')===0?'mat_stock'
+                 :dest.indexOf('ASSY')===0?'assy_stock':'';
+        (st.rows||[]).forEach(r=>{
+          if((r.item||'')!==item)return;
+          // 준비재고 방식(R)은 준비재고에서 빠져나간다 — 음수로 내려가지 않게 클램프
+          if(x.type==='R')r.ready_stock=Math.max((+r.ready_stock||0)-q,0);
+          if(fld)r[fld]=(+r[fld]||0)+q;
+        });
+      };
       // 서버가 실제 처리한 수량(준비재고 상한으로 잘렸을 수 있음)만 반영
-      (r.rows||[]).forEach(x=>{ if(x.key)bump(x.key,+x.qty||0); });
+      (r.rows||[]).forEach(x=>{ if(x.key)bump(x.key,+x.qty||0); moveStock(x); });
       redrawBody();
       alert(m);
     }catch(e){ alert('실적처리 실패: '+e.message); }
