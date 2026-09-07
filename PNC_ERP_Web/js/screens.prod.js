@@ -4173,8 +4173,14 @@ SCREEN.kitting=(host)=>{
      다른 PC 에서 맞다는 보장이 없으므로, 서버에 공유하면 오히려 틀어진다.
      (계정별 화면설정과는 성격이 다르다 — 이건 그 PC 의 장비 특성이다) */
 const _LBL_KEY='prodsheet_label_cal';
+/* ★기본 세로 보정 = -96 dot (12mm 위로) — 현장 실측값(2026-09-07).
+     TSC TE210 + 40×20mm 용지에서 인쇄가 그만큼 아래로 밀려 찍혔다.
+     갭을 2·3·4mm 로 바꿔도, GAPDETECT 로도 잡히지 않아 SHIFT 로 직접 당겼다.
+     다른 PC·프린터에서 어긋나면 화면에서 8dot(1mm) 단위로 조정하면 되고,
+     그 값은 그 PC 에 저장된다. */
+const _LBL_SHIFT_DEFAULT=-96;
 function _lblCfg(){
-  const d={gap:3,shift:0};
+  const d={gap:3,shift:_LBL_SHIFT_DEFAULT};
   try{const s=localStorage.getItem(_LBL_KEY); if(!s)return d;
       const o=JSON.parse(s)||{};
       const g=parseFloat(o.gap), h=parseInt(o.shift,10);

@@ -420,9 +420,16 @@ LABEL_GAP_MM = 3
 LABEL_GAPDETECT = True
 _GAP_DONE = False          # 이번 프로세스에서 이미 측정을 보냈는가
 
+# ★세로 보정 기본값 = -96 dot (12mm 위로) — 현장 실측 확정(2026-09-07).
+#   TSC TE210 + 40×20mm 용지에서 인쇄가 그만큼 아래로 밀려 찍혔다.
+#   갭을 2·3·4mm 로 바꿔도, GAPDETECT 로도 잡히지 않아 SHIFT 로 직접 당겨 해결했다.
+#   ※화면(생산전표출력관리)에서 이 값을 덮어쓸 수 있고, 그 값은 PC 별로 저장된다.
+#     여기 기본값은 화면을 거치지 않는 호출(RPA·직접 API)에도 적용되도록 두는 것이다.
+LABEL_SHIFT_DOT = -96
+
 
 def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3, gap: float = 0,
-                     shift: int = 0) -> str:
+                     shift=None) -> str:
     """제품스티커 TSPL — TSC/Bixolon 계열 직송용.
 
     ★프린터가 QR·텍스트를 직접 그리므로 래스터(PDF)보다 훨씬 선명하고 빠르다.
@@ -460,10 +467,12 @@ def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3, gap: float = 0,
     #   들어가는데(콘텐츠 최하단 142dot < 160dot) 인쇄 자체가 아래로 밀려 찍혔다.
     #   ⟹ 갭 인식이 아니라 **시작점 오프셋** 문제다. TSPL SHIFT 로 직접 당긴다.
     #   1mm = 8dot. 예: 라벨 높이의 60% 밀렸으면 SHIFT -96 정도.
+    #   shift 를 안 주면 기본값(LABEL_SHIFT_DOT)을 쓴다 — 화면을 거치지 않는 호출도 정상이 되게.
+    #   0 을 **명시적으로** 주면 보정을 끄는 것으로 본다(보정이 필요 없는 프린터용).
     try:
-        _sh = int(shift or 0)
+        _sh = LABEL_SHIFT_DOT if shift is None else int(shift)
     except Exception:
-        _sh = 0
+        _sh = LABEL_SHIFT_DOT
     if _sh:
         out.append(f"SHIFT {max(-200, min(_sh, 200))}")   # 상식 밖 값은 잘라 용지 낭비를 막는다
     global _GAP_DONE
@@ -519,7 +528,7 @@ def print_label(print_seq: str = Query(...), start_no: int = Query(0), end_no: i
                 mode: str = Query("pdf", description="pdf | tspl"),
                 darkness: int = Query(8), speed: int = Query(3),
                 gap: float = Query(0, description="갭 mm — 0이면 기본값(LABEL_GAP_MM)"),
-                shift: int = Query(0, description="세로 보정 dot — 음수=위로, 8dot=1mm")):
+                shift: int = Query(None, description="세로 보정 dot — 음수=위로, 8dot=1mm. 미지정=기본값(-96)")):
     """제품스티커 인쇄물. mode=pdf 면 PDF(base64), mode=tspl 이면 TSPL 명령어 문자열."""
     j = prodsheet_label_print(print_seq=print_seq, start_no=start_no, end_no=end_no,
                               worker=worker, inspector=inspector)
