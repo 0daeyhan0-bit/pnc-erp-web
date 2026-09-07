@@ -170,6 +170,9 @@ nx 테이블은 **설계상 두 갈래**(CUTOVER_DELTA §2):
    - **✅ 완료(2026-09-08·feat/single-source-price)**: 13곳 전환(autoorder 2·matexpect 3·planrev 1·setin 6·setinstat 1). guard 잔여 **0**. 매핑 = `ITEM_DESC→item_name·IN_CUST_CODE→in_cust·WORK_CODE→work_code·ITEM_CODE→item_code`.
    - **검증(읽기전용)**: 살아있는 품목(공통 24,154) **in_cust diff0·work_code diff0** · item_name 27건만 차이(표시전용 품명·접미사류) · nx.item⊇PR_M_ITEM(1,249품목 더 완전=유령 감소). setin 431/457은 존재확인 조인(컬럼 미사용). 미배포(재컷오버 시 함께).
 3. **거래처 146곳**(CM_M_CUST→nx.cust) — 규모 큼. 표시명 조인부터 일괄 패턴전환(공통 헬퍼화 검토)·사업자정보 사용처 개별. **3순위**(당장 드리프트 작음).
+   - **✅ 완료(2026-09-08·feat/single-source-price)**: **호환 뷰 방식**. `nx.v_cm_m_cust`(nx.cust 위에 레거시 컬럼명 전체 매핑, DDL=`_migration/create_v_cm_m_cust.py`) 신설 → 코드 **147곳/39파일** 을 `nx.cm_m_cust`→`nx.v_cm_m_cust` 로 일괄교체(테이블명만·컬럼 무변경). `CM_M_CUST_MAGAM`(마감일 26곳)은 별개라 보존.
+   - **backfill**: 미러에만 있던 실거래처 4곳(2370 승호산업·2371 원광산업[6품목 매입처]·2372 Huayi·2373 청송에어팩) nx.cust 적재(nx.cust 361=미러 동수). 원인=클린 마이그 이후 레거시 추가분.
+   - **검증**: 컴파일 OK · 미러 대비 뷰 이름 회귀 **0** · 상관서브쿼리/JOIN/기타컬럼(CUST_TYPE·GC_GUBUN·USE_FLAG) 동작확인. 데이터 소스 = nx.cust 단일. 미러 CM_M_CUST 은퇴(drop) 대상. 미배포(재컷오버 시).
 4. **BOM 25곳** — 대부분 엔진 경유여야 함(§1-10 소요엔진 하드룰). ad-hoc 직독이면 엔진 호출로. 개별 판정.
 5. **nx.bom 3곳**(backflush) — §1-9-2 은퇴계획대로 bom_line 우회(재고 소비량 변동 주의).
 
