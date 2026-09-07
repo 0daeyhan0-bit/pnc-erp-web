@@ -437,7 +437,24 @@ SCREEN.qcspec=(c)=>{
     const saveHdr=async()=>{
       for(const f of HFORM){if(!f.optional&&!String(form[f.k]??'').trim()){alert(f.label+' 은(는) 필수입니다');return;}}
       const b={...form,user:'웹사용자'};Object.keys(b).forEach(k=>{if(k.endsWith('__nm'))delete b[k];});
-      try{const r=await fetch(`${API}/api/qc/spec/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});const j=await r.json();if(j.ok){form=null;await load();}else alert('저장 실패: '+JSON.stringify(j));}catch(e){alert('저장 오류: '+e);}};
+      /* ★신규 저장 후에도 창을 닫지 않고 **첨부를 이어서 올릴 수 있게** 남긴다(2026-09-07).
+           종전엔 저장하면 무조건 form=null 로 닫혀, 첨부 영역(form.id 조건)을 보려면
+           "저장 → 목록에서 다시 찾아 수정으로 열기" 2단계를 거쳐야 했다(사용자 신고).
+         ★업로드 키가 (rev_ymd, rev_no) 라 저장 전에는 올릴 수 없다 — 그래서 '저장 직후'가
+           첨부를 붙일 수 있는 가장 빠른 시점이다. 서버가 준 id 와 화면이 입력한 일자·순번을
+           _ry/_rn 에 채워 넣으면 그 자리에서 바로 첨부가 열린다. */
+      try{const r=await fetch(`${API}/api/qc/spec/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});const j=await r.json();
+        if(j.ok){
+          const wasNew=!form.id;
+          if(wasNew&&j.id){
+            form.id=j.id;
+            form._ry=String(form.rev_ymd||'').replace(/\D/g,'');   // 화면 입력값 → 업로드 키
+            form._rn=String(form.rev_no||'').trim();
+            await load(); draw();                                   // 목록 갱신 + 첨부 영역 표시
+            const _fb=body.querySelector('#hf-files');
+            if(_fb)_fb.scrollIntoView({block:'center',behavior:'smooth'});
+          }else{form=null;await load();}
+        }else alert('저장 실패: '+JSON.stringify(j));}catch(e){alert('저장 오류: '+e);}};
     const delHdr=async(r)=>{if(!r||!r.ID){alert('nx 등록건만 삭제 가능');return;}if(!confirm('이 시방을 삭제할까요?'))return;
       await fetch(`${API}/api/qc/spec/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[r.ID]})});await load();};
     const addApply=async(mode)=>{if(!sel||!sel.ID){alert('nx 시방을 먼저 선택하세요');return;}
@@ -515,9 +532,19 @@ SCREEN.qcspec=(c)=>{
         if(form.id){
           const loadFiles=async()=>{const box=g('#hf-files');if(!box)return;
             try{const j=await(await fetch(`${API}/api/qc/spec/files?rev_ymd=${encodeURIComponent(form._ry||'')}&rev_no=${encodeURIComponent(form._rn||'')}`)).json();
-              box.innerHTML=(j.rows||[]).length?j.rows.map(f=>`<div style="display:flex;gap:8px;align-items:center;padding:2px 0"><span class="bdg ${f.editable?'ok':'off'}">${esc(f.kind)}</span><span class="hff-dl" data-src="${esc(f.src)}" data-key="${esc(f.key)}" style="cursor:pointer;color:#1c47a0;text-decoration:underline">${esc(f.filename)}</span>${f.editable?`<span class="hff-del" data-id="${esc(f.key)}" style="cursor:pointer;color:#c0392b" title="삭제">✖</span>`:''}</div>`).join(''):'<span style="color:#8aa0bd">첨부 없음</span>';
-              box.querySelectorAll('.hff-dl').forEach(a=>a.onclick=()=>window.open(`${API}/api/doc/download?src=${encodeURIComponent(a.dataset.src)}&key=${encodeURIComponent(a.dataset.key)}`,'_blank'));
-              box.querySelectorAll('.hff-del').forEach(x=>x.onclick=async()=>{if(!confirm('첨부 삭제?'))return;await fetch(`${API}/api/doc/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({doc_id:+x.dataset.id})});loadFiles();});}
+              box.innerHTML=(j.rows||[]).length?j.rows.map(f=>`<div style="display:flex;gap:8px;align-items:center;padding:2px 0"><span class="bdg ${f.editable?'ok':'off'}">${esc(f.kind)}</span><span class="hff-dl" data-src="${esc(f.src)}" data-key="${esc(f.key)}" data-fn="${esc(f.filename)}" style="cursor:pointer;color:#1c47a0;text-decoration:underline">${esc(f.filename)}</span>${f.editable?`<span class="hff-del" data-id="${esc(f.key)}" style="cursor:pointer;color:#c0392b" title="삭제">✖</span>`:''}</div>`).join(''):'<span style="color:#8aa0bd">첨부 없음</span>';
+              /* ★window.open → docDownload(fetch+Blob) (2026-09-07 교정).
+                   window.open 은 일반 내비게이션이라 core.js 의 fetch 몽키패치를 타지 않아
+                   Authorization 헤더가 빠지고 **401 "로그인이 필요합니다"** 가 떴다.
+                   설계도면조회는 이미 docDownload(screens.base.js:236)로 고쳐져 있었다 — 같은 함수를 쓴다. */
+              box.querySelectorAll('.hff-dl').forEach(a=>a.onclick=()=>
+                docDownload(API,{src:a.dataset.src,key:a.dataset.key,filename:a.dataset.fn||'file'}));
+              // ★삭제 결과를 확인한다 — 종전엔 ok 를 안 보고 목록만 새로고침해 실패가 조용히 묻혔다.
+              box.querySelectorAll('.hff-del').forEach(x=>x.onclick=async()=>{if(!confirm('첨부 삭제?'))return;
+                try{const j=await(await fetch(`${API}/api/doc/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({doc_id:+x.dataset.id})})).json();
+                  if(!j.ok)alert('삭제 실패: '+((j.errors||[]).join('\n')||j.detail||''));}
+                catch(e){alert('삭제 오류: '+e);}
+                loadFiles();});}
             catch(e){box.innerHTML='<span style="color:#c0392b">파일 조회 실패</span>';}};
           loadFiles();
           const doUp=async(kind,inp)=>{const el=g(inp);if(!el||!el.files[0]){alert('파일을 선택하세요');return;}
