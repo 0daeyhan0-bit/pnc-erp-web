@@ -657,14 +657,22 @@ def _snapshot_rows(cur, domain, ptype, period, with_loc=False):
     return out
 
 
-def _mv_base(cur, target):
+def _mv_base(cur, target, monthly=False):
     """기초 = target 직전의 가장 최근 확정 스냅샷(일·월 통합). 없으면 레거시 월마감 시드.
-       반환 (state{mat:[qty,avg]}, base_ymd, 출처)."""
-    cur.execute("""SELECT TOP 1 period FROM nx.period_close
-                    WHERE domain='MAT' AND ptype='D' AND close_flag=1 AND period < ?
-                    ORDER BY period DESC""", target)
-    r = cur.fetchone()
-    cand = [(r[0], "D", r[0])] if r else []
+       반환 (state{mat:[qty,avg]}, base_ymd, 출처).
+       ★monthly=True(월마감): 잠정 일마감을 기초로 쓰지 않고 **전월 월마감**만 기초로 → 그 달 전체 재생.
+         이유 = 마감기간(익월 1~9일)에 등록된 단가수정 등 '그 달 안의 모든 수정'을 다시 읽어 반영해야 하는데,
+         이동평균은 앞으로만 흐르므로 잠정 일마감(옛 평균이 굳음)을 기초로 삼으면 놓친다. 전월말부터
+         전체재생하면 그 달 어느 날짜의 수정이든 다시 읽혀 최종 확정된다. (정본 _schema/CLOSE_REDESIGN.md)
+         ★검증: 무수정 시 '순차 일마감 == 전체재생' diff0(_schema/close_fullreplay_verify.py)."""
+    cand = []
+    if not monthly:
+        cur.execute("""SELECT TOP 1 period FROM nx.period_close
+                        WHERE domain='MAT' AND ptype='D' AND close_flag=1 AND period < ?
+                        ORDER BY period DESC""", target)
+        r = cur.fetchone()
+        if r:
+            cand = [(r[0], "D", r[0])]
     # ★"가장 최신 월마감" 하나만 보고 target 보다 뒤면 버리면 안 된다 — 그러면 그 아래
     #   쓸 수 있는 월마감이 있는데도 **레거시 시드로 떨어진다**(2026-08-28 실측).
     #   같은 기간을 마감엔진과 수불장이 서로 다른 기초로 계산해 금액이 394건 갈렸다.
@@ -712,7 +720,7 @@ def _snap_mat(cur, ptype, period):
        월마감 = 그 달 말일까지 전개(= 말일 일마감과 동일). 멱등. 반환 (행수, 기준설명)."""
     import datetime as _dt
     target = period if ptype == "D" else _month_end(period)
-    state, base_ymd, src = _mv_base(cur, target)
+    state, base_ymd, src = _mv_base(cur, target, monthly=(ptype == "M"))   # ★월마감=전월말 전체재생(CLOSE_REDESIGN)
     try:
         b = _dt.date(2000 + int(base_ymd[:2]), int(base_ymd[2:4]), int(base_ymd[4:6])) + _dt.timedelta(days=1)
         start = f"{b.year % 100:02d}{b.month:02d}{b.day:02d}"
