@@ -518,6 +518,22 @@ def print_label(print_seq: str = Query(...), start_no: int = Query(0), end_no: i
             "pdf": base64.b64encode(build_label_pdf(j)).decode("ascii")}
 
 
+@router.get("/api/print/label/calib")
+def print_label_calib():
+    """라벨 갭 보정(수동) — 프린터가 라벨 간격을 실측해 시작점을 다시 잡는다.
+
+    ★왜 필요한가 — 인쇄가 라벨 경계를 넘어 밀리는 것은 좌표 문제가 아니라
+      **프린터가 라벨의 시작 위치를 모르는 것**이다. 갭 센서 기준값은
+      프린터 내부(EEPROM)에 저장되므로 **한 번만 보정하면 계속 유지**된다.
+    ★출력물 없이 GAPDETECT 만 보낸다 — 측정 과정에서 라벨 1~2장이 배출된다.
+    ★화면(생산전표출력관리)의 [갭 보정] 버튼이 이걸 부른다.
+      에이전트를 다시 깔지 않아도 현장에서 바로 보정할 수 있게 하기 위함이다.
+    """
+    cmds = ["SIZE 40 mm,20 mm", f"GAP {LABEL_GAP_MM} mm,0", "GAPDETECT"]
+    return {"ok": True, "kind": "label", "mode": "tspl", "cnt": 0,
+            "doc": "라벨 갭 보정", "tspl": "\r\n".join(cmds) + "\r\n"}
+
+
 # ───────────────────── 에이전트 배포(다운로드) ─────────────────────
 #   ★USB 로 돌리면 반드시 빠지는 PC 가 생기고 버전 올릴 때도 문제가 된다.
 #     화면에서 바로 받게 한다 — 받아서 더블클릭하면 자가설치된다.
