@@ -379,16 +379,19 @@ def build_label_pdf(j: dict) -> bytes:
     for L in labels:
         page = _newpage(doc)
         d = Pen(page, doc)
-        # 좌측 QR 13mm (화면 .lb .qr 와 동일 — 2026-09-04 사용자 요청으로 17→13mm 축소).
-        #   ★화면 CSS 와 반드시 같은 값을 유지할 것. 여기(에이전트 PDF 경로)만 17mm 로 남으면
+        # 좌측 QR 11mm (화면 .lb .qr 와 동일 — 17→13mm(260904) → 11mm(260907 "1단계 더")).
+        #   ★화면 CSS·TSPL 과 **반드시 같은 값**을 유지할 것. 한 경로만 남으면
         #     "화면에서는 줄었는데 실제 인쇄물은 그대로"가 된다(에이전트 설치 PC 는 이쪽으로 출력).
-        #   세로 중앙정렬 — 라벨 높이 20mm 기준 (20-13)/2 = 3.5mm.
+        #   ★11mm 안전근거 = 실측: 최악 데이터(한글도번 24자)가 QR 버전3(29모듈)이라
+        #     border 포함 31칸 → 셀 0.355mm. 열전사 권장하한 0.33mm 를 넘는다.
+        #     10mm 는 0.323mm 로 하한에 닿으므로 더 줄이지 않는다(screens.prod.js 주석에 표 있음).
+        #   세로 중앙정렬 — 라벨 높이 20mm 기준 (20-11)/2 = 4.5mm.
         try:
-            d.image(1.2, 3.5, 13.0, 13.0, _qr_png(L.get("qr", ""), scale=6, border=1))
+            d.image(1.2, 4.5, 11.0, 11.0, _qr_png(L.get("qr", ""), scale=6, border=1))
         except Exception:
             d.text(1.2, 8, "QR?", size=5)
-        # 우측 텍스트 — 화면 .tx 의 5줄. QR 이 4mm 줄어든 만큼 왼쪽으로 당기고 폭을 넓힌다.
-        tx, tw = 15.0, 24.0
+        # 우측 텍스트 — 화면 .tx 의 5줄. QR 이 줄어든 만큼 왼쪽으로 당기고 폭을 넓힌다.
+        tx, tw = 13.0, 26.0
         d.text(tx, 2.0, "PNC Industry", size=4.4, bold=True, align="center", w=tw)
         d.text(tx, 5.4, str(L.get("disp", "")), size=4.0, align="center", w=tw)
         d.text(tx, 8.8, f"{L.get('n','')} / {tot}", size=4.4, bold=True, align="center", w=tw)
@@ -420,15 +423,22 @@ def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3) -> str:
             "DIRECTION 1",
             "CODEPAGE UTF-8",
             "CLS",
-            # 좌측 QR — cell width 3 ≈ 13mm 상당(2026-09-04 축소, 화면·PDF 와 동일 크기).
-            #   종전 4 ≈ 17mm. 세로 중앙정렬로 y=12→28dot(=3.5mm×8).
-            f'QRCODE 10,28,M,3,A,0,"{L.get("qr","")}"',
-            # 텍스트 시작 x — QR 이 32dot(4mm) 줄어든 만큼 왼쪽으로(155→120dot=15mm).
-            f'TEXT 120,14,"2",0,1,1,"PNC Industry"',
-            f'TEXT 120,42,"1",0,1,1,"{L.get("disp","")}"',
-            f'TEXT 120,66,"2",0,1,1,"{L.get("n","")} / {tot}"',
-            f'TEXT 120,96,"3",0,1,1,"{item}"',
-            f'TEXT 120,130,"1",0,1,1,"{wi}"',
+            # 좌측 QR — cell width 3.
+            #   ★실측(2026-09-07): 최악 데이터(한글도번 24자)가 QR 버전3=29모듈이라
+            #     border1 포함 31칸 × 3dot = 93dot = **11.6mm**. 즉 TSPL 은 이미 11mm 급이다
+            #     (종전 주석의 "≈13mm 상당"은 틀린 계산이었다 — 화면 13mm 와 맞춘다고 적었으나
+            #      실제로는 그때도 11.6mm 로 나가고 있었다).
+            #   ⟹ 화면·PDF 를 11mm 로 내린 지금이 오히려 세 경로가 일치하는 상태다.
+            #   ★cell=2 로 더 내리지 말 것 — 셀 0.250mm 로 열전사 권장하한 0.33mm 미만이다
+            #     (cell=3 은 0.375mm 로 안전). 더 줄여야 하면 QR 데이터를 줄여야 한다.
+            #   세로 중앙정렬 — (20mm − 11.6mm)/2 ≈ 4.2mm → 34dot.
+            f'QRCODE 10,34,M,3,A,0,"{L.get("qr","")}"',
+            # 텍스트 시작 x — QR(10dot 시작 + 93dot) 뒤. 104dot=13mm 로 PDF(tx=13.0)와 맞춘다.
+            f'TEXT 104,14,"2",0,1,1,"PNC Industry"',
+            f'TEXT 104,42,"1",0,1,1,"{L.get("disp","")}"',
+            f'TEXT 104,66,"2",0,1,1,"{L.get("n","")} / {tot}"',
+            f'TEXT 104,96,"3",0,1,1,"{item}"',
+            f'TEXT 104,130,"1",0,1,1,"{wi}"',
             "PRINT 1,1",
         ]
     return "\r\n".join(out) + "\r\n"

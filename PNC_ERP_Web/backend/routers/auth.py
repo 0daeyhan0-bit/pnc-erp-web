@@ -27,8 +27,33 @@ router = APIRouter()
 
 ITER = 120000
 TTL_HOURS = 12            # 토큰 수명. 만료되면 다시 로그인.
-FAIL_MAX = 5              # 연속 실패 한도
-LOCK_MIN = 10             # 잠금 시간(분)
+FAIL_MAX = 10             # 연속 실패 한도 (2026-09-07 대표확정: 5 → 10)
+INIT_PW = "1111"          # 관리자 비번초기화 기본값. 이 값으로는 **새 비번을 정할 수 없다**.
+# ★LOCK_MIN(시간잠금)은 폐지했다(2026-09-07). 종전엔 5회 실패 시 10분 뒤 저절로 풀렸다.
+#   대표확정 = "10회 틀리면 미접속, 관리자가 초기화해야 재접속".
+#   시간이 지나 저절로 열리면 무차별 대입을 10분마다 재개할 수 있어 잠금의 의미가 없다.
+#   구현 = locked_until 에 먼 미래값(LOCK_FOREVER)을 넣어 기존 잠금검사를 그대로 재사용한다.
+LOCK_FOREVER = "9999-12-31"
+
+# 비번변경 전에도 허용할 경로 — 그 외는 must_change_pw=1 이면 전부 403(아래 require_user).
+_MUSTCHG_ALLOW = ("/api/auth/password", "/api/auth/me", "/api/auth/logout")
+
+
+def _ensure_user_cols(cur):
+    """★must_change_pw 컬럼 멱등 보장 (2026-09-07 신설).
+
+       관리자가 비번을 초기화하면 1 이 되고, 사용자가 새 비번을 정하면 0 으로 내린다.
+       "비번이 1111 인가"로 판정하지 않는 이유 —
+         ① 사용자가 새 비번을 또 1111 로 정하면 무한 반복된다
+         ② 관리자가 다른 초기비번을 쓰면 판정이 안 먹는다
+       기본값 0 — 기존 계정이 갑자기 못 들어오면 안 된다.
+    """
+    try:
+        cur.execute("""IF COL_LENGTH('PARTNER_ERP_TEST3.nx.app_user','must_change_pw') IS NULL
+                         ALTER TABLE PARTNER_ERP_TEST3.nx.app_user
+                           ADD must_change_pw bit NOT NULL CONSTRAINT DF_app_user_mcp DEFAULT 0""")
+    except Exception:
+        pass   # 권한 등으로 실패해도 로그인 자체는 막지 않는다(아래 ISNULL 로 방어)
 
 
 # ===================== 비밀번호 =====================
@@ -67,8 +92,25 @@ def _token_of(request):
 CUTTING_COOP_CODES = {"2148", "2306", "2096", "2142", "2250", "233",
                       "2068", "2048", "2266", "2067", "2030"}
 
+_MCP_OK = None            # must_change_pw 컬럼 존재여부 캐시(매 요청 COL_LENGTH 하지 않는다)
+
+
+def _has_mcp(cur):
+    global _MCP_OK
+    if _MCP_OK is None:
+        try:
+            cur.execute("SELECT COL_LENGTH('PARTNER_ERP_TEST3.nx.app_user','must_change_pw')")
+            _MCP_OK = cur.fetchone()[0] is not None
+        except Exception:
+            _MCP_OK = False
+    return _MCP_OK
+
+
 def _load_user(cur, uid):
-    cur.execute("""SELECT user_id,name,utype,dept,pos,roles,partner_code,email,tel,status
+    # ★must_change_pw 는 컬럼이 없을 수도 있다(신설 전 구버전 DB) → ISNULL+COL_LENGTH 방어.
+    #   여기서 실어야 require_user 가 비번변경 강제를 판정할 수 있다.
+    _mcp = "ISNULL(must_change_pw,0)" if _has_mcp(cur) else "0"
+    cur.execute(f"""SELECT user_id,name,utype,dept,pos,roles,partner_code,email,tel,status,{_mcp}
                      FROM nx.app_user WHERE user_id=?""", uid)
     r = cur.fetchone()
     if not r:
@@ -82,6 +124,7 @@ def _load_user(cur, uid):
             "dept": (r[3] or "").strip(), "pos": (r[4] or "").strip(), "roles": roles,
             "partner_code": _pc, "email": (r[7] or "").strip(),
             "tel": (r[8] or "").strip(), "status": (r[9] or "사용").strip(),
+            "must_change": bool(r[10]),
             "is_cutting": bool(_pc and _pc in CUTTING_COOP_CODES)}
 
 
@@ -231,10 +274,22 @@ def coop_allowed(path):
 
 
 def require_user(request):
-    """토큰 없으면 401. **보호할 API 는 이걸 쓴다.**"""
+    """토큰 없으면 401. **보호할 API 는 이걸 쓴다.**
+
+       ★비번변경 강제(2026-09-07) — must_change=1 이면 비번변경·내정보·로그아웃 외
+         **전부 403**. 화면에서 숨기는 게 아니라 서버가 거부한다(이 파일 머리말 원칙).
+         관리자가 초기화한 계정이 초기비번 그대로 시스템을 쓰는 것을 막는다.
+    """
     u = current_user(request)
     if not u:
         raise HTTPException(401, "로그인이 필요합니다.")
+    if u.get("must_change"):
+        try:
+            path = request.url.path
+        except Exception:
+            path = ""
+        if path not in _MUSTCHG_ALLOW:
+            raise HTTPException(403, "비밀번호를 변경해야 계속 사용할 수 있습니다.")
     return u
 
 
@@ -297,7 +352,9 @@ def auth_login(request: Request, payload: dict = Body(...)):
     cn = _nx()
     cur = cn.cursor()
     try:
-        cur.execute("""SELECT pw_hash, status, ISNULL(fail_cnt,0), locked_until
+        _ensure_user_cols(cur)
+        cur.execute("""SELECT pw_hash, status, ISNULL(fail_cnt,0), locked_until,
+                              ISNULL(must_change_pw,0)
                          FROM nx.app_user WHERE user_id=?""", uid)
         r = cur.fetchone()
         # ★없는 계정과 틀린 비밀번호를 같은 문구로 답한다(계정 존재 여부를 흘리지 않는다).
@@ -305,17 +362,24 @@ def auth_login(request: Request, payload: dict = Body(...)):
         if not r:
             raise HTTPException(401, BAD)
         pw_hash, status, fail, locked = r[0], (r[1] or "사용").strip(), int(r[2]), r[3]
+        must_chg = bool(r[4])
         if status != "사용":
             raise HTTPException(403, f"사용할 수 없는 계정입니다({status}).")
+        # ★잠금은 시간이 지나도 안 풀린다 — 관리자만 해제한다(2026-09-07).
+        LOCKED_MSG = (f"연속 {FAIL_MAX}회 실패로 잠긴 계정입니다. "
+                      f"시스템관리자에게 비밀번호 초기화를 요청하세요.")
         if locked and locked > datetime.now():
-            raise HTTPException(423, f"연속 실패로 잠겼습니다 — {locked:%H:%M} 이후 다시 시도하세요.")
+            raise HTTPException(423, LOCKED_MSG)
         if not verify_pw(pw, pw_hash):
             fail += 1
             if fail >= FAIL_MAX:
-                cur.execute("""UPDATE nx.app_user SET fail_cnt=0,
-                                 locked_until=DATEADD(minute,?,GETDATE()) WHERE user_id=?""", LOCK_MIN, uid)
+                # ★fail_cnt 는 그대로 둔다 — 종전엔 0 으로 밀어 "몇 회 틀렸는지"가 사라졌다.
+                #   관리자 화면이 실패횟수를 보여주려면 기록이 남아야 한다.
+                cur.execute("""UPDATE nx.app_user SET fail_cnt=?, locked_until=?
+                                WHERE user_id=?""", fail, LOCK_FOREVER, uid)
                 cn.commit()
-                raise HTTPException(423, f"연속 {FAIL_MAX}회 실패로 {LOCK_MIN}분 잠깁니다.")
+                _tok_forget()          # ★잠근 계정이 캐시된 토큰으로 계속 살면 안 된다
+                raise HTTPException(423, LOCKED_MSG)
             cur.execute("UPDATE nx.app_user SET fail_cnt=? WHERE user_id=?", fail, uid)
             cn.commit()
             raise HTTPException(401, f"{BAD} (남은 시도 {FAIL_MAX - fail}회)")
@@ -332,7 +396,11 @@ def auth_login(request: Request, payload: dict = Body(...)):
         cur.execute("DELETE FROM nx.app_session WHERE expires_at < DATEADD(day,-7,GETDATE())")
         cn.commit()
         u = _load_user(cur, uid)
-        return {"ok": True, "token": tok, "expires_hours": TTL_HOURS, "user": u}
+        # ★비번변경이 필요한 계정 — 토큰은 주되 서버가 다른 API 를 전부 막는다(require_user).
+        #   임시토큰을 따로 두면 토큰 종류가 둘이 되어 fetch 래퍼·게이트를 전부 손봐야 한다.
+        #   화면에서 숨기는 게 아니라 **서버가 거부**하므로 이 파일 머리말의 원칙에 맞는다.
+        return {"ok": True, "token": tok, "expires_hours": TTL_HOURS, "user": u,
+                "must_change": must_chg}
     finally:
         cn.close()
 
@@ -438,16 +506,25 @@ def auth_password(request: Request, payload: dict = Body(...)):
     u = require_user(request)
     old = str(payload.get("old", ""))
     new = str(payload.get("new", ""))
+    # ★새 비번 규칙(2026-09-07 대표확정) — 4자 이상 + 초기비번 금지.
+    #   초기비번을 그대로 다시 정하면 강제변경이 아무 의미가 없다.
     if len(new) < 4:
         raise HTTPException(400, "새 비밀번호는 4자 이상이어야 합니다.")
+    if new == INIT_PW:
+        raise HTTPException(400, f"초기 비밀번호({INIT_PW})는 사용할 수 없습니다. 다른 비밀번호를 정하세요.")
+    if new == old:
+        raise HTTPException(400, "현재 비밀번호와 다른 비밀번호를 정하세요.")
     cn = _nx()
     cur = cn.cursor()
     try:
+        _ensure_user_cols(cur)
         cur.execute("SELECT pw_hash FROM nx.app_user WHERE user_id=?", u["id"])
         r = cur.fetchone()
         if not r or not verify_pw(old, r[0]):
             raise HTTPException(401, "현재 비밀번호가 올바르지 않습니다.")
-        cur.execute("""UPDATE nx.app_user SET pw_hash=?, upd_user=?, upd_dt=GETDATE()
+        # ★must_change_pw 를 내린다 — 이걸 빠뜨리면 비번을 바꿔도 계속 변경화면에 갇힌다.
+        cur.execute("""UPDATE nx.app_user SET pw_hash=?, must_change_pw=0,
+                          upd_user=?, upd_dt=GETDATE()
                         WHERE user_id=?""", hash_pw(new), u["id"], u["id"])
         # 비밀번호를 바꾸면 **다른 기기의 세션을 모두 끊는다**(도난 대비).
         cur.execute("UPDATE nx.app_session SET revoked=1 WHERE user_id=? AND token<>?",
@@ -455,5 +532,71 @@ def auth_password(request: Request, payload: dict = Body(...)):
         cn.commit()
         _tok_forget()                     # ★다른 기기 세션을 끊었으므로 캐시 전체를 버린다
         return {"ok": True, "msg": "비밀번호를 변경했습니다. 다른 기기의 로그인은 해제됩니다."}
+    finally:
+        cn.close()
+
+
+# ===================== 관리자 전용 — 잠금해제 · 비번초기화 (2026-09-07 신설) =====================
+#   ★시스템관리자만. 협력사는 COOP_ALLOW 에 넣지 않았으므로 전역 게이트가 먼저 403 을 준다.
+#   ★세션 revoke + _tok_forget() 을 빠뜨리면 잠근/초기화한 계정이 옛 토큰으로 계속 돌아다닌다.
+
+def _admin_only(request):
+    """계정 보안조작은 시스템관리자만. sales._is_admin 과 같은 기준(roles 에 '시스템관리자')."""
+    u = require_user(request)
+    if "시스템관리자" not in (u.get("roles") or []):
+        raise HTTPException(403, "계정 잠금해제·비밀번호 초기화는 시스템관리자만 할 수 있습니다.")
+    return u
+
+
+@router.post("/api/auth/admin/unlock")
+def auth_admin_unlock(request: Request, payload: dict = Body(...)):
+    """잠금 해제 — 실패횟수와 잠금표시를 지운다. 비밀번호는 건드리지 않는다."""
+    adm = _admin_only(request)
+    uid = str(payload.get("user_id") or payload.get("id") or "").strip()
+    if not uid:
+        raise HTTPException(400, "대상 아이디가 필요합니다.")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) FROM nx.app_user WHERE user_id=?", uid)
+        if not cur.fetchone()[0]:
+            raise HTTPException(404, f"계정을 찾을 수 없습니다({uid}).")
+        cur.execute("""UPDATE nx.app_user SET fail_cnt=0, locked_until=NULL,
+                          upd_user=?, upd_dt=GETDATE() WHERE user_id=?""", adm["id"], uid)
+        cn.commit()
+        _tok_forget()
+        return {"ok": True, "user_id": uid, "msg": f"{uid} 계정의 잠금을 해제했습니다."}
+    finally:
+        cn.close()
+
+
+@router.post("/api/auth/admin/resetpw")
+def auth_admin_resetpw(request: Request, payload: dict = Body(...)):
+    """비밀번호 초기화 — 초기비번으로 되돌리고 **다음 로그인 시 새 비번을 강제**한다.
+
+       · pw 를 주면 그 값으로, 없으면 INIT_PW('1111')
+       · must_change_pw=1 → require_user 가 비번변경 외 전부 403
+       · 잠금·실패횟수도 함께 푼다(초기화했는데 잠긴 채면 못 들어온다)
+       · ★그 계정의 세션을 전부 끊는다 — 안 그러면 옛 토큰으로 계속 쓴다
+    """
+    adm = _admin_only(request)
+    uid = str(payload.get("user_id") or payload.get("id") or "").strip()
+    newpw = str(payload.get("pw") or "").strip() or INIT_PW
+    if not uid:
+        raise HTTPException(400, "대상 아이디가 필요합니다.")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        _ensure_user_cols(cur)
+        cur.execute("SELECT COUNT(*) FROM nx.app_user WHERE user_id=?", uid)
+        if not cur.fetchone()[0]:
+            raise HTTPException(404, f"계정을 찾을 수 없습니다({uid}).")
+        cur.execute("""UPDATE nx.app_user SET pw_hash=?, must_change_pw=1,
+                          fail_cnt=0, locked_until=NULL, upd_user=?, upd_dt=GETDATE()
+                        WHERE user_id=?""", hash_pw(newpw), adm["id"], uid)
+        cur.execute("UPDATE nx.app_session SET revoked=1 WHERE user_id=?", uid)
+        cn.commit()
+        _tok_forget()
+        return {"ok": True, "user_id": uid, "init_pw": newpw,
+                "msg": f"{uid} 계정의 비밀번호를 초기화했습니다. "
+                       f"초기비번 {newpw} 로 접속하면 새 비밀번호를 정하게 됩니다."}
     finally:
         cn.close()

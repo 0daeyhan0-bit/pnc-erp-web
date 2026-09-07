@@ -254,6 +254,15 @@
     <label>비밀번호</label>
     <input id="lgpw" type="password" autocomplete="current-password" placeholder="비밀번호">
     <button class="btn" id="lgbtn">로그인</button>
+    <!-- ★비밀번호 변경(2026-09-07) — 관리자가 초기화한 계정은 새 비번을 정해야 한다.
+           로그인 박스를 그대로 쓰고 보이는 것만 바꾼다(스타일 재사용). -->
+    <div id="cpwrap" class="hide">
+      <label>새 비밀번호</label>
+      <input id="cpn1" type="password" autocomplete="new-password" placeholder="4자 이상 · 1111 불가">
+      <label>새 비밀번호 확인</label>
+      <input id="cpn2" type="password" autocomplete="new-password" placeholder="한 번 더">
+      <button class="btn" id="cpbtn">변경하고 시작</button>
+    </div>
     <div class="foot">계정 문의 · 피앤씨인더스트리 전산담당</div>
   </div>
 </div>
@@ -348,11 +357,45 @@ async function doLogin(){
     const j = await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(j.detail||'로그인에 실패했습니다.');
     T.tok=j.token; T.me=j.user;
+    // ★비번변경 강제 — 서버가 비번변경 외 API 를 전부 403 으로 막으므로 여기서 갈라야 한다.
+    if(j.must_change){ showChangePw(id,pw); return; }
     if(gotoMainIfStaff(T.me)) return;      // ★내부 계정 = 포털이 아니라 내부 ERP 로
     $('#login').classList.add('hide');
     start();
   }catch(e){ showLogin(e.message); }
   finally{ b.disabled=false; b.textContent='로그인'; }
+}
+
+/* ★비밀번호 변경 (2026-09-07) — 초기비번으로 들어온 협력사가 새 비번을 정한다.
+     old 는 방금 입력한 초기비번을 그대로 보낸다(서버가 현재비번을 확인한다). */
+function showChangePw(id,oldPw){
+  ['#lgid','#lgpw','#lgbtn'].forEach(s=>$(s).classList.add('hide'));
+  // 아이디·비밀번호 라벨 2개만 숨긴다($$ 헬퍼는 이 파일에 없다 — querySelectorAll 직접)
+  Array.from(document.querySelectorAll('#login .box > label'))
+       .slice(0, 2).forEach(el => el.classList.add('hide'));
+  $('#cpwrap').classList.remove('hide');
+  $('#lgerr').classList.add('hide');
+  const sb=$('#login .sb'); if(sb) sb.textContent=id+' — 새 비밀번호를 정해야 계속 사용할 수 있습니다';
+  setTimeout(()=>{const f=$('#cpn1'); if(f) f.focus();},30);
+  const go=async()=>{
+    const n1=$('#cpn1').value, n2=$('#cpn2').value, e=$('#lgerr');
+    const bad=m=>{ e.textContent=m; e.classList.remove('hide'); };
+    if(!n1||!n2) return bad('새 비밀번호를 두 번 입력하세요.');
+    if(n1!==n2)  return bad('두 비밀번호가 다릅니다.');
+    const b=$('#cpbtn'); b.disabled=true; b.textContent='변경 중…'; e.classList.add('hide');
+    try{
+      const r=await fetch(API+'/api/auth/password',{method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+T.tok},
+        body:JSON.stringify({old:oldPw,new:n1})});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok) throw new Error(j.detail||'비밀번호 변경에 실패했습니다.');
+      if(gotoMainIfStaff(T.me)) return;
+      $('#login').classList.add('hide');
+      start();
+    }catch(err){ bad(err.message); b.disabled=false; b.textContent='변경하고 시작'; }
+  };
+  $('#cpbtn').onclick=go;
+  [$('#cpn1'),$('#cpn2')].forEach(el=>el.onkeyup=ev=>{ if(ev.key==='Enter') go(); });
 }
 
 /* ───────── 화면 ───────── */

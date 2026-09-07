@@ -739,11 +739,17 @@ SCREEN.partmaster=(c)=>{
            <b style="background:#e6effb;padding:0 4px;border-radius:3px">자재창고출고</b>
            <span style="color:#8aa0bd;font-size:11px">— 자재창고(Z99990)에서 BOM만큼 차감</span></label>
        </div>
-       ${f('파트그룹','grp')}${f('자동창고IP','ip')}${f('RACK개수','rack','type="number"')}
+       ${f('파트그룹','grp')}
+       <!-- ★자동창고IP·RACK개수 입력칸 제거(2026-09-07 요청) — 안 쓰는 항목.
+              전 23행 실측 전부 빈값/0 이었다. 컬럼(WH_IP_ADDRESS·RACK_NUMBER)은 남겨두고
+              저장 시 기존값을 그대로 돌려보낸다(partmaster.py 가 그 컬럼을 계속 UPDATE 하므로
+              화면에서만 빼면 빈값으로 덮어써진다 — 아래 wireModal 주석 참조). -->
        <div style="margin-top:14px;text-align:right"><button class="btn ghost" id="pm-cancel">취소</button> <button class="btn" id="pm-save" style="background:#1c47a0;color:#fff">💾 저장</button></div>
      </div></div>`;};
   const wireModal=()=>{if(!st.edit)return;const g=id=>c.querySelector(id);
-    ['code','nm','gubun','wc','wh','sortkey','rate','grp','ip','rack'].forEach(k=>{const el=g('#pm-f-'+k);if(el)el.oninput=()=>{st.edit[k]=el.value;};});
+    // ★ip·rack 은 입력칸을 없앴다 — 목록에서 읽어온 기존값이 st.edit 에 그대로 남아
+    //   저장 시 원값이 되돌아간다(덮어써서 지워지지 않는다).
+    ['code','nm','gubun','wc','wh','sortkey','rate','grp'].forEach(k=>{const el=g('#pm-f-'+k);if(el)el.oninput=()=>{st.edit[k]=el.value;};});
     // ★실적처리방법 — 바코드는 독립 체크, 생산실적은 라디오라 택1이 강제된다
     const bcEl=g('#pm-f-bc'); if(bcEl)bcEl.onchange=()=>{st.edit.bc=bcEl.checked?'1':'0';};
     c.querySelectorAll('input[name="pm-pt"]').forEach(el=>{el.onchange=()=>{st.edit.pt=el.value;};});

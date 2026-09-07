@@ -250,41 +250,104 @@ SCREEN.users=(c)=>{
   const load=async()=>{try{const r=await fetch(API_BASE+'/api/perm/users');
     if(!r.ok)return null; const j=await r.json(); return Array.isArray(j.users)?j.users:null;}catch(e){return null;}};
   let users=[], editMode=false, loadErr='';
+  let users_orig=[];   // 서버에 실제로 있는 계정 id — ✕ 가 '신규행 제거'인지 '서버 삭제'인지 가른다
   const CT=['내부','협력사'], ST=['사용','정지'];
-  const cols=[{f:'id',h:'ID'},{f:'pw',h:'비밀번호',pw:1},{f:'nm',h:'이름'},{f:'type',h:'구분',sel:CT},{f:'dept',h:'부서'},{f:'pos',h:'직책'},{f:'roles',h:'역할',roles:1},{f:'partner',h:'협력사'},{f:'email',h:'이메일'},{f:'tel',h:'연락처'},{f:'status',h:'상태',sel:ST}];
+  const cols=[{f:'id',h:'ID'},{f:'pw',h:'비밀번호',pw:1},{f:'nm',h:'이름'},{f:'type',h:'구분',sel:CT},{f:'dept',h:'부서'},{f:'pos',h:'직책'},{f:'roles',h:'역할',roles:1},{f:'partner',h:'협력사'},{f:'email',h:'이메일'},{f:'tel',h:'연락처'},{f:'status',h:'상태',sel:ST},
+    // ★잠금상태(2026-09-07) — 10회 실패하면 잠기고 관리자가 풀어줘야 한다. 읽기전용 표시.
+    {f:'lock',h:'잠금',lock:1}];
+  /* 관리자 전용 조작 — 잠금해제 · 비번초기화.
+     ★버튼을 숨기는 게 아니라 서버(_admin_only)가 막는다. 여기선 편의를 위해 관리자에게만 보인다. */
+  const adminAct=async(path,u,okMsg)=>{
+    try{const r=await fetch(`${API_BASE}/api/auth/admin/${path}`,{method:'POST',
+          headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:u.id})});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok||!j.ok)throw new Error(j.detail||'실패');
+      alert(j.msg||okMsg);
+      users=(await load())||users; draw();
+    }catch(e){alert('실패 — '+(e&&e.message||e));}
+  };
   const draw=()=>{
     c.innerHTML=`
      <div class="page-title">👤 사용자관리</div>
      <div class="page-sub">계정 정본 = <b>nx.app_user</b> · 비밀번호는 <b>PBKDF2 해시</b>로 저장되며 화면에 나오지 않습니다 ·
        <b>비밀번호를 비워두면 기존 비밀번호가 그대로 유지</b>됩니다(바꿀 때만 입력) ·
-       계정을 지우려면 <b>상태를 '정지'</b>로 두세요(목록에서 빼는 것으로는 지워지지 않습니다) ·
-       협력사 칸 = <b>거래처코드</b> · 프로그램별 권한은 「권한관리」${loadErr?` · <span class="neg">${esc(loadErr)}</span>`:''}</div>
+       <b>⏸</b>=로그인만 막음(계정 유지) · <b>✕</b>=완전삭제(되돌릴 수 없음) ·
+       신규 계정은 비밀번호를 비워두면 <b>초기비번 1111</b>이 부여되고 <b>첫 로그인에 본인이 새 비번을 정합니다</b> ·
+       협력사 칸 = <b>거래처코드</b> · 프로그램별 권한은 「권한관리」 ·
+       <b>비밀번호 10회 연속 실패</b> 시 계정이 잠기며 <b>관리자가 [잠금해제]·[비번초기화]</b> 해야 다시 접속됩니다${loadErr?` · <span class="neg">${esc(loadErr)}</span>`:''}</div>
      <div class="toolbar"><input class="inp" id="q" placeholder="ID·이름·부서·협력사">
        ${editMode?`<button class="btn" id="add">➕ 추가</button><button class="btn" id="save">💾 저장</button><button class="btn ghost" id="cancel">✖ 취소</button>`:(PERM.canEdit('users')?`<button class="btn" id="edit">✎ 수정</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}
        <div class="spacer"></div><span class="rowcount" id="cnt"></span></div>
-     <div class="grid-wrap" style="max-height:520px;overflow:auto"><table class="tbl fit"><thead><tr>${cols.map(cc=>`<th>${cc.h}</th>`).join('')}${editMode?'<th class="center">삭제</th>':''}</tr></thead><tbody id="tb"></tbody></table></div>`;
+     <div class="grid-wrap" style="max-height:520px;overflow:auto"><table class="tbl fit"><thead><tr>${cols.map(cc=>`<th>${cc.h}</th>`).join('')}${editMode?'<th class="center">정지/삭제</th>':''}</tr></thead><tbody id="tb"></tbody></table></div>`;
+    const isAdm=(typeof PERM!=='undefined')&&PERM.isAdmin&&PERM.isAdmin();
     const disp=(cc,u)=>{ if(cc.pw)return u.pw_set?'설정됨':'<span class="neg">미설정</span>';
       if(cc.roles)return (u.roles||[]).map(r=>`<span class="badge">${esc(r)}</span>`).join(' ');
+      if(cc.lock){
+        const badge=u.locked?'<span class="badge" style="background:#c0392b">잠김</span>'
+                   :(u.fail_cnt?`<span style="color:#c0392b;font-size:11px">실패 ${u.fail_cnt}</span>`:'');
+        if(!isAdm||editMode)return badge;
+        return `${badge} <button class="btn xs ghost" data-unlock="${esc(u.id)}"${u.locked?'':' disabled'}
+                   title="실패횟수와 잠금을 지웁니다(비밀번호는 그대로)">잠금해제</button>
+                <button class="btn xs ghost" data-reset="${esc(u.id)}"
+                   title="초기비번으로 되돌리고 다음 로그인 때 새 비번을 정하게 합니다">비번초기화</button>`;
+      }
       return esc(''+(u[cc.f]||'')); };
     const editCell=(cc,u,i)=>{
+      if(cc.lock)return disp(cc,u);           // 잠금은 편집 대상이 아니다(버튼으로만)
       if(cc.sel)return `<select data-i="${i}" data-f="${cc.f}">${cc.sel.map(o=>`<option ${u[cc.f]===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
       if(cc.roles)return `<div style="min-width:150px">${ROLES.map(r=>`<label style="margin-right:6px;white-space:nowrap;font-size:11px"><input type="checkbox" data-i="${i}" data-role="${esc(r)}" ${(u.roles||[]).includes(r)?'checked':''}>${esc(r)}</label>`).join('')}</div>`;
-      if(cc.pw)return `<input data-i="${i}" data-f="pw" type="password" value="" placeholder="비우면 유지" style="width:95px">`;
+      // ★신규는 비워두면 서버가 초기비번(1111)을 자동 부여한다 — 첫 로그인에 본인이 바꾼다.
+      if(cc.pw)return `<input data-i="${i}" data-f="pw" type="password" value=""
+            placeholder="${u.pw_set?'비우면 유지':'비우면 1111'}" title="${u.pw_set?'비워두면 기존 비밀번호가 유지됩니다':'신규 계정 — 비워두면 초기비번 1111 이 부여되고 첫 로그인에 본인이 새 비번을 정합니다'}" style="width:95px">`;
       return `<input data-i="${i}" data-f="${cc.f}" value="${esc(''+(u[cc.f]||''))}" style="width:${cc.f==='email'?150:95}px">`;
     };
     const rend=()=>{
       const q=(c.querySelector('#q').value||'').toLowerCase();
       const vis=users.map((u,i)=>({u,i})).filter(({u})=>!q||(''+u.id+u.nm+u.dept+u.partner).toLowerCase().includes(q));
-      c.querySelector('#tb').innerHTML=vis.map(({u,i})=>`<tr>${cols.map(cc=>`<td>${editMode?editCell(cc,u,i):disp(cc,u)}</td>`).join('')}${editMode?`<td class="center"><button class="btn xs ghost" data-del="${i}">✕</button></td>`:''}</tr>`).join('')||`<tr><td colspan="${cols.length+1}" class="empty">없음</td></tr>`;
+      c.querySelector('#tb').innerHTML=vis.map(({u,i})=>`<tr>${cols.map(cc=>`<td>${editMode?editCell(cc,u,i):disp(cc,u)}</td>`).join('')}${editMode?`<td class="center" style="white-space:nowrap"><button class="btn xs ghost" data-stop="${i}" title="로그인만 막는다(계정은 남음)">${u.status==='정지'?'▶':'⏸'}</button> <button class="btn xs ghost" data-del="${i}" title="계정 완전삭제" style="color:#c0392b">✕</button></td>`:''}</tr>`).join('')||`<tr><td colspan="${cols.length+1}" class="empty">없음</td></tr>`;
       if(editMode){
-        c.querySelectorAll('#tb input[data-f],#tb select[data-f]').forEach(el=>el.onchange=()=>{users[+el.dataset.i][el.dataset.f]=el.value;});
+        /* ★oninput 으로 받는다(2026-09-07 수정) — 종전엔 onchange 뿐이라
+             **입력하고 바로 [저장]을 누르면 값이 안 담겼다.** onchange 는 포커스가 빠질 때만
+             발생하는데, 버튼 클릭은 그 전에 처리될 수 있다.
+             실제 증상: 신규계정을 비번과 함께 등록했는데 pw_hash 가 NULL 로 저장돼
+                       무슨 비번을 넣어도 로그인 불가(대표 실사용 오류).
+             change 도 함께 건다 — 드롭다운(select)은 change 가 자연스럽다. */
+        c.querySelectorAll('#tb input[data-f],#tb select[data-f]').forEach(el=>{
+          const grab=()=>{users[+el.dataset.i][el.dataset.f]=el.value;};
+          el.oninput=grab; el.onchange=grab;});
         c.querySelectorAll('#tb input[data-role]').forEach(el=>el.onchange=()=>{const u=users[+el.dataset.i];u.roles=u.roles||[];const r=el.dataset.role;if(el.checked){if(!u.roles.includes(r))u.roles.push(r);}else u.roles=u.roles.filter(x=>x!==r);});
-        // ★목록에서 빼도 서버는 계정을 지우지 않는다(그래야 화면이 일부만 보냈을 때 계정이 증발하지 않는다).
-        //   그래서 삭제 버튼은 **상태를 '정지'** 로 바꾼다 — 실제로 로그인이 막히는 방법이다.
-        c.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{const u=users[+b.dataset.del];
+        /* 삭제 — ✕=계정 완전삭제 / ⏸=정지(로그인만 막고 계정은 남김), 2026-09-07 분리.
+           종전엔 ✕ 가 '정지 토글'이라 계정이 목록에서 사라지지 않았다(대표 지적). */
+        c.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
+          const i=+b.dataset.del, u=users[i];
+          if(!u.pw_set&&!u.id){users.splice(i,1);rend();return;}         // 빈 신규행은 그냥 제거
+          const isNew=!users_orig.some(o=>o.id===u.id);                   // 아직 저장 안 된 신규
+          if(isNew){users.splice(i,1);rend();return;}
+          if(!confirm(`${u.id} 계정을 완전히 삭제할까요?\n\n· 계정과 로그인 세션이 지워집니다\n· 되돌릴 수 없습니다(다시 등록해야 합니다)\n\n로그인만 막으려면 [취소] 후 상태를 '정지'로 두세요.`))return;
+          try{
+            const r=await fetch(API_BASE+'/api/perm/users/delete',{method:'POST',
+              headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[u.id]})});
+            const j=await r.json().catch(()=>({}));
+            if(!r.ok||!j.ok)throw new Error(j.detail||'삭제 실패');
+            alert(`${u.id} 계정을 삭제했습니다.`);
+            editMode=false; users=(await load())||users; users_orig=users.map(x=>({id:x.id})); draw();
+          }catch(e){alert('삭제 실패 — '+(e&&e.message||e));}
+        });
+        // 정지/사용 토글은 별도 버튼으로 남긴다(계정을 지우지 않고 로그인만 막는 방법)
+        c.querySelectorAll('[data-stop]').forEach(b=>b.onclick=()=>{const u=users[+b.dataset.stop];
           u.status=(u.status==='정지')?'사용':'정지'; rend();});
       }
-      c.querySelector('#cnt').textContent=`${users.length}명 (내부 ${users.filter(u=>u.type==='내부').length}·협력사 ${users.filter(u=>u.type==='협력사').length}) · ${editMode?'✎수정중':'읽기전용'}`;
+      // ★관리자 조작 버튼 — 읽기전용 모드에서만(수정 중엔 저장과 섞이면 헷갈린다)
+      c.querySelectorAll('[data-unlock]').forEach(b=>b.onclick=()=>{
+        const u=users.find(x=>x.id===b.dataset.unlock); if(!u)return;
+        if(confirm(`${u.id} 계정의 잠금을 해제할까요?`))adminAct('unlock',u,'잠금을 해제했습니다.');});
+      c.querySelectorAll('[data-reset]').forEach(b=>b.onclick=()=>{
+        const u=users.find(x=>x.id===b.dataset.reset); if(!u)return;
+        if(confirm(`${u.id} 계정의 비밀번호를 초기화할까요?\n\n· 초기비번 1111 로 바뀝니다\n· 그 계정의 로그인이 전부 해제됩니다\n· 다음 접속 때 새 비밀번호를 정하게 됩니다`))
+          adminAct('resetpw',u,'비밀번호를 초기화했습니다.');});
+      const nLock=users.filter(u=>u.locked).length;
+      c.querySelector('#cnt').innerHTML=`${users.length}명 (내부 ${users.filter(u=>u.type==='내부').length}·협력사 ${users.filter(u=>u.type==='협력사').length})`
+        +(nLock?` · <b style="color:#c0392b">잠김 ${nLock}</b>`:'')+` · ${editMode?'✎수정중':'읽기전용'}`;
     };
     if(editMode){
       c.querySelector('#add').onclick=()=>{users.push({id:'',pw:'',nm:'',type:'내부',dept:'',pos:'',roles:['조회전용'],partner:'',email:'',tel:'',status:'사용',pw_set:false});rend();};
@@ -294,7 +357,7 @@ SCREEN.users=(c)=>{
           msg=r.ok&&j.ok?`저장되었습니다 — 신규 ${j.new} · 수정 ${j.updated} · 비밀번호 변경 ${j.pw_changed}건`
                         :`저장 실패 — ${(j&&j.detail)||'백엔드 확인 필요'}`;}
         catch(e){msg='저장 실패 — 서버에 연결하지 못했습니다.';}
-        editMode=false; users=(await load())||users; draw(); alert(msg);};
+        editMode=false; users=(await load())||users; users_orig=users.map(x=>({id:x.id})); draw(); alert(msg);};
       c.querySelector('#cancel').onclick=async()=>{users=(await load())||users;editMode=false;draw();};
     } else if(c.querySelector('#edit')) c.querySelector('#edit').onclick=()=>{editMode=true;draw();};
     c.querySelector('#q').onkeyup=rend;
@@ -303,7 +366,8 @@ SCREEN.users=(c)=>{
   draw();
   // 최초 진입 시 서버에서 정본을 읽는다
   (async()=>{const u=await load();
-    if(u)users=u; else loadErr='서버에서 계정을 읽지 못했습니다(권한 또는 연결 확인).';
+    if(u){users=u;users_orig=u.map(x=>({id:x.id}));}
+    else loadErr='서버에서 계정을 읽지 못했습니다(권한 또는 연결 확인).';
     draw();})();
 };
 SCREEN.setinreq=(c)=>{
