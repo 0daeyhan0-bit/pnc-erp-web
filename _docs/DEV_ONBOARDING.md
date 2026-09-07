@@ -105,6 +105,17 @@ git push -u origin feat/gagong-progress
 - **공유파일 5개**(`app.py`·`common.py`·`index.html`·`js/core.js`·`js/data.js`)는 만질 때 **짧게 → 즉시 커밋·push**. 오래 열어두지 말 것.
 - 매일 아침 `git switch main && git pull` 로 최신화 후 브랜치 rebase/merge.
 
+### 2-5. ★★★모든 문서·기록도 서버(Gitea main)에 올린다 (전 개발자·예외 없음)
+코드만이 아니라 **모든 기록** — durable 노트, 정본(canon)·규칙 문서, 설계(design) 문서, 검증·대사·실행 로그,
+인벤토리, 마이그레이션·의사결정 경위(`_schema/`·`_docs/` 이하 전부) — 을 **내 PC 로컬 커밋 + Gitea main 병합**까지 한다.
+- **왜**: Gitea(184) main = 다른 개발자가 실제로 보는 공유 저장소. 로컬이나 feature 브랜치에만 두면 **남에게 안 보여** 같은 함정·중복작업이 반복된다.
+- **어떻게**: 프로그램을 수정/신규개발할 때 그 기록을 **같은 흐름에서 즉시** 올린다("나중에 몰아서" 금지).
+  - 코드와 함께 나온 문서 → 같은 PR에 포함.
+  - 문서만이면 → `docs/<주제>` 브랜치로 **문서-only PR → main 병합**.
+  - **feature 브랜치에만 두고 방치 금지**(main에 병합돼야 공유됨).
+- 새 정본·충돌·완료가 생기면 `_schema/00_MASTER_INDEX.md`부터 갱신하고 그 변경도 main에 push.
+- 상세 규칙 = `CLAUDE.md §7`.
+
 ---
 
 ## 3. 배포 (main → 운영 184)
