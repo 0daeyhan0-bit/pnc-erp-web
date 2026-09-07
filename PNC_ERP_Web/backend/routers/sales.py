@@ -1972,7 +1972,14 @@ def sale040_cancel(payload: dict = Body(...)):
                             WHERE ITEM_CODE=?""", q, user, win, it)
             cur.execute("SELECT ISNULL(SUM(STOCK_QTY),0) FROM nx.SA_T_ITEM_STOCK WHERE ITEM_CODE=?", it)
             _lf = float(cur.fetchone()[0] or 0)
-            done.append({"wo": wo, "swo": swo, "item": it, "ymd": y, "qty": q, "left": _lf})
+            # ★cell_ymd = **화면 셀의 날짜**(사용자가 클릭한 칸). ymd = 실제 전표일자.
+            #   둘은 다른 축이다(화면 sday 는 계획일자 순 배분값 — L1731 주석 참조).
+            #   프론트 applyLocal 은 화면 셀을 갱신해야 하므로 cell_ymd 를 쓴다.
+            #   이걸 안 주면 실제일자(260901)로 없는 칸을 찾아 아무것도 안 줄고,
+            #   "취소했는데 다시 조회해야 보인다"가 된다(실사용 신고 2026-09-07).
+            done.append({"wo": wo, "swo": swo, "item": it, "ymd": y,
+                         "cell_ymd": (str(c.get("ymd") or "").strip() or y),
+                         "qty": q, "left": _lf})
         if not done:
             cn.rollback()
             return {"ok": False, "msg": "취소할 출하실적이 없습니다."}
