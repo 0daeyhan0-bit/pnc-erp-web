@@ -379,10 +379,10 @@ WITH CTE_BOM(mat_code, in_cust_code, mat_use_qty, cum_in_cust_code,
 )
 SELECT mat_code, MAX(in_cust_code) in_cust_code, SUM(mat_use_qty) mat_use_qty,
        ISNULL(MAX(insp_flag),'N') insp_flag, ISNULL(in_gagong_proc_code,'') in_gpc,
-       ISNULL((SELECT TOP 1 item_cost FROM nx.pr_m_item_cost
-                WHERE item_code = a.mat_code AND cust_code = MAX(a.in_cust_code)
-                  AND cost_tag = '1' AND cost_apply_ymd <= ? AND currency = 'KRW'
-                ORDER BY cost_apply_ymd DESC),0) item_cost
+       ISNULL((SELECT TOP 1 price FROM nx.price_item
+                WHERE item_code = a.mat_code AND vendor_code = MAX(a.in_cust_code)
+                  AND price_type = '매입' AND apply_ymd <= ? AND currency = 'KRW'
+                ORDER BY apply_ymd DESC),0) item_cost
   FROM CTE_BOM a
  WHERE a.in_cust_code = ?
    AND CHARINDEX('||' + a.in_cust_code + '||', a.cum_in_cust_code) = 0
@@ -941,22 +941,23 @@ def _derive_set_stock(cur, cust, doban, qty, sheet, bc, mseq, today):
     cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.stock_ledger WHERE MAINT_YMD=?", today)
     lseq = int(cur.fetchone()[0])
     # ★레거시 135(dw_pr_input_135_5) 원문: 세트입고요청 명세(_DTL)를 그대로 읽는다.
-    #   단가 = pr_m_item_cost(cost_tag='1', 거래처별, 입고일 이하 최신). 입고창고 'IS0001' 하드코딩.
+    #   단가 = nx.price_item(price_type='매입', 거래처별, 입고일 이하 최신). 입고창고 'IS0001' 하드코딩.
+    #   ※단일데이터셋 전환(2026-09-08): pr_m_item_cost(미러)→price_item(클린 편집대상). 미러는 컷오버 후 write-dead.
     #   ※웹 명세(set_input_req_dtl)가 비어 있으면 미러(_DTL)를 원천으로 쓴다.
     cur.execute("""SELECT d.mat_code, d.use_qty,
-                          ISNULL((SELECT TOP 1 c.item_cost FROM nx.pr_m_item_cost c WITH(NOLOCK)
-                                   WHERE c.item_code=d.mat_code AND c.cust_code=?
-                                     AND c.cost_tag='1' AND c.currency='KRW'
-                                     AND c.cost_apply_ymd<=? ORDER BY c.cost_apply_ymd DESC),0) cost
+                          ISNULL((SELECT TOP 1 c.price FROM nx.price_item c WITH(NOLOCK)
+                                   WHERE c.item_code=d.mat_code AND c.vendor_code=?
+                                     AND c.price_type='매입' AND c.currency='KRW'
+                                     AND c.apply_ymd<=? ORDER BY c.apply_ymd DESC),0) cost
                      FROM nx.set_input_req_dtl d WITH(NOLOCK)
                     WHERE d.sheet_no=?""", cust, today, sheet)
     dtl = cur.fetchall()
     if not dtl:
         cur.execute("""SELECT d.MAT_CODE, d.USE_QTY,
-                              ISNULL((SELECT TOP 1 c.item_cost FROM nx.pr_m_item_cost c WITH(NOLOCK)
-                                       WHERE c.item_code=d.MAT_CODE AND c.cust_code=?
-                                         AND c.cost_tag='1' AND c.currency='KRW'
-                                         AND c.cost_apply_ymd<=? ORDER BY c.cost_apply_ymd DESC),0) cost
+                              ISNULL((SELECT TOP 1 c.price FROM nx.price_item c WITH(NOLOCK)
+                                       WHERE c.item_code=d.MAT_CODE AND c.vendor_code=?
+                                         AND c.price_type='매입' AND c.currency='KRW'
+                                         AND c.apply_ymd<=? ORDER BY c.apply_ymd DESC),0) cost
                          FROM nx.PU_T_SET_INPUT_REQ_DTL d WITH(NOLOCK)
                         WHERE d.SHEET_NO=? AND ISNULL(d.ITEM_GUBUN,'1')='1'""", cust, today, sheet)
         dtl = cur.fetchall()

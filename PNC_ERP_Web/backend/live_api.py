@@ -1116,7 +1116,7 @@ def shipment(dfrom: str = Query(""), dto: str = Query("")):
     sql = f"""
 SELECT a.SALE_YMD ymd, a.WORK_ORDER wo, a.SPLIT_WORK_ORDER swo, a.ITEM_CODE item,
   a.SALE_QTY qty, a.SALE_COST cost, a.SALE_AMT amt,
-  ISNULL((SELECT TOP 1 item_cost FROM PARTNER_ERP_TEST3.nx.pr_m_item_cost WHERE item_code=a.item_code AND cost_apply_ymd<=a.sale_ymd AND cost_tag='S' AND cust_code IN ('1010','1020') ORDER BY cost_apply_ymd DESC),0) mcost,
+  ISNULL((SELECT TOP 1 price FROM PARTNER_ERP_TEST3.nx.price_item WHERE item_code=a.item_code AND apply_ymd<=a.sale_ymd AND price_type='TAGS' AND vendor_code IN ('1010','1020') ORDER BY apply_ymd DESC),0) mcost,
   a.SALE_USER_ID usr, a.SALE_HMS hms,
   CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
        ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=M.in_cust) END wc,
@@ -1172,7 +1172,7 @@ select UPPER(a.mat_code),a.maint_qty*-1,0,0,0 from PARTNER_ERP_TEST3.nx.pu_t_sto
 SELECT t.mat cd, max(M.item_name) nm, max(m.item_spec) spec, max(m.item_class) cls,
    sum(t.basic) basic, sum(t.inq) inq, sum(t.outq) outq, sum(t.etc) adj,
    sum(t.basic+t.inq-t.etc-t.outq) qty,
-   (select top 1 item_cost from PARTNER_ERP_TEST3.nx.pr_m_item_cost where item_code=t.mat and cost_apply_ymd<='{t}' and cost_tag in ('S','E') order by cost_apply_ymd desc) cost,
+   (select top 1 price from PARTNER_ERP_TEST3.nx.price_item where item_code=t.mat and apply_ymd<='{t}' and price_type in ('TAGS','TAGE') order by apply_ymd desc) cost,
    case when max(m.work_code)>'' then (select work_desc from PARTNER_ERP_TEST3.nx.pr_m_work where work_code=max(m.work_code))
         else (select cust_desc from PARTNER_ERP_TEST3.nx.cm_m_cust where cust_code=max(M.in_cust)) end wc
 FROM t JOIN PARTNER_ERP_TEST3.nx.item m ON t.mat=m.item_code
@@ -1333,7 +1333,7 @@ UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),0
 UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),0,iif(a.MAINT_YMD<'{y01}',0,-a.MAINT_QTY),0 FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND A.MAINT_TAG='4'
 """
     # ★단가 상관서브쿼리를 OUTER APPLY로 1회만 계산(기존엔 cost·amt에 2회 → 품목당 2배). 값 동일·성능개선.
-    C2A = f"select top 1 q.item_cost cost from PARTNER_ERP_TEST3.nx.pr_m_item_cost q where q.item_code=agg.mat and q.cost_tag='1' and q.cost_apply_ymd<='{y01}' and q.cust_code=case when pi.work_code='P2' then '2228' else pi.in_cust end order by q.cost_apply_ymd desc"
+    C2A = f"select top 1 q.price cost from PARTNER_ERP_TEST3.nx.price_item q where q.item_code=agg.mat and q.price_type='매입' and q.apply_ymd<='{y01}' and q.vendor_code=case when pi.work_code='P2' then '2228' else pi.in_cust end order by q.apply_ymd desc"
     sql = f"""
 ;WITH agg AS (
   SELECT LTRIM(RTRIM(t.mat)) mat, ISNULL(LTRIM(RTRIM(t.gpc)),'') line,
