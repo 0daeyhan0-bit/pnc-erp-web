@@ -308,7 +308,7 @@ REASON_CHECKS = [
 #   ★캐시만 붙이고 무효화를 빼면 "재고가 움직였는데 화면은 옛 값" 이 된다.
 #
 #   ★2026-08-28 실측으로 확인된 것 — **수불장은 웹 입력분을 보지 않는다.**
-#     수불장·마감 = 라이브 전표(PARTNER_ERP.dbo.PU_T_STOCK_MAINT)를 읽는다.
+#     수불장·마감 = 라이브 전표(PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT)를 읽는다.
 #     웹 쓰기(/api/stock/save) = nx.stock_ledger 에 쓴다.   ⟹ 축이 다르다.
 #     이건 병행 테스트 기간의 **의도된 분리**다(CLOSE_MGMT_CANON §26):
 #       재고 금액은 실데이터만 반영해야 하므로 마감은 라이브만 본다.
@@ -1035,8 +1035,8 @@ E_CASES = [
                     (SELECT COUNT(*) FROM nx.plan_part_mat m WITH(NOLOCK)
                       WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WITH(NOLOCK)
                                         WHERE RTRIM(d.work_order)=RTRIM(m.work_order))),
-                    (SELECT COUNT(*) FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_MAT m WITH(NOLOCK)
-                      WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_DTL d WITH(NOLOCK)
+                    (SELECT COUNT(*) FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT m WITH(NOLOCK)
+                      WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_DTL d WITH(NOLOCK)
                                         WHERE RTRIM(d.WORK_ORDER)=RTRIM(m.WORK_ORDER)))""", "args": []},
          check=lambda res, ctx: _e4_link(res, ctx)),
 
@@ -1100,7 +1100,7 @@ E_CASES = [
                          GROUP BY LTRIM(RTRIM(mat_work_center_code)), LTRIM(RTRIM(mat_code))),
                   L AS (SELECT LTRIM(RTRIM(MAT_WORK_CENTER_CODE)) wc,
                                LTRIM(RTRIM(MAT_CODE)) mat, SUM(CAST(PART_PLAN_QTY AS float)) q
-                          FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_MAT WITH(NOLOCK)
+                          FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT WITH(NOLOCK)
                          WHERE ISNULL(MAT_WORK_CENTER_CODE,'')<>''
                            AND LTRIM(RTRIM(MAT_CODE)) NOT LIKE 'RAC%'
                          GROUP BY LTRIM(RTRIM(MAT_WORK_CENTER_CODE)), LTRIM(RTRIM(MAT_CODE))),
@@ -1127,7 +1127,7 @@ E_CASES = [
                          GROUP BY LTRIM(RTRIM(mat_work_center_code)), LTRIM(RTRIM(mat_code))),
                   L AS (SELECT LTRIM(RTRIM(MAT_WORK_CENTER_CODE)) wc,
                                LTRIM(RTRIM(MAT_CODE)) mat, SUM(CAST(PART_PLAN_QTY AS float)) q
-                          FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_MAT WITH(NOLOCK)
+                          FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT WITH(NOLOCK)
                          WHERE ISNULL(MAT_WORK_CENTER_CODE,'')<>''
                            AND LTRIM(RTRIM(MAT_CODE)) NOT LIKE 'RAC%'
                          GROUP BY LTRIM(RTRIM(MAT_WORK_CENTER_CODE)), LTRIM(RTRIM(MAT_CODE))),
@@ -1203,7 +1203,7 @@ E_CASES = [
                       WHERE CAST(ISNULL(STOCK_QTY,0) AS float) < 0),
                     (SELECT COUNT(*) FROM nx.PU_T_MAT_STOCK_WH w WITH(NOLOCK)
                       WHERE CAST(ISNULL(w.STOCK_QTY,0) AS float) < 0
-                        AND NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.PU_T_MAT_STOCK_WH l WITH(NOLOCK)
+                        AND NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.PU_T_MAT_STOCK_WH l WITH(NOLOCK)
                                         WHERE RTRIM(l.MAT_CODE)=RTRIM(w.MAT_CODE)
                                           AND ISNULL(RTRIM(l.GAGONG_PROC_CODE),'')
                                               =ISNULL(RTRIM(w.GAGONG_PROC_CODE),'')
