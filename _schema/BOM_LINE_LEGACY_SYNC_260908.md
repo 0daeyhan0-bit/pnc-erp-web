@@ -25,11 +25,16 @@
 | **prodsheet 소요 diff0** | `_bom_expand`(미러) vs `prod_input_soyo`(bom_line) 300표본 비-Q1000 | 97.3%→**99.7%**(299/300). AJR73364008·AEG74589808 해소 |
 | 잔여 1(AGF30058404) | 근인 | **sagub_default 드리프트**(AGF30058504→MAF: 미러0/클린1). 다필드 드리프트의 다음 필드 |
 
+## sagub_default 단계 (2026-09-08 적용, `r_bomline_sagub_align.py` 신규·백업 nx.bom_line_sagub_bak)
+- 적용: 76엣지 PR 정합(잔여0). 방향=PR_M_ITEM_BOM.SAGUB_FLAG(§3 정본).
+- 검증: ✅**원가 diff0**(67부모 변동0·sagub는 원가 무영향) · ✅**prodsheet 완전 diff0**(AGF30058404 해소=마지막 잔차) · ✅**PR vs CS SAGUB 99.91% 동일**(42,246중 39만 상이).
+- ⚠**중량정산 46부모 변동**: weight_explode(sagub≠1 동중량)가 sagub 교정으로 재산출. 대부분 **유효범위 밖**(유효범위 2~3). bom_line.sagub 드리프트 교정이라 **레거시로 수렴(정확)** 방향이나, `_explode_legacy`(5인자) standalone 호출 불가로 **중량==레거시 독립 자동검증은 미완**. → 협력사 정산금액 영향이라 **대표 판단 대기**(keep=sync정확 / rollback=중량 별도검증 후).
+
 ## 남은 단계 (단계별)
-1. **sagub_default 정합** — ★사급이라 다중소비자: 원가·**중량정산(weight_explode, sagub≠1)**·prodsheet·setin. **3중 검증 필수**(원가+중량+prodsheet). 방향=미러(레거시 현행)로.
+1. **[대표판단] sagub 중량영향 46부모 keep/rollback** — 중량정산 레거시 대사(compute_quote/CS 재계산)로 확정.
 2. 잔여 필드(kitting 등) 있으면 동일 방식.
-3. **매일마이그에 bom_line sync 편입**(항구화).
-4. 전부 diff0 도달 후 → prodsheet 등 BOM 소비자 엔진 스왑(#2~).
+3. **매일마이그에 bom_line sync 편입**(항구화) — gagong/vir/except/sagub align 순서 포함.
+4. 전부 diff0 도달 후 → prodsheet 등 BOM 소비자 엔진 스왑(#2~). **prodsheet는 이미 diff0 도달**(sagub 유지 전제).
 
 ## 롤백
 백업: nx.bom_line_bak_soyorec·bom_header_bak_soyorec / nx.bom_line_procmeta_bak / nx.bom_line_vir_bak. 각 스크립트 역적용 또는 bak에서 복원.
