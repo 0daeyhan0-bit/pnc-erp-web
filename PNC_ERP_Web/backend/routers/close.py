@@ -306,7 +306,15 @@ def _snap_mat_movavg_old(cur, ptype, period):
 
 TA_IN_TAGS = ('3', '9', 'C', 'G', 'H', 'S', 'P', 'R')      # 자재입고
 TA_OUT_TAGS = ('1', '4', '5', '6', '8', 'A', 'B', 'J')     # 자재출고
-
+# ★★2026-09-08 실측 결함(미해결·대표 결정 대기) — **자재반품이 재고를 반대로 움직인다.**
+#   자재반품 화면은 tag 'RT' 로 쓰지만 nx.PU_T_STOCK_MAINT.MAINT_TAG 가 varchar(1) 이라
+#   저장이 안 돼(F2), stock.py:521 이 **'RT'→'T'** 로 매핑해 넣는다.
+#   그런데 레거시 'T' = 생산창고 반납(자재창고로 되돌아옴=입고 성격) 이라 아래 엔진이
+#   SUM(-MAINT_QTY) 로 **부호를 반전**시킨다 → 반품(-25 저장)이 +25 로 잡힌다.
+#   실측: 260907 품목 1NHA0801206 에 반품 25 삽입 → net +25 (감소해야 하는데 증가).
+#   ⟹ 고치려면 (a)MAINT_TAG varchar(4) 확장 후 'RT' 직접 저장+TA_OUT_TAGS 등록 또는
+#      (b)미사용 1글자 출고태그 신설. 미러 재복제·화면 표시 영향이 있어 결정 대기.
+#   정본 _schema/CLOSE_REDESIGN.md §11.
 
 def _ta_rnd(x):
     """T-SQL ROUND(x,0) = 반올림(.5 는 0 에서 먼 쪽). 파이썬 round() 는 은행가반올림이라 못 씀."""
@@ -770,7 +778,7 @@ def _snap_mat(cur, ptype, period):
 # ★한계(정직히 기록): 이 앱은 세션 인증이 없고 사용자 식별은 프론트 localStorage 다.
 #   즉 payload 의 user 는 위조 가능하며, 이 게이트는 **오조작 방지**지 보안 인증이 아니다.
 #   진짜 인증은 로그인/세션 도입 시 함께 해결해야 한다(별도 과제).
-PERM_SID = "close"
+PERM_SID = "close"   # ★은퇴(2026-09-08) — 마감 권한은 시스템관리자만. 개별부여 경로 제거됨.
 
 def _assert_can_close(cur, user, what="마감"):
     u = str(user or "").strip()
@@ -785,16 +793,13 @@ def _assert_can_close(cur, user, what="마감"):
             if "시스템관리자" in (_json.loads(r[0]) or []):
                 return "시스템관리자"
     except Exception:
-        pass          # 계정 테이블이 아직 없으면 ②로 판정(권한 없으면 어차피 거부)
-    # ② 개별 부여 권한
-    try:
-        cur.execute("""SELECT can_edit FROM nx.user_perm WHERE user_id=? AND sid=?""", u, PERM_SID)
-        r = cur.fetchone()
-        if r and int(r[0] or 0) == 1:
-            return "개별권한"
-    except Exception:
-        pass
-    raise HTTPException(403, f"{what} 권한이 없습니다({u}) — 시스템관리자 또는 '마감관리' 수정권한이 필요합니다.")
+        pass          # 계정 테이블 조회 실패 → 아래에서 거부(deny by default)
+    # ★2026-09-08 대표 확정: **일·월 마감 권한은 관리자(시스템관리자)만.**
+    #   종전엔 ② nx.user_perm(sid='close', can_edit=1) 개별부여 경로가 있었으나 제거한다.
+    #   실측(2026-09-08): 'close' 개별권한 행 25건이 **전부 can_edit=0** 이라 실제로 마감 가능한
+    #   사람은 이미 시스템관리자 9명뿐이었다 — 이 변경으로 잃는 사용자는 없다(경로만 명시적으로 닫는다).
+    #   마감 해제(_assert_reopen)도 시스템관리자만이므로 실행·해제가 같은 기준으로 통일된다.
+    raise HTTPException(403, f"{what} 권한이 없습니다({u}) — 마감은 시스템관리자만 가능합니다.")
 
 
 def _assert_reopen(cur, user):
