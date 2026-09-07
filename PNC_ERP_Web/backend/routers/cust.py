@@ -223,3 +223,102 @@ def line_list(q: str = Query("")):
         nx.close()
 
 # ==================================================================================
+
+# ============ 거래처 마감적용일자 관리 (레거시 w_cm_master_055 하단 그리드) ============
+#   원천 = nx.CM_M_CUST_MAGAM (PK: CUST_CODE + APPLY_YYMM)
+#   ★이 테이블은 이미 매입/매출마감 계산이 읽고 있다(common.py:562,767 · live_api.py:299 등).
+#     "적용년월 이하의 최신 1건"을 골라 그 달의 마감일(MAGAM_DAY)로 쓴다 —
+#     즉 행 하나가 그 시점부터의 마감일을 정하는 **이력 테이블**이다(덮어쓰기 아님).
+#   ★쓰기는 nx 만(§1). 라이브 PARTNER_ERP 무변경.
+
+@router.get("/api/cust/magam/list")
+def cust_magam_list(cust: str = Query("")):
+    """거래처별 마감적용일자 이력 — 적용년월 내림차순(최신이 위)."""
+    cc = str(cust or "").strip()
+    if not cc:
+        return {"rows": [], "cnt": 0}
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("""SELECT RTRIM(APPLY_YYMM), RTRIM(ISNULL(MAGAM_DAY,'')),
+                              RTRIM(ISNULL(COMP_GUBUN,'')), ISNULL(UPDATE_USER_ID,''),
+                              CONVERT(varchar(19),UPDATE_DATETIME,120)
+                         FROM nx.CM_M_CUST_MAGAM WITH(NOLOCK)
+                        WHERE RTRIM(CUST_CODE)=? ORDER BY APPLY_YYMM DESC""", cc)
+        rows = [{"ym": r[0], "day": r[1], "comp": r[2], "user": r[3], "dt": r[4] or ""}
+                for r in cur.fetchall()]
+        return {"rows": rows, "cnt": len(rows)}
+    finally:
+        nx.close()
+
+
+@router.post("/api/cust/magam/save")
+def cust_magam_save(payload: dict = Body(...)):
+    """마감적용일자 저장(다건 upsert). rows=[{ym,day,comp}] · ym=YYMM(4) · day=1~31.
+
+       ★전량 스냅샷이 아니라 **보낸 행만** upsert 한다 — 삭제는 /delete 로 명시적으로.
+         (권한저장에서 겪은 '보낸 것만 반영' 함정과 반대로, 여기선 이력이라 삭제가 드물다)"""
+    cc = str(payload.get("cust") or "").strip()
+    rows = payload.get("rows", []) or []
+    user = (str(payload.get("user") or "웹")).strip()[:20]
+    if not cc:
+        return {"ok": False, "detail": "거래처코드 필수"}
+    errs, ok_n = [], 0
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        for i, r in enumerate(rows, 1):
+            ym = "".join(ch for ch in str(r.get("ym") or "") if ch.isdigit())
+            if len(ym) == 6:            # YYYYMM 로 들어오면 뒤 4자리
+                ym = ym[2:]
+            day = "".join(ch for ch in str(r.get("day") or "") if ch.isdigit())
+            comp = str(r.get("comp") or "").strip()[:10]
+            if len(ym) != 4:
+                errs.append(f"{i}행: 적용년월은 YYMM 4자리"); continue
+            if not day or not (1 <= int(day) <= 31):
+                errs.append(f"{i}행: 자재마감일자는 1~31"); continue
+            day = day.zfill(2)
+            cur.execute("""UPDATE nx.CM_M_CUST_MAGAM
+                              SET MAGAM_DAY=?, COMP_GUBUN=?, UPDATE_USER_ID=?,
+                                  UPDATE_DATETIME=getdate(), UPDATE_WINDOW='web_custmagam'
+                            WHERE RTRIM(CUST_CODE)=? AND RTRIM(APPLY_YYMM)=?""",
+                        day, comp, user, cc, ym)
+            if cur.rowcount == 0:
+                cur.execute("""INSERT INTO nx.CM_M_CUST_MAGAM
+                                 (CUST_CODE,APPLY_YYMM,MAGAM_DAY,COMP_GUBUN,
+                                  UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                               VALUES(?,?,?,?,?,getdate(),'web_custmagam')""",
+                            cc, ym, day, comp, user)
+            ok_n += 1
+        if errs:
+            nx.rollback()
+            return {"ok": False, "detail": " / ".join(errs[:5])}
+        nx.commit()
+        return {"ok": True, "saved": ok_n}
+    except Exception as e:
+        nx.rollback()
+        return {"ok": False, "detail": str(e)[:200]}
+    finally:
+        nx.close()
+
+
+@router.post("/api/cust/magam/delete")
+def cust_magam_delete(payload: dict = Body(...)):
+    """마감적용일자 행 삭제 — 근거키(거래처+적용년월) 스코프로만(§1-3)."""
+    cc = str(payload.get("cust") or "").strip()
+    yms = [("".join(ch for ch in str(x) if ch.isdigit()))[-4:] for x in (payload.get("yms", []) or [])]
+    yms = [y for y in yms if len(y) == 4]
+    if not cc or not yms:
+        return {"ok": False, "detail": "거래처코드·적용년월 필요"}
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        n = 0
+        for ym in yms:
+            cur.execute("""DELETE FROM nx.CM_M_CUST_MAGAM
+                            WHERE RTRIM(CUST_CODE)=? AND RTRIM(APPLY_YYMM)=?""", cc, ym)
+            n += cur.rowcount
+        nx.commit()
+        return {"ok": True, "deleted": n}
+    except Exception as e:
+        nx.rollback()
+        return {"ok": False, "detail": str(e)[:200]}
+    finally:
+        nx.close()
