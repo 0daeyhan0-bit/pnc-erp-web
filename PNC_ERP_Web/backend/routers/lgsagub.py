@@ -101,8 +101,8 @@ def _matcost_asof(ym6):
     """절삭재료비 신규 사급가 as-of: {(metal,diam,thick): TOT_COST}, APPLY_YYYYMM ≤ ym6(YYYYMM) 최신."""
     c2 = _conn(); cu = c2.cursor()
     try:
-        cu.execute("""SELECT METAL_GUBUN,ITEM_DIAM,ITEM_THICK,TOT_COST FROM PARTNER_ERP.dbo.CS_M_METERIAL_COST
-            WHERE APPLY_YYYYMM=(SELECT MAX(APPLY_YYYYMM) FROM PARTNER_ERP.dbo.CS_M_METERIAL_COST WHERE APPLY_YYYYMM<=?)""", ym6)
+        cu.execute("""SELECT METAL_GUBUN,ITEM_DIAM,ITEM_THICK,TOT_COST FROM PARTNER_ERP_TEST3.nx.CS_M_METERIAL_COST
+            WHERE APPLY_YYYYMM=(SELECT MAX(APPLY_YYYYMM) FROM PARTNER_ERP_TEST3.nx.CS_M_METERIAL_COST WHERE APPLY_YYYYMM<=?)""", ym6)
         return {(str(r[0]).strip(), float(r[1] or 0), float(r[2] or 0)): float(r[3] or 0) for r in cu.fetchall()}
     finally:
         c2.close()
@@ -962,11 +962,11 @@ def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: st
             cn2 = _conn(); cur2 = cn2.cursor()
             try:
                 cur2.execute(f"""SELECT UPPER(LTRIM(RTRIM(mat))) it, SUM(qty) q FROM (
-                      SELECT MAT_CODE mat, CONVERT(float,ISNULL(MAINT_QTY,0)) qty FROM dbo.PU_T_STOCK_MAINT
+                      SELECT MAT_CODE mat, CONVERT(float,ISNULL(MAINT_QTY,0)) qty FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT
                         WHERE LEFT(MAINT_YMD,4) IN ({inl}) AND MAINT_TAG IN ('9','S','C','G','H')
                           AND ((ISNULL(INSP_FLAG,'N') IN ('','N')) OR (ISNULL(INSP_FLAG,'N') IN ('S','F') AND INSP_PROC_YMD >= ''))
                       UNION ALL
-                      SELECT MAT_CODE, CONVERT(float,ISNULL(MAINT_QTY,0)) FROM dbo.PU_T_STOCK_MAINT_C
+                      SELECT MAT_CODE, CONVERT(float,ISNULL(MAINT_QTY,0)) FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C
                         WHERE LEFT(MAINT_YMD,4) IN ({inl}) AND DIVISION='P'
                     ) t GROUP BY UPPER(LTRIM(RTRIM(mat)))""")
                 for r in cur2.fetchall():

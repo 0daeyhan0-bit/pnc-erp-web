@@ -629,7 +629,7 @@ def _step5_item(cur):
     #   AJR30133610(웹 등록·라이브 미등록·모델/주문정보 없음)이 되살아나
     #   plan_item_dtl 15행 → plan_part_dtl 60행 → plan_part_mat **315키**로 번졌다.
     #   ⟹ 등록여부는 라이브에서 직접 읽는다(라이브는 읽기전용 §1-1, 조회는 허용).
-    cur.execute("SELECT ITEM_CODE FROM PARTNER_ERP.dbo.PR_M_ITEM")
+    cur.execute("SELECT ITEM_CODE FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM")
     _known = set(str(r[0]).strip() for r in cur.fetchall())
     cur.execute("""IF OBJECT_ID('nx.plan_item_dtl') IS NULL CREATE TABLE nx.plan_item_dtl(
         PLAN_YMD varchar(6),WORK_ORDER varchar(20),SPLIT_WORK_ORDER varchar(30),C_ITEM_CODE varchar(20),

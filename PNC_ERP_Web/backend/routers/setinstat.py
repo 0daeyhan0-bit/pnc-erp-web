@@ -509,7 +509,7 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
             ch = _wos[i:i + 900]
             cur.execute("""SELECT RTRIM(WORK_ORDER),
                                   MAX(ISNULL(LG_INPUT_YMD,'')) + MAX(ISNULL(LG_INPUT_HM,''))
-                             FROM PARTNER_ERP.dbo.PR_T_PLAN_DTL WITH(NOLOCK)
+                             FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_DTL WITH(NOLOCK)
                             WHERE RTRIM(WORK_ORDER) IN (%s)
                             GROUP BY RTRIM(WORK_ORDER)""" % ",".join("?" * len(ch)), *ch)
             for a, b in cur.fetchall():

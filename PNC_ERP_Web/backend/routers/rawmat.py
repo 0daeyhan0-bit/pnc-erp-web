@@ -156,7 +156,7 @@ def _mc_obj(r, user, dt):
 
 def _mc_live_rows(cur, metal, ym):
     cur.execute(f"""SELECT {_MC_COLS}, ISNULL(UPDATE_USER_ID,INSERT_USER_ID), ISNULL(UPDATE_DATETIME,INSERT_DATETIME)
-        FROM dbo.CS_M_METERIAL_COST WHERE LTRIM(RTRIM(METAL_GUBUN))=? AND LTRIM(RTRIM(APPLY_YYYYMM))=?
+        FROM PARTNER_ERP_TEST3.nx.CS_M_METERIAL_COST WHERE LTRIM(RTRIM(METAL_GUBUN))=? AND LTRIM(RTRIM(APPLY_YYYYMM))=?
         ORDER BY ITEM_DIAM, ITEM_THICK""", metal, ym)
     n = len(_MC_MAP)
     return [_mc_obj(r[:n], r[n], r[n + 1]) for r in cur.fetchall()]
@@ -194,11 +194,11 @@ def rawmat_matcost(metal: str = Query("CU"), ym: str = Query("")):
     ymq = "".join(ch for ch in str(ym or "") if ch.isdigit())[:6]
     cn = _conn(); cur = cn.cursor(); nx = _nx(); curnx = nx.cursor()
     try:
-        cur.execute("SELECT DISTINCT LTRIM(RTRIM(METAL_GUBUN)) FROM dbo.CS_M_METERIAL_COST WHERE ISNULL(METAL_GUBUN,'')<>'' ORDER BY 1")
+        cur.execute("SELECT DISTINCT LTRIM(RTRIM(METAL_GUBUN)) FROM PARTNER_ERP_TEST3.nx.CS_M_METERIAL_COST WHERE ISNULL(METAL_GUBUN,'')<>'' ORDER BY 1")
         metals = [str(r[0]).strip() for r in cur.fetchall()]
         if metal not in metals and metals:
             metal = "CU" if "CU" in metals else metals[0]
-        cur.execute("SELECT DISTINCT LTRIM(RTRIM(APPLY_YYYYMM)) FROM dbo.CS_M_METERIAL_COST WHERE LTRIM(RTRIM(METAL_GUBUN))=?", metal)
+        cur.execute("SELECT DISTINCT LTRIM(RTRIM(APPLY_YYYYMM)) FROM PARTNER_ERP_TEST3.nx.CS_M_METERIAL_COST WHERE LTRIM(RTRIM(METAL_GUBUN))=?", metal)
         live_months = {str(r[0]).strip() for r in cur.fetchall()}
         web_months = _mc_web_months(curnx, metal)
         months = sorted(live_months | web_months, reverse=True)
@@ -313,7 +313,7 @@ def rawmat_matcost_upload(file: UploadFile = File(...), metal: str = Form("CU"),
     try:
         # 템플릿 = 해당 소재 최신월(대상월 제외, 라이브∪웹)
         wm = sorted([m for m in _mc_web_months(cur, metal) if m != ymd], reverse=True)
-        curL.execute("SELECT TOP 1 LTRIM(RTRIM(APPLY_YYYYMM)) FROM dbo.CS_M_METERIAL_COST WHERE LTRIM(RTRIM(METAL_GUBUN))=? AND LTRIM(RTRIM(APPLY_YYYYMM))<>? ORDER BY 1 DESC", metal, ymd)
+        curL.execute("SELECT TOP 1 LTRIM(RTRIM(APPLY_YYYYMM)) FROM PARTNER_ERP_TEST3.nx.CS_M_METERIAL_COST WHERE LTRIM(RTRIM(METAL_GUBUN))=? AND LTRIM(RTRIM(APPLY_YYYYMM))<>? ORDER BY 1 DESC", metal, ymd)
         lr = curL.fetchone(); lm = str(lr[0]).strip() if lr else None
         tmpl_ym = max([x for x in (wm[0] if wm else None, lm) if x], default=None)
         tmpl = {}

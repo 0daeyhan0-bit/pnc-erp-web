@@ -512,7 +512,7 @@ def gagong_plan4w(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
             d6t = _y.strftime('%y%m%d')
         wcp = (wc.strip() or 'P2')
         # ★계획소스는 라이브 직독(PARTNER_ERP.dbo) — 레거시 SP가 라이브를 읽고, nx 계획미러는 이 조인분이 stale(6222 vs 9521행)이라 diff0 위해 라이브 필수. (nx 계획테이블 동기화는 컷오버 과제)
-        S = "PARTNER_ERP.dbo"
+        S = "PARTNER_ERP_TEST3.nx"
         # 날짜 캘린더: dates[0]=기준일(=col1 당일이전누적 plan_ymd<=기준일), 이후 plan_ymd=기준일+1..
         da = _dt.date(2000+int(d6f[:2]), int(d6f[2:4]), int(d6f[4:6]))
         db = _dt.date(2000+int(d6t[:2]), int(d6t[2:4]), int(d6t[4:6]))

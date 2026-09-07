@@ -198,7 +198,7 @@ def _next_wo(cur, line, n=1):
     mx = 0
     for sql in ("""SELECT MAX(CAST(SUBSTRING(work_order,3,6) AS bigint)) FROM nx.prod_plan_input
                     WHERE work_order LIKE 'WO[0-9][0-9][0-9][0-9][0-9][0-9][0-9]%'""",
-                """SELECT MAX(CAST(SUBSTRING(WORK_ORDER,3,6) AS bigint)) FROM PARTNER_ERP.dbo.PR_T_PLAN_INPUT WITH(NOLOCK)
+                """SELECT MAX(CAST(SUBSTRING(WORK_ORDER,3,6) AS bigint)) FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_INPUT WITH(NOLOCK)
                     WHERE WORK_ORDER LIKE 'WO[0-9][0-9][0-9][0-9][0-9][0-9][0-9]%'"""):
         try:
             v = cur.execute(sql).fetchone()[0]

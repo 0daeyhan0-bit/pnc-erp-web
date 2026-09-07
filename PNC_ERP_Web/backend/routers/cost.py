@@ -647,7 +647,7 @@ def cost_nx_bulk_v2(p: dict = Body(...)):
 @router.post("/api/cost/nx/bulk_actual")
 def cost_nx_bulk_actual(p: dict = Body(...)):
     """★실제손익(월별매칭 · COSTANALYSIS_V2 §10~12) — 원가분석 '실제' 모드. 이론(bulk_v2 단일 as-of)의 대응.
-       판가 = 그달 리시빙 실적 가중평균(PARTNER_ERP.dbo.sa_t_recv_dtl: Σ order_qty×item_cost / Σ order_qty).
+       판가 = 그달 리시빙 실적 가중평균(PARTNER_ERP_TEST3.nx.sa_t_recv_dtl: Σ order_qty×item_cost / Σ order_qty).
        원가 = 그달 이동평균(nx.mat_stock_daily) 재료비 + 가공/일반/운반/이윤. 판가·원가 같은달 매칭(§11 논리필수).
        from_ym~to_ym(YYMM). 검증 = §12 actual2 diff0(dev만). 로직정본 = _harness 배치 actual2.py 이식."""
     if NxCostEngine is None: raise HTTPException(500, "nx엔진 로드 실패")

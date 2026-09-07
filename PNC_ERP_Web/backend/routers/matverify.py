@@ -58,14 +58,14 @@ def _build(ct, fr, to):
         sup = []   # (mat, code, name, ctype, kind, q, amt)
         cu.execute("""SELECT UPPER(LTRIM(RTRIM(a.MAT_CODE))), a.CUST_CODE, MAX(c.CUST_DESC), MAX(ISNULL(c.CUST_TYPE,'')),
               SUM(CONVERT(float,ISNULL(a.MAINT_QTY,0))), SUM(CONVERT(float,ISNULL(a.MAINT_AMT,0)))
-            FROM dbo.PU_T_STOCK_MAINT a JOIN dbo.CM_M_CUST c ON a.CUST_CODE=c.CUST_CODE
+            FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON a.CUST_CODE=c.CUST_CODE
             WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG IN ('9','S','C','G','H')
             GROUP BY UPPER(LTRIM(RTRIM(a.MAT_CODE))), a.CUST_CODE""", fr, to)
         for m, cc, cnm, cty, q, amt in cu.fetchall():
             sup.append((_U(m), str(cc).strip(), cnm, str(cty or "").strip(), "협력", float(q or 0), float(amt or 0)))
         cu.execute("""SELECT UPPER(LTRIM(RTRIM(a.MAT_CODE))), a.CUST_CODE, MAX(ISNULL(c.CUST_DESC,a.CUST_CODE)),
               SUM(CONVERT(float,ISNULL(a.MAINT_QTY,0))), SUM(CONVERT(float,ISNULL(a.MAINT_AMT*ISNULL(a.EXCHANGE_RATE,1),0)))
-            FROM dbo.PU_T_STOCK_MAINT_C a LEFT JOIN dbo.CM_M_CUST c ON a.CUST_CODE=c.CUST_CODE
+            FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C a LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON a.CUST_CODE=c.CUST_CODE
             WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.DIVISION='P'
             GROUP BY UPPER(LTRIM(RTRIM(a.MAT_CODE))), a.CUST_CODE""", fr, to)
         for m, cc, cnm, q, amt in cu.fetchall():
@@ -82,12 +82,12 @@ def _build(ct, fr, to):
             SUM(CASE WHEN MAINT_TAG='5' THEN -CONVERT(float,ISNULL(MAINT_QTY,0)) ELSE 0 END) sagub,
             SUM(CASE WHEN MAINT_TAG IN ('1','2') THEN CONVERT(float,ISNULL(MAINT_QTY,0)) ELSE 0 END) adj,
             SUM(CASE WHEN MAINT_TAG='3' THEN 0 ELSE CONVERT(float,ISNULL(MAINT_QTY,0)) END) netmv
-          FROM dbo.PU_T_STOCK_MAINT WHERE MAINT_YMD BETWEEN ? AND ? GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", fr, to)
+          FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT WHERE MAINT_YMD BETWEEN ? AND ? GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", fr, to)
         mv = {_U(r[0]): {"gagong": float(r[1] or 0), "sagub": float(r[2] or 0), "adj": float(r[3] or 0), "netmv": float(r[4] or 0)} for r in cu.fetchall()}
         # (참고) 전이동 누적 재고(≤to): PU 전 태그 + 수입(_C). — 실재고 표시엔 안 씀(정본=자재일마감 사용). 내부 참고만.
-        cu.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) mat, SUM(CONVERT(float,ISNULL(MAINT_QTY,0))) q FROM dbo.PU_T_STOCK_MAINT WHERE MAINT_YMD <= ? GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))", to)
+        cu.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) mat, SUM(CONVERT(float,ISNULL(MAINT_QTY,0))) q FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT WHERE MAINT_YMD <= ? GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))", to)
         stock_cum = {_U(r[0]): float(r[1] or 0) for r in cu.fetchall()}
-        cu.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) mat, SUM(CONVERT(float,ISNULL(MAINT_QTY,0))) q FROM dbo.PU_T_STOCK_MAINT_C WHERE MAINT_YMD <= ? AND DIVISION='P' GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))", to)
+        cu.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) mat, SUM(CONVERT(float,ISNULL(MAINT_QTY,0))) q FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C WHERE MAINT_YMD <= ? AND DIVISION='P' GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))", to)
         for r in cu.fetchall():
             m = _U(r[0]); stock_cum[m] = stock_cum.get(m, 0.0) + float(r[1] or 0)
         # ★정본재고 = 자재일마감(이동평균) nx.mat_stock_daily. 실재고=정본 최신스냅샷(≤to).
@@ -116,7 +116,7 @@ def _build(ct, fr, to):
             if kind == "수입": imp_net[m] = imp_net.get(m, 0.0) + q
 
         # 4) 리시빙(참고)
-        cu.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), SUM(CONVERT(float,ISNULL(RECV_QTY,0))) FROM dbo.SA_T_LG_RECEIVING_DTL WHERE RECEIVING_YMD BETWEEN ? AND ? GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))", fr, to)
+        cu.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), SUM(CONVERT(float,ISNULL(RECV_QTY,0))) FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL WHERE RECEIVING_YMD BETWEEN ? AND ? GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))", fr, to)
         recv = {_U(r[0]): float(r[1] or 0) for r in cu.fetchall()}
 
         # 5) items 조립 (prim_bases만). vendors=전 공급처(유형태그). buy_all=Σ공급, prim=선택유형 공급(단가/업체매입).

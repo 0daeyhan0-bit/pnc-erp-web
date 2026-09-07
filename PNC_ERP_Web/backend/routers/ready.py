@@ -176,7 +176,7 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
                 #   미러가 늦어 nx 에 없는 품목은 라이브 값이 잡힌다(누락 방지).
                 #   (구버전은 기본 live 라 웹 실적이 안 보였다 — 실측 466 팝업 18건 중
                 #    6건이 라이브 값으로 표시돼 nx 실적과 어긋남.)
-                _lv = "PARTNER_ERP.dbo"; _nxs = "PARTNER_ERP_TEST3.nx"
+                _lv = "PARTNER_ERP_TEST3.nx"; _nxs = "PARTNER_ERP_TEST3.nx"
                 if str(src).strip() == "live":
                     _sel = f"""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), SUM(CAST(STOCK_QTY AS float))
                                  FROM {_lv}.PU_T_MAT_STOCK_WH WITH(NOLOCK)
@@ -347,7 +347,7 @@ def ready_sheet(sheet_no: str = Query(...)):
     try:
         row = _fetch(ncur, "nx"); src = "nx"; dcur = ncur; dsch = "nx"
         if not row:
-            row = _fetch(ccur, "PARTNER_ERP.dbo"); src = "live"; dcur = ccur; dsch = "PARTNER_ERP.dbo"
+            row = _fetch(ccur, "PARTNER_ERP_TEST3.nx"); src = "live"; dcur = ccur; dsch = "PARTNER_ERP_TEST3.nx"
         if not row:
             return {"ok": False, "detail": f"전표 {sn} 없음"}
         g = lambda i: ("" if row[i] is None else str(row[i]).strip())

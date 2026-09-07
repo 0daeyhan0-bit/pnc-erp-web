@@ -37,7 +37,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
     #   live = 레거시 라이브 · nx = 레거시 미러(nx) · new = ★웹 자체편성(신규DB, 기본값)
     #   계획 원천만 바꾸고 마스터·재고·실적은 nx 그대로 → '계획' 차이만 순수 비교.
     _src = str(src).strip()
-    _PSCH = "PARTNER_ERP.dbo" if _src == "live" else "PARTNER_ERP_TEST3.nx"
+    _PSCH = "PARTNER_ERP_TEST3.nx" if _src == "live" else "PARTNER_ERP_TEST3.nx"
     PLAN_T = ("PARTNER_ERP_TEST3.nx.v_plan_part_copy_new" if _src == "new"
               else f"{_PSCH}.PR_T_PLAN_PART_COPY")
     cn = _conn(); cur = cn.cursor()
@@ -537,7 +537,7 @@ def plan_part410_lines(src: str = Query("new")):
            (라인칸에 양산라인과 주문구분이 함께 들어오는 구조).
        정렬 = 레거시 목록 순서와 같게 ①코드순 → ②PR003 SORT_SEQ 순."""
     _s = str(src).strip()
-    SCH = "PARTNER_ERP.dbo" if _s == "live" else "PARTNER_ERP_TEST3.nx"
+    SCH = "PARTNER_ERP_TEST3.nx" if _s == "live" else "PARTNER_ERP_TEST3.nx"
     _t = ("PARTNER_ERP_TEST3.nx.v_plan_part_copy_new" if _s == "new"
           else f"{SCH}.PR_T_PLAN_PART_COPY")
     cn = _conn(); cur = cn.cursor()
@@ -596,7 +596,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
     #   new 는 계획 원천만 nx.v_plan_part_copy_new(=nx.plan_part_dtl 호환뷰)로 바꾸고,
     #   마스터·재고·실적은 nx 그대로 쓴다 → 레거시와 '계획' 차이만 순수 비교 가능.
     _src = str(src).strip()
-    SCH = "PARTNER_ERP.dbo" if _src == "live" else "PARTNER_ERP_TEST3.nx"
+    SCH = "PARTNER_ERP_TEST3.nx" if _src == "live" else "PARTNER_ERP_TEST3.nx"
     PLAN_T = ("PARTNER_ERP_TEST3.nx.v_plan_part_copy_new" if _src == "new"
               else f"{SCH}.PR_T_PLAN_PART_COPY")
     cn = _conn(); cur = cn.cursor()
@@ -668,7 +668,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
               SUM(CAST(a.PART_PLAN_QTY AS float)) pl
             FROM {PLAN_T} a WITH(NOLOCK)
             -- ★품목마스터는 소스토글과 무관하게 nx.item 고정(§1-9 클린 정본).
-            --   {SCH}.item 으로 두면 src=live 에서 PARTNER_ERP.dbo.item(미존재) 을 찾아 500.
+            --   {SCH}.item 으로 두면 src=live 에서 PARTNER_ERP_TEST3.nx.item(미존재) 을 찾아 500.
             JOIN PARTNER_ERP_TEST3.nx.item b WITH(NOLOCK) ON a.ASSY_ITEM_CODE=b.ITEM_CODE
             JOIN PARTNER_ERP_TEST3.nx.item ib WITH(NOLOCK) ON a.ITEM_CODE=ib.ITEM_CODE
             JOIN {SCH}.PR_M_PROC_GAGONG pg WITH(NOLOCK) ON a.GAGONG_PROC_CODE=pg.GAGONG_PROC_CODE

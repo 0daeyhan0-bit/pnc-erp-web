@@ -1384,7 +1384,7 @@ S040 = "PARTNER_ERP_TEST3.nx"
 @router.get("/api/sale040/lines")
 def sale040_lines(src: str = Query("nx")):
     """라인 드롭다운 = CM_M_MASTER_DETAIL(KIND_CODE='PR003') + 계획에 실제 쓰인 코드."""
-    SCH = "PARTNER_ERP.dbo" if str(src).strip() == "live" else "PARTNER_ERP_TEST3.nx"
+    SCH = "PARTNER_ERP_TEST3.nx" if str(src).strip() == "live" else "PARTNER_ERP_TEST3.nx"
     cn = _conn() if str(src).strip() == "live" else _nx()
     cur = cn.cursor()
     try:
@@ -1421,7 +1421,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
     #     아예 없으므로(편성 미구현) 그 두 갈래는 레거시 원천을 그대로 쓴다.
     #     → 화면에서 'LG계획 부분만' 웹편성으로 갈아끼워 레거시와 대조하는 용도.
     _src = str(src).strip()
-    SCH = "PARTNER_ERP.dbo" if _src == "live" else "PARTNER_ERP_TEST3.nx"
+    SCH = "PARTNER_ERP_TEST3.nx" if _src == "live" else "PARTNER_ERP_TEST3.nx"
     # ★★040 전용 뷰를 쓴다(2026-09-02 교정). v_plan_item_dtl_new 를 쓰면 안 된다.
     #   경위 — 040 은 **당김 전 원본계획일자**가 필요해서 v_plan_item_dtl_new 의 원천을
     #   nx.plan_item_dtl(당김 후) → nx.sale_plan_item(원본)으로 바꿨었다. 그런데 그 뷰는

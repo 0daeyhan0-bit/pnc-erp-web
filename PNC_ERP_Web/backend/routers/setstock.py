@@ -20,7 +20,7 @@ from common import _conn, _nx, _d6, _assert_open
 
 router = APIRouter()
 
-LIVE = "PARTNER_ERP.dbo"
+LIVE = "PARTNER_ERP_TEST3.nx"
 NX = "PARTNER_ERP_TEST3.nx"
 
 # 조정구분 — 레거시 dw_pu_stock_285_c1 의 maint_tag 선택지

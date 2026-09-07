@@ -21,7 +21,7 @@ from common import _conn, _nx, _nx_tx, _d6
 
 router = APIRouter()
 
-LIVE = "PARTNER_ERP.dbo"
+LIVE = "PARTNER_ERP_TEST3.nx"
 NXS = "PARTNER_ERP_TEST3.nx"
 NX_SEQ_BASE = 9000000     # nx 채번 시작 — 라이브 SEQ(현재 995)와 절대 겹치지 않게
 

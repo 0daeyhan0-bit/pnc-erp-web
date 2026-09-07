@@ -147,7 +147,7 @@ def _mat_moves(cur, d_from, d_to):
           SUM(CASE WHEN MAINT_QTY<0 THEN -CAST(MAINT_QTY AS float) ELSE 0 END),
           SUM(CASE WHEN MAINT_TAG IN('9','S') THEN CAST(MAINT_QTY AS float) ELSE 0 END),
           SUM(CASE WHEN MAINT_TAG IN('9','S') THEN CAST(MAINT_AMT AS float) ELSE 0 END)
-        FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT
+        FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT
         WHERE MAINT_YMD BETWEEN ? AND ? AND MAT_CODE IS NOT NULL
         GROUP BY MAINT_YMD, UPPER(LTRIM(RTRIM(MAT_CODE)))""", d_from, d_to)
     for y, m, net, pos, neg, pq, pamt in cur.fetchall():
@@ -159,7 +159,7 @@ def _mat_moves(cur, d_from, d_to):
     cur.execute("""SELECT MAINT_YMD, UPPER(LTRIM(RTRIM(MAT_CODE))), DIVISION,
           SUM(CAST(MAINT_QTY AS float)),
           SUM(CAST(MAINT_AMT AS float)*ISNULL(CAST(EXCHANGE_RATE AS float),1))
-        FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT_C
+        FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C
         WHERE MAINT_YMD BETWEEN ? AND ? AND MAT_CODE IS NOT NULL
         GROUP BY MAINT_YMD, UPPER(LTRIM(RTRIM(MAT_CODE))), DIVISION""", d_from, d_to)
     for y, m, div, q, amtk in cur.fetchall():
@@ -210,7 +210,7 @@ def _mat_base(cur, target):
         m = 12; y -= 1
     prev_ym = f"{y:02d}{m:02d}"
     cur.execute("""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), SUM(CAST(STOCK_QTY AS float)), SUM(CAST(STOCK_AMT AS float))
-                     FROM PARTNER_ERP.dbo.PU_T_MONTH_STOCK_WH
+                     FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH
                     WHERE STOCK_YYMM=? AND CUST_CODE='Z99990' AND MAT_CODE IS NOT NULL
                     GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", prev_ym)
     st = {}
@@ -329,7 +329,7 @@ def _ta_build(cur, d_from, d_to, basic):
 
     ph_in = ','.join('?' * len(TA_IN_TAGS))
     cur.execute(f"""SELECT a.MAT_CODE, SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
-                      FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                       JOIN PARTNER_ERP_TEST3.nx.item m ON a.MAT_CODE = m.ITEM_CODE
                      WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_QTY <> 0
                        AND a.MAINT_TAG IN ({ph_in})
@@ -341,7 +341,7 @@ def _ta_build(cur, d_from, d_to, basic):
     # 수입(도입): division<>'Q' = 입고(금액 = TAXPAYERS 과세표준, 이미 원화) / 'Q' = 수출출고
     cur.execute("""SELECT a.MAT_CODE, a.DIVISION, SUM(CAST(a.MAINT_QTY AS float)),
                           SUM(CAST(ISNULL(a.TAXPAYERS,0) AS float))
-                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT_C a
+                     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C a
                     WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.WH_CUST_CODE = 'Z99990'
                     GROUP BY a.MAT_CODE, a.DIVISION""", d_from, d_to)
     for m, div, q, tax in cur.fetchall():
@@ -353,20 +353,20 @@ def _ta_build(cur, d_from, d_to, basic):
 
     ph_out = ','.join('?' * len(TA_OUT_TAGS))
     cur.execute(f"""SELECT a.MAT_CODE, SUM(-CAST(a.MAINT_QTY AS float))
-                      FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                      WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG IN ({ph_out})
                      GROUP BY a.MAT_CODE""", d_from, d_to, *TA_OUT_TAGS)
     for m, q in cur.fetchall():
         slot(m)["oq"] += float(q or 0)
 
     cur.execute("""SELECT a.MAT_CODE, SUM(-CAST(a.MAINT_QTY AS float))
-                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                      JOIN PARTNER_ERP_TEST3.nx.item m ON a.MAT_CODE = m.ITEM_CODE
                     WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG = 'T' GROUP BY a.MAT_CODE""", d_from, d_to)
     for m, q in cur.fetchall():
         slot(m)["tq"] += float(q or 0)
     cur.execute("""SELECT a.MAT_CODE, SUM(CAST(a.MAINT_QTY AS float))
-                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                     WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG = '2' GROUP BY a.MAT_CODE""", d_from, d_to)
     for m, q in cur.fetchall():
         slot(m)["tq"] += float(q or 0)
@@ -443,7 +443,7 @@ def _ta_basic(cur, yymm):
     if rows:
         return {str(r[0]): (float(r[1] or 0), float(r[2] or 0)) for r in rows}, prev, "확정 월스냅샷"
     cur.execute("""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), SUM(CAST(STOCK_QTY AS float)), SUM(CAST(STOCK_AMT AS float))
-                     FROM PARTNER_ERP.dbo.PU_T_MONTH_STOCK_WH
+                     FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH
                     WHERE STOCK_YYMM=? AND CUST_CODE='Z99990' AND MAT_CODE IS NOT NULL
                     GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", prev)
     rows = cur.fetchall()
@@ -695,7 +695,7 @@ def _mv_base(cur, target):
         m = 12; y -= 1
     prev = f"{y:02d}{m:02d}"
     cur.execute("""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), SUM(CAST(STOCK_QTY AS float)), SUM(CAST(STOCK_AMT AS float))
-                     FROM PARTNER_ERP.dbo.PU_T_MONTH_STOCK_WH
+                     FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH
                     WHERE STOCK_YYMM=? AND CUST_CODE='Z99990' AND MAT_CODE IS NOT NULL
                     GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", prev)
     st = {}

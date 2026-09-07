@@ -34,7 +34,7 @@ def partner_workcenters(request: Request, src: str = Query("nx")):
         cn = _conn(); cur = cn.cursor()
         try:
             cur.execute("""SELECT pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE) nm, COUNT(*) n
-                FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_MAT pp
+                FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT pp
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE=pp.MAT_WORK_CENTER_CODE
                 LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE=pp.MAT_WORK_CENTER_CODE
                 WHERE pp.MAT_WORK_CENTER_CODE>'' GROUP BY pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE)
@@ -411,7 +411,7 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
               pp.assy_item_code assy, pp.mat_code mat, pp.mat_flag matflag,
               CAST(pp.lot_qty AS float) lot, CAST(pp.plan_qty AS float) planq, CAST(pp.part_plan_qty AS float) partq,
               pp.part_plan_ymd ppy
-            FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_MAT pp
+            FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT pp
             WHERE {where}
             ORDER BY pp.mat_work_center_code, pp.split_work_order, pp.assy_item_code, pp.mat_code""", *p)
         cols = [d[0] for d in cur.description]; raw = [dict(zip(cols, r)) for r in cur.fetchall()]

@@ -448,7 +448,7 @@ def dailypurissue(date: str = Query(""), frm: str = Query(""), nocache: str = Qu
     m0 = frm6   # 기간 시작일(기본=종료일 달의 1일). 리시빙/사급/매출요약 집계 시작.
     # ⑤ 현매출 = 리시빙(월초~조회일) × 품목구분(nx.item.cut_gubun). ★LG리시빙관리 소스와 동일: SUM(recv_amt) 그대로(GUBUN C−R 빼지 않음).
     _c, rr = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, SUM(ISNULL(r.RECV_AMT,0)) amt
-      FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL r  -- ★리시빙 기준=라이브(nx미러 stale로 최근입고 누락 → LG리시빙관리와 불일치 수정)
+      FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL r  -- ★리시빙 기준=라이브(nx미러 stale로 최근입고 누락 → LG리시빙관리와 불일치 수정)
       LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=UPPER(LTRIM(RTRIM(r.ITEM_CODE)))
       WHERE r.RECEIVING_YMD BETWEEN '{m0}' AND '{d6}' GROUP BY ISNULL(i.cut_gubun,'')""")
     cutm = {(r['cg'] or ''): float(r['amt'] or 0) for r in rr}
@@ -515,7 +515,7 @@ def dailypurissue(date: str = Query(""), frm: str = Query(""), nocache: str = Qu
     def _madd(k, h, v): MS[k][h] += float(v or 0)
     # 현매출 실적 = 리시빙(월초~조회일) cut별·half별 + 내수(mkt=2)
     _c, _rr5 = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, r.RECEIVING_YMD ymd, ISNULL(r.mkt,'') mkt, SUM(ISNULL(r.RECV_AMT,0)) amt
-      FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL r  -- ★리시빙 기준=라이브(nx미러 stale로 최근입고 누락 → LG리시빙관리와 불일치 수정)
+      FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL r  -- ★리시빙 기준=라이브(nx미러 stale로 최근입고 누락 → LG리시빙관리와 불일치 수정)
       LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=UPPER(LTRIM(RTRIM(r.ITEM_CODE)))
       WHERE r.RECEIVING_YMD BETWEEN '{m0}' AND '{d6}' GROUP BY ISNULL(i.cut_gubun,''), r.RECEIVING_YMD, ISNULL(r.mkt,'')""")
     for _r in _rr5:
@@ -594,7 +594,7 @@ def dailypurissue(date: str = Query(""), frm: str = Query(""), nocache: str = Qu
 
     # ⑥ 당일 실적(조회일=d6만): 매출(리시빙 cut별 절삭/설치/기타) + 사급(OSP 원소재=TUBE/부품)
     _c, _rrt = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, SUM(ISNULL(r.RECV_AMT,0)) amt
-      FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL r
+      FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL r
       LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=UPPER(LTRIM(RTRIM(r.ITEM_CODE)))
       WHERE r.RECEIVING_YMD='{d6}' GROUP BY ISNULL(i.cut_gubun,'')""")
     _tc = {(r['cg'] or ''): float(r['amt'] or 0) for r in _rrt}
@@ -913,7 +913,7 @@ def _prodinout(ym, frm=None, to=None, src="nx", inc_zero=False):
     def _U(tbl, keys):
         """라이브 ∪ nx — nx 행 중 라이브에 같은 키가 없는 것만 얹는다."""
         if _live:
-            return "PARTNER_ERP.dbo." + tbl
+            return "PARTNER_ERP_TEST3.nx." + tbl
         # ★키 비교는 문자 캐스팅으로(2026-09-02 실측 버그). `ISNULL(수량,'')` 은
         #   decimal 에 빈 문자열을 넣는 꼴이라 8114(varchar→numeric) 로 쿼리가 죽고
         #   화면이 조회 0건이 된다. common._u_tbl 과 같은 처리.
@@ -931,7 +931,7 @@ def _prodinout(ym, frm=None, to=None, src="nx", inc_zero=False):
     _PRPD = _U("PR_T_PROD_DTL", ["PROD_YMD", "PROD_HMS", "ITEM_CODE", "WORK_ORDER", "SPLIT_WORK_ORDER"])
     _SASM = _U("SA_T_STOCK_MAINT", ["MAINT_YMD", "MAINT_SEQ", "ITEM_CODE", "MAINT_QTY", "MAINT_TAG"])
     _PRSM = _U("PR_T_STOCK_MAINT_MAT", ["MAINT_YMD", "MAINT_SEQ", "MAT_CODE", "PART_CODE", "MAINT_QTY"])
-    _S = "PARTNER_ERP.dbo" if _live else "PARTNER_ERP_TEST3.nx"
+    _S = "PARTNER_ERP_TEST3.nx" if _live else "PARTNER_ERP_TEST3.nx"
     INSP = "NOT(ISNULL(a.insp_flag,'N') IN ('S','F') AND ISNULL(a.insp_proc_flag,'0')<>'1')"
     CUST = "ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=a.cust_code),'')"
     CUR = f"""
@@ -957,7 +957,7 @@ def _prodinout(ym, frm=None, to=None, src="nx", inc_zero=False):
     #   ⟹ nx 가 오히려 **웹 실적까지 포함**해 정확하다.
     #   ★그리고 라이브 고정은 **컷오버에 죽는 코드**다(CLAUDE.md §1-9-1) —
     #     레거시가 은퇴하면 PARTNER_ERP.dbo 자체가 없어진다. 지금 클린으로 짠다.
-    _B = "PARTNER_ERP.dbo" if _live else "PARTNER_ERP_TEST3.nx"
+    _B = "PARTNER_ERP_TEST3.nx" if _live else "PARTNER_ERP_TEST3.nx"
     BF = f"""
  SELECT a.gagong_proc_code part, UPPER(a.mat_code) mat, a.stock_qty sq FROM {_B}.PR_T_MONTH_STOCK_WH a WHERE a.stock_yymm='2502'
  UNION ALL SELECT a.TO_GAGONG_PROC_CODE, UPPER(a.mat_code), a.maint_qty*-1 FROM {_B}.PU_T_STOCK_MAINT a WHERE a.maint_ymd>'250299' AND a.maint_ymd<{BFT} AND a.maint_tag='B' AND ISNULL(a.out_wh_gubun,'1')='1' AND {INSP} AND a.TO_GAGONG_PROC_CODE>''
@@ -1213,7 +1213,7 @@ def lgrecv(ym: str = Query(""), fr: str = Query(""), to: str = Query("")):
     _c1, cells = _rows(f"""
 SELECT a.item_code item, ISNULL(a.mkt,'') mkt, a.receiving_ymd d,
   SUM(a.recv_qty) q, SUM(a.recv_amt) amt
-FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL a  -- ★컷오버 flip 대상(→nx). 업로드=nx 쓰기(routers/lgrecv.py)
+FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL a  -- ★컷오버 flip 대상(→nx). 업로드=nx 쓰기(routers/lgrecv.py)
 WHERE a.receiving_ymd BETWEEN '{fr6}' AND '{to6}'
 GROUP BY a.item_code, ISNULL(a.mkt,''), a.receiving_ymd""")
     _c2, items = _rows(f"""
@@ -1222,7 +1222,7 @@ SELECT m.item_code item,
   CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
        ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=M.in_cust) END wc
 FROM PARTNER_ERP_TEST3.nx.item m
-WHERE m.item_code IN (SELECT DISTINCT item_code FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL WHERE receiving_ymd BETWEEN '{fr6}' AND '{to6}')""")
+WHERE m.item_code IN (SELECT DISTINCT item_code FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL WHERE receiving_ymd BETWEEN '{fr6}' AND '{to6}')""")
     return {"fr": fr6, "to": to6, "ym": fr6[:4], "cells": cells, "items": items}
 
 # ================= 생산재고조회 (생산, dw_pr_stock_040/480) — 가공(P0001)/용접(그외) 라인재고 =================
