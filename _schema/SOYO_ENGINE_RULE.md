@@ -126,3 +126,30 @@ LG BOM(Assembly Pull) 기준 전개. 소스 = `nx.lg_bom_ver`(point-in-time).
 | 엔진 전개 소스 `nx.bom_line` → 클린 `nx.bom`(§3 (2)) | ☐ 추후 근본(변형SUB 이중계상 근절, 원가 copper_by_spec 2배·LME 잔차 동시 해소) |
 
 > 각 마이그레이션 = 옆에짓고 **전수 diff0 게이트** 통과 후 전환·dev 검증·명시 승인 후 배포. 정확도 검토 상세 = `SOYO_ENGINE_UNIFY_DESIGN.md`(§7)·감사 4종(2026-08-29).
+
+---
+
+## §5-1. 현행 재감사 (2026-09-08) — §5 표(8/29)가 stale, 실코드 기준 정정
+
+> 대표 지시(신규 ERP 존재이유 = 신규 BOM 방식). 전 백엔드 라우터 실코드 전수 재감사로 §5 체크박스를 현행에 맞게 정정. **각 전환은 결과값 diff0 필수(대표 확정).**
+
+**§5(8/29) 대비 이미 완료(A)로 확인 — §5는 대상으로 적었으나 실코드는 엔진화됨:**
+- pri1 `soyo.sales_forecast_sagub_rebuild` → ✅ `sagub_parts_soyo`(L499-502).
+- pri3 `gagong._p2` → ✅ `gagong_matplan070`=엔진(L1021·1071).
+- 중량 `weight_calc._explode` → ✅ `weight_explode`(L133). lgsagub `_explode_parts` → ✅ 제거됨.
+
+**★진짜 남은 마이그 대상(B) — 현행 확정(정산금액·재고 영향 순):**
+| 우선 | 위치(현행 line) | 무엇 | 엔진 대체 | 비고 |
+|---|---|---|---|---|
+| 1 | `weight_calc.py:311/323`(compute_quote)·`:455/467`(compute_quote_lme) · `coopquote2.py:863`(_dong_weight) · `coopquote.py:756`(_coop_soyo v1) | 협력사 견적/무게·LME **정산금액**(v_cs_bom 재귀) | `weight_explode`/`copper_by_spec` | 금액직결·이중계상 위험 최고. ★§5가 놓친 coopquote2/v1 포함 |
+| 2 | `prodsheet.py:712`(_bom_expand) | 생산실적 재고차감 소요 | **`prod_input_soyo`**(엔진 재현본 존재) | 착수난이도 최저·스왑. caller 1곳(:1508 gpc='%') |
+| 3 | `backflush.py:133/163/198/254` | 재고차감축(중량·다단계) | walker 신설(별도축) | nx.bom L169/206 잔존·단순치환 아님 |
+| 4 | `ready.py:106`(setcheck)·`kitting.py:89/296/832` | 키팅 물량/충당 | explode walker | |
+| 5 | `setin.py:351`(_set_bom_expand)·`procbc.py:74`(_bc_bom) | 세트입고 명세/차감 | prod_input_soyo 계열 | coopplan:1593이 setin 소비 |
+| 6 | `sourcing.py:2371`(current_order) | 자동발주 소요량 | prod_soyo/plan_explode | |
+| 7 | `gagong.py:213/539/622` | 가공진척 재고충당 롤업 | (저순위·표시성) | |
+| 존치 | `planrev.py:125/311`(_step6/_step7_sql) | 생산계획 자재소요 정본 | plan_explode(대조가능·STEP7 존치) | §5·엔진도크 "plan결합 존치" |
+
+**DEAD(라이브 아님·정리만, 마이그 아님)**: `soyo._step6/_step7_sql`(L538 raise), `_sp_4wk.py:SQL_4WK`(import 0건), `partplan._compose_assy`(deprecated no-op), `weight_calc._explode_legacy`(롤백보존), `lgsagub._explode_parts`(제거됨).
+
+**진행**: #2 prodsheet부터 착수(엔진 재현본 존재로 diff0 확실). 각 건 옆에짓고 diff0 검증 후 교체·기록.
