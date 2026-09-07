@@ -75,6 +75,9 @@ function showLogin(){
     const btn=g('#lg-login'); btn.disabled=true; btn.textContent='확인 중…'; err('');
     try{
       const u=await AUTH.login(id,pw);
+      // ★비번변경 강제(2026-09-07) — 관리자가 초기화한 계정은 여기서 새 비번을 정해야 한다.
+      //   서버가 비번변경 외 API 를 전부 403 으로 막으므로 그냥 진입시키면 화면이 통째로 안 뜬다.
+      if(AUTH.mustChange){ showChangePw(ov,id,pw,u); return; }
       sessionStorage.setItem('perm_authed',id);
       PERM.setUser(id);
       if(gotoPortalIfCoop(u)) return;      // ★협력사 = 포털로(내부 화면 진입 금지)
@@ -91,6 +94,46 @@ function showLogin(){
   if(DEV_AUTOLOGIN){g('#lg-id').value=DEV_AUTOLOGIN;
     setTimeout(()=>{const f=g('#lg-pw');if(f)f.focus();},30); return;}
   setTimeout(()=>{const f=g('#lg-id');if(f)f.focus();},30);
+}
+
+/* ★비밀번호 변경 화면 (2026-09-07 신설)
+     관리자가 비번을 초기화한 계정(must_change_pw=1)은 새 비번을 정해야 시스템을 쓸 수 있다.
+     ★로그인 오버레이를 재사용한다 — 카드 안쪽만 갈아끼우므로 스타일이 자동으로 따라온다.
+     ★old 는 방금 입력한 비번(초기비번)을 그대로 쓴다 — 서버가 현재비번을 확인한다. */
+function showChangePw(ov,id,oldPw,user){
+  const card=ov.querySelector('.lg-card');
+  card.innerHTML=`
+    <div class="lg-brand"><span class="lg-mark">P</span>
+      <div><div class="lg-t">비밀번호 <span>변경</span></div>
+        <div class="lg-sub">${esc(id)} — 새 비밀번호를 정해야 계속 사용할 수 있습니다</div></div></div>
+    <div class="lg-field"><label>새 비밀번호</label>
+      <input id="cp-n1" type="password" autocomplete="new-password" placeholder="4자 이상 · 1111 불가"></div>
+    <div class="lg-field"><label>새 비밀번호 확인</label>
+      <input id="cp-n2" type="password" autocomplete="new-password" placeholder="한 번 더"></div>
+    <div id="cp-err" class="lg-err" style="display:none"></div>
+    <button id="cp-go" class="lg-btn">변경하고 시작</button>
+    <div class="lg-foot">계정 문의 · 전산담당 (pncind@pncind.co.kr)</div>`;
+  const g=x=>card.querySelector(x);
+  const err=m=>{const e=g('#cp-err');e.textContent=m||'';e.style.display=m?'block':'none';};
+  const go=async()=>{
+    const n1=g('#cp-n1').value, n2=g('#cp-n2').value;
+    if(!n1||!n2){err('새 비밀번호를 두 번 입력하세요.');return;}
+    if(n1!==n2){err('두 비밀번호가 다릅니다.');return;}
+    const b=g('#cp-go'); b.disabled=true; b.textContent='변경 중…'; err('');
+    try{
+      await AUTH.changePw(oldPw,n1);
+      sessionStorage.setItem('perm_authed',id);
+      PERM.setUser(id);
+      if(gotoPortalIfCoop(user)) return;   // 협력사는 포털로
+      ov.remove(); bootApp();
+    }catch(e){
+      err((e&&e.message)||'비밀번호 변경에 실패했습니다.');
+      b.disabled=false; b.textContent='변경하고 시작';
+    }
+  };
+  g('#cp-go').onclick=go;
+  [g('#cp-n1'),g('#cp-n2')].forEach(el=>el.onkeyup=e=>{if(e.key==='Enter')go();});
+  setTimeout(()=>{const f=g('#cp-n1');if(f)f.focus();},30);
 }
 
 /* ★협력사 계정이면 협력사 포털(partner.html)로 보낸다 (2026-09-04).

@@ -443,8 +443,15 @@ def perm_all():
         cn.close()
 
 @router.post("/api/perm/save")
-def perm_save(payload: dict = Body(...)):
-    """권한 저장(전체 스냅샷 교체). body {perms:{user_id:{sid:{view,edit}}}, by?}. 관리자 UI가 PERM.perms 전체 전송."""
+def perm_save(request: Request, payload: dict = Body(...)):
+    """권한 저장(전체 스냅샷 교체). body {perms:{user_id:{sid:{view,edit}}}, by?}. 관리자 UI가 PERM.perms 전체 전송.
+
+       ★시스템관리자만(2026-09-07 보강) — 종전엔 라우터에 관리자 검사가 없어
+         **로그인만 하면 누구나 권한표를 통째로 교체**할 수 있었다(DELETE 후 재삽입).
+         계정저장(/api/perm/users, 아래 :518)과 같은 게이트를 건다."""
+    u = require_user(request)
+    if not _is_admin(u):
+        raise HTTPException(403, "권한 설정은 시스템관리자만 할 수 있습니다.")
     perms = payload.get("perms") or {}
     by = str(payload.get("by", "web")).strip() or "web"
     cn = _nx(); cur = cn.cursor()
@@ -482,8 +489,14 @@ def perm_users_get(request: Request):
     u = require_user(request)
     cn = _nx(); cur = cn.cursor()
     try:
+        # ★잠금상태(fail_cnt·locked_until)를 함께 내린다(2026-09-07) —
+        #   계정관리 화면이 '잠김' 뱃지와 실패횟수를 보여주려면 이 값이 필요하다.
+        #   비밀번호는 여전히 나가지 않는다(pw_set bool 만).
         q = """SELECT user_id,name,utype,dept,pos,roles,partner_code,email,tel,status,
-                      CASE WHEN ISNULL(pw_hash,'')='' THEN 0 ELSE 1 END pw_set, last_login
+                      CASE WHEN ISNULL(pw_hash,'')='' THEN 0 ELSE 1 END pw_set, last_login,
+                      ISNULL(fail_cnt,0),
+                      CASE WHEN locked_until IS NOT NULL AND locked_until > GETDATE()
+                           THEN 1 ELSE 0 END locked
                  FROM nx.app_user"""
         if _is_admin(u):
             cur.execute(q + " ORDER BY user_id")
@@ -502,7 +515,8 @@ def perm_users_get(request: Request):
                         "partner_code": (r[6] or "").strip(), "partner": (r[6] or "").strip(),
                         "email": (r[7] or "").strip(), "tel": (r[8] or "").strip(),
                         "status": (r[9] or "사용").strip(), "pw_set": bool(r[10]),
-                        "last_login": str(r[11])[:19] if r[11] else ""})
+                        "last_login": str(r[11])[:19] if r[11] else "",
+                        "fail_cnt": int(r[12] or 0), "locked": bool(r[13])})
         return {"users": out}
     finally:
         cn.close()
@@ -513,15 +527,18 @@ def perm_users_save(request: Request, payload: dict = Body(...)):
     """계정 저장(전체 스냅샷). ★시스템관리자만.
        ★빈 pw = 기존 비밀번호 유지 — GET 이 비번을 안 주므로, 안 그러면 저장할 때마다 전원 비번이 날아간다.
        ★목록에서 빠진 계정은 지우지 않는다(화면이 일부만 보냈을 때 계정이 증발하면 안 된다).
-         삭제는 status='중지' 로 한다."""
+         삭제는 status='중지' 로 한다.
+       ★관리자가 비번을 넣으면 must_change_pw=1 — 받은 사람이 자기 비번을 정해야 한다(2026-09-07)."""
     u = require_user(request)
     if not _is_admin(u):
         raise HTTPException(403, "계정 관리는 시스템관리자만 할 수 있습니다.")
     users = payload.get("users") or []
     by = (str(payload.get("by") or u["id"]).strip() or "web")[:40]
     import json as _json
+    from routers.auth import _ensure_user_cols, INIT_PW
     cn = _nx(); cur = cn.cursor()
     try:
+        _ensure_user_cols(cur)      # must_change_pw 컬럼 보장(멱등)
         n_new = n_upd = n_pw = 0
         for x in users:
             uid = str(x.get("id", "")).strip()
@@ -536,7 +553,15 @@ def perm_users_save(request: Request, payload: dict = Body(...)):
                 hit = cur.fetchall()
                 pc = str(hit[0][0]).strip() if len(hit) == 1 else None
             cur.execute("SELECT COUNT(*) FROM nx.app_user WHERE user_id=?", uid)
-            if cur.fetchone()[0]:
+            _exists = cur.fetchone()[0]
+            # ★신규계정은 비번을 안 줘도 **초기비번을 자동 부여**한다(2026-09-07 대표확정).
+            #   왜 — 종전엔 비번 없이 저장되면 pw_hash=NULL 이 되어 그 계정은 어떤 비번으로도
+            #   로그인할 수 없었다(실사용 오류: '한대윤' 계정이 그렇게 만들어졌다).
+            #   관리자가 굳이 비번을 정할 이유도 없다 — 어차피 첫 로그인에 본인이 바꾼다.
+            #   ※기존 계정은 그대로 — 빈 pw = 기존 유지(이 규칙을 깨면 저장 시 전원 비번이 날아간다).
+            if not _exists and not pw:
+                pw = INIT_PW
+            if _exists:
                 cur.execute("""UPDATE nx.app_user SET name=?,utype=?,dept=?,pos=?,roles=?,partner_code=?,
                                  email=?,tel=?,status=?,upd_user=?,upd_dt=getdate() WHERE user_id=?""",
                             str(x.get("nm", "")).strip(), str(x.get("type", "내부")).strip(),
@@ -555,7 +580,12 @@ def perm_users_save(request: Request, payload: dict = Body(...)):
                             str(x.get("status", "사용")).strip() or "사용", by)
                 n_new += 1
             if pw:                      # ★비밀번호는 준 경우에만 바꾼다
-                cur.execute("UPDATE nx.app_user SET pw_hash=? WHERE user_id=?", hash_pw(pw), uid)
+                # ★관리자가 정해준 비번은 **본인이 바꿔야 한다**(2026-09-07).
+                #   신규 등록이든 기존 계정 비번변경이든, 관리자가 아는 비번으로 계속 쓰면
+                #   [비번초기화] 로만 강제변경이 걸리는 반쪽 정책이 된다.
+                #   ※본인이 자기 비번을 바꾸는 경로는 /api/auth/password 이고, 거기선 0 으로 내린다.
+                cur.execute("""UPDATE nx.app_user SET pw_hash=?, must_change_pw=1
+                                WHERE user_id=?""", hash_pw(pw), uid)
                 cur.execute("UPDATE nx.app_session SET revoked=1 WHERE user_id=?", uid)   # 기존 로그인 해제
                 n_pw += 1
         cn.commit()
@@ -563,6 +593,60 @@ def perm_users_save(request: Request, payload: dict = Body(...)):
         return {"ok": True, "count": len(users), "new": n_new, "updated": n_upd, "pw_changed": n_pw}
     finally:
         cn.close()
+
+@router.post("/api/perm/users/delete")
+def perm_users_delete(request: Request, payload: dict = Body(...)):
+    """계정 **완전 삭제** — 시스템관리자만. body {ids:[...]}
+
+       ★종전엔 삭제 경로가 없어 status='정지' 로만 막을 수 있었다(2026-09-07 신설).
+         잘못 만든 계정·퇴사자 계정이 목록에 계속 남는다는 요청.
+
+       ★지우는 것 = **계정 행 + 세션** 뿐이다(2026-09-07 대표확정 "사용자정보만").
+         · nx.app_user     계정 행
+         · nx.app_session  그 계정의 토큰 — **이건 반드시 함께 지운다.**
+           남기면 계정을 지워도 살아있는 토큰으로 최대 12시간 계속 접속된다.
+         · nx.user_perm / nx.user_pref 는 **남긴다** — 같은 아이디로 다시 만들면
+           예전 권한·화면설정이 그대로 살아난다(재등록이 잦은 현장에 유리).
+
+       ★안전장치
+         · 자기 자신은 못 지운다(관리자가 스스로를 지우고 못 들어오는 사고 방지)
+         · 마지막 시스템관리자는 못 지운다(전부 지우면 아무도 계정관리를 못 한다)
+         · 근거키(user_id) 스코프로만 삭제 — 조건 없는 DELETE 금지(§1-3)
+    """
+    u = require_user(request)
+    if not _is_admin(u):
+        raise HTTPException(403, "계정 삭제는 시스템관리자만 할 수 있습니다.")
+    ids = [str(x).strip() for x in (payload.get("ids") or []) if str(x).strip()]
+    if not ids:
+        return {"ok": False, "detail": "삭제할 아이디가 없습니다."}
+    me = str(u.get("id") or "").strip()
+    if me in ids:
+        raise HTTPException(400, "본인 계정은 삭제할 수 없습니다.")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        # 마지막 시스템관리자 보호 — 지우고 나서 관리자가 0명이 되면 거부
+        cur.execute("""SELECT COUNT(*) FROM nx.app_user
+                        WHERE status=N'사용' AND roles LIKE N'%시스템관리자%'""")
+        adm_now = int(cur.fetchone()[0] or 0)
+        ph = ",".join("?" * len(ids))
+        cur.execute(f"""SELECT COUNT(*) FROM nx.app_user
+                         WHERE user_id IN ({ph}) AND status=N'사용'
+                           AND roles LIKE N'%시스템관리자%'""", *ids)
+        adm_del = int(cur.fetchone()[0] or 0)
+        if adm_now - adm_del <= 0:
+            raise HTTPException(400, "시스템관리자가 한 명도 남지 않습니다. 최소 1명은 유지해야 합니다.")
+
+        n = 0
+        for uid in ids:
+            cur.execute("DELETE FROM nx.app_session WHERE user_id=?", uid)   # ★토큰은 반드시
+            cur.execute("DELETE FROM nx.app_user WHERE user_id=?", uid)
+            n += cur.rowcount
+        cn.commit()
+        _tok_forget()             # ★지운 계정의 캐시된 토큰이 남으면 계속 접속된다
+        return {"ok": True, "deleted": n, "ids": ids}
+    finally:
+        cn.close()
+
 
 # ===================== 판매및출고등록 (w_pu_output_010/015, nx.stock_maint tag='5') — 구매→협력사 판매출고 =====================
 # ★역분석 확정(2026-07-28, dw_pu_input_140_t2 retrieve + 라이브대사 98%): 판매출고 정본 = PU_T_STOCK_MAINT(자재수불) MAINT_TAG='5'.

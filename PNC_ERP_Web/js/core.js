@@ -17,7 +17,19 @@ const AUTH={
       body:JSON.stringify({id,pw})});
     let j={}; try{j=await r.json();}catch(e){}
     if(!r.ok) throw new Error((j&&j.detail)||'로그인에 실패했습니다.');
-    this.token=j.token; this.user=j.user; return j.user;
+    this.token=j.token; this.user=j.user;
+    // ★비번변경 강제(2026-09-07) — 관리자가 초기화한 계정은 새 비번을 정해야 한다.
+    //   서버가 비번변경 외 API 를 전부 403 으로 막으므로, 화면도 여기서 갈라야 한다.
+    this.mustChange=!!j.must_change;
+    return j.user;
+  },
+  /* 비밀번호 변경 — 강제변경(초기비번 로그인 직후)과 자발적 변경이 같은 경로를 쓴다. */
+  async changePw(oldPw,newPw){
+    const r=await fetch(API_BASE+'/api/auth/password',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({old:oldPw,new:newPw})});
+    let j={}; try{j=await r.json();}catch(e){}
+    if(!r.ok) throw new Error((j&&j.detail)||'비밀번호 변경에 실패했습니다.');
+    this.mustChange=false; return j;
   },
   async me(){ if(!this.token)return null;
     try{const r=await fetch(API_BASE+'/api/auth/me');
@@ -289,7 +301,7 @@ const MODULES=[
    {id:'prodinfo',ic:'⚙️',nm:'생산정보등록'},
    // ★검토용(2026-08-26) — ① 신규모델 검색·생성 결과 확인 + 제외조건 등록(레거시 w_pr_master_050/070).
    //   삭제=일회성(다음 편성에 재생성) / 제외조건=영구차단. 편성 STEP M 의 3중 NOT EXISTS 중 하나.
-   {id:'modelbomhist',ic:'🧪',nm:'모델BOM 이력·제외',tag:'검토'},
+   {id:'modelbomhist',ic:'🧪',nm:'모델BOM 이력·제외'},   // ★검토 배지 제거(2026-09-07 요청) — 운영 확정
  ]},
  {id:'pur',nm:'구매/자재',ic:'🧾',subs:[
    {id:'mat',ic:'📦',nm:'자재목록조회'},
@@ -3238,7 +3250,8 @@ const _whms=s=>(s&&(''+s).length>=4)?`${(''+s).slice(0,2)}:${(''+s).slice(2,4)}`
 function custMaint(host){
   const API=API_BASE;
   let opts={cust_type:[],biztag:[],yn:[],ue_date:[],ue_week:[],banks:[]};
-  const st={rows:[],cnt:0,q:'',use:'',ctype:'',form:null,sel:new Set(),msg:''};
+  const st={rows:[],cnt:0,q:'',use:'',ctype:'',form:null,sel:new Set(),msg:'',
+           mg:[],mgLoad:false};   // mg = 마감적용일자 이력(수정 모달 하단 그리드)
   // [key,label,type,optkey] · type: req(필수텍스트)/text/num/date/sel(드롭다운)/chk(0·1)
   const FIELDS=[
     ['cust_code','거래처코드','text'],['cust_name','거래처명','req'],
@@ -3266,6 +3279,73 @@ function custMaint(host){
     catch(e){st.msg='백엔드 연결 실패';st.rows=[];}
     render();
   };
+  /* == 마감적용일자 관리 (2026-09-07 신설) ==============================
+       레거시 w_cm_master_055 하단 그리드. 원천 = nx.CM_M_CUST_MAGAM.
+       ★행 하나가 "그 적용년월부터의 마감일" 를 정하는 이력이다(덮어쓰기 아님).
+         매입/매출마감이 이미 이 값을 읽고 있다(common.py:562 등) — 화면만 없었다. */
+  const mgLoad=async(code)=>{
+    st.mg=[];st.mgLoad=true;
+    try{const j=await (await fetch(`${API}/api/cust/magam/list?cust=${encodeURIComponent(code)}`)).json();
+      st.mg=(j.rows||[]).map(r=>Object.assign({},r));}
+    catch(e){st.mg=[];}
+    st.mgLoad=false;
+    const box=host.querySelector('#cm-mg'); if(box){box.innerHTML=mgHtml();mgBind();}
+  };
+  const mgHtml=()=>{
+    if(st.mgLoad)return '<div class="empty" style="font-size:12px;padding:8px">불러오는 중…</div>';
+    // ★입력칸은 들어갈 글자수만큼만(§3). app.css .inp{min-width:200px} 을 넘기려면
+    //   width 말고 min-width 를 같이 줄여야 한다([[erp-inp-minwidth-trap]]).
+    const IN='padding:1px 4px;height:22px;font-size:11px;text-align:center;box-sizing:border-box';
+    const rows=st.mg.length?st.mg.map((r,i)=>`<tr>
+        <td class="center"><input type="checkbox" class="mg-ck" data-i="${i}" style="width:14px;height:14px"></td>
+        <td class="center" style="color:#8aa0bd">${i+1}</td>
+        <td class="center"><input class="inp mg-f" data-i="${i}" data-k="ym" value="${esc(r.ym||'')}"
+              placeholder="YYMM" maxlength="4" inputmode="numeric" style="width:56px;min-width:56px;${IN}"></td>
+        <td class="center"><input class="inp mg-f" data-i="${i}" data-k="day" value="${esc(r.day||'')}"
+              placeholder="1~31" maxlength="2" inputmode="numeric" style="width:44px;min-width:44px;${IN}"></td>
+        <td class="center"><input class="inp mg-f" data-i="${i}" data-k="comp" value="${esc(r.comp||'')}"
+              style="width:64px;min-width:64px;${IN}"></td>
+        <td class="center" style="font-size:11px;color:#5a6b82">${esc(r.user||'')}</td>
+        <td class="center" style="font-size:10.5px;color:#8aa0bd;font-family:Consolas,monospace">${esc((r.dt||'').slice(0,16))}</td>
+      </tr>`).join(''):'<tr><td colspan="7" class="empty" style="font-size:11.5px;padding:6px">등록된 마감적용일자가 없습니다 — [행추가]</td></tr>';
+    return `<table class="tbl" style="font-size:11px;width:100%;table-layout:fixed"><thead><tr>
+        <th style="width:24px"></th><th style="width:28px">SEQ</th><th style="width:70px">적용년월</th>
+        <th style="width:60px">마감일</th><th style="width:78px">입고사업장</th>
+        <th style="width:66px">수정자</th><th>수정일시</th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+  };
+  const mgBind=()=>{
+    host.querySelectorAll('.mg-f').forEach(el=>{el.oninput=()=>{
+      const i=+el.dataset.i,k=el.dataset.k;if(st.mg[i])st.mg[i][k]=el.value;};});
+  };
+  const mgSave=async()=>{
+    const code=(st.form&&st.form.cust_code||'').trim();
+    if(!code){alert('거래처를 먼저 저장하세요.');return;}
+    const rows=st.mg.filter(r=>String(r.ym||'').trim()&&String(r.day||'').trim());
+    if(!rows.length){alert('저장할 행이 없습니다.');return;}
+    try{const j=await (await fetch(`${API}/api/cust/magam/save`,{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({cust:code,rows,user:(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹')})})).json();
+      if(j.ok){alert(`마감적용일자 ${j.saved}건 저장되었습니다.`);mgLoad(code);}
+      else alert('저장 실패: '+(j.detail||''));}
+    catch(e){alert('저장 오류: '+e);}
+  };
+  const mgDel=async()=>{
+    const code=(st.form&&st.form.cust_code||'').trim();
+    const idx=[...host.querySelectorAll('.mg-ck')].filter(c=>c.checked).map(c=>+c.dataset.i);
+    if(!idx.length){alert('삭제할 행을 체크하세요.');return;}
+    const yms=idx.map(i=>st.mg[i]&&st.mg[i].ym).filter(Boolean);
+    const news=idx.filter(i=>st.mg[i]&&st.mg[i]._new);
+    if(news.length&&!yms.length){   // 저장 전 신규행은 화면에서만 제거
+      st.mg=st.mg.filter((_,i)=>!idx.includes(i));
+      const box=host.querySelector('#cm-mg');if(box){box.innerHTML=mgHtml();mgBind();}return;}
+    if(!confirm(`선택한 ${yms.length}건을 삭제합니다.`))return;
+    try{const j=await (await fetch(`${API}/api/cust/magam/delete`,{method:'POST',
+          headers:{'Content-Type':'application/json'},body:JSON.stringify({cust:code,yms})})).json();
+      if(j.ok){mgLoad(code);}else alert('삭제 실패: '+(j.detail||''));}
+    catch(e){alert('삭제 오류: '+e);}
+  };
+
   const fld=(f)=>{
     const [k,label,type,ok]=f, v=st.form[k]??'';
     if(type==='sel'){const os=opts[ok]||[];return `<select class="inp" data-fk="${k}" style="min-width:90px;width:auto;max-width:260px"><option value="">선택</option>${os.map(o=>`<option value="${esc(o.code)}" ${String(o.code)===String(v)?'selected':''}>${esc(o.nm)}</option>`).join('')}</select>`;}
@@ -3296,6 +3376,21 @@ function custMaint(host){
            <table style="border-collapse:collapse;width:100%"><tbody>${(()=>{let h='';for(let i=0;i<FIELDS.length;i+=2){const a=FIELDS[i],b=FIELDS[i+1];
              const cell=f=>f?`<td style="padding:5px 8px 5px 0;white-space:nowrap;color:#33507d;font-weight:600;font-size:12px;text-align:right;width:96px">${f[1]}${f[2]==='req'||f[0]==='cust_type'?'<span style="color:#c0392b">*</span>':''}</td><td style="padding:4px 8px 4px 0">${fld(f)}</td>`:'<td></td><td></td>';
              h+=`<tr>${cell(a)}${cell(b)}</tr>`;}return h;})()}</tbody></table>
+           ${st.form._edit?`
+           <!-- ★마감적용일자 관리(2026-09-07) — 레거시 w_cm_master_055 하단 그리드.
+                  신규 등록 중엔 거래처코드가 아직 없으므로 수정 모드에서만 보인다. -->
+           <div style="margin-top:14px;border-top:2px solid #e2e8f2;padding-top:10px">
+             <!-- ★한 줄 유지(§3) — 라벨·버튼을 nowrap 으로 묶고 설명은 title 로 내린다.
+                    종전엔 긴 설명문 때문에 버튼이 줄바꿈되고 모달이 불필요하게 커졌다. -->
+             <div style="display:flex;align-items:center;gap:5px;margin-bottom:5px;flex-wrap:nowrap;white-space:nowrap">
+               <b style="color:#33507d;font-size:12px" title="적용년월(YYMM) 이후부터 그 마감일이 적용됩니다. 매입/매출마감이 이 값을 읽습니다.">마감적용일자</b>
+               <div class="spacer" style="flex:1"></div>
+               <button class="btn" id="cm-mg-new" style="padding:1px 7px;font-size:11px">행추가</button>
+               <button class="btn" id="cm-mg-del" style="padding:1px 7px;font-size:11px">행삭제</button>
+               <button class="btn" id="cm-mg-save" style="padding:1px 7px;font-size:11px;background:#1b6ec2;color:#fff">저장</button>
+             </div>
+             <div id="cm-mg" style="max-height:150px;overflow:auto;border:1px solid var(--line-2,#c9d3e0);border-radius:6px">${mgHtml()}</div>
+           </div>`:''}
          </div>
          <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
            <span style="color:#c0392b;font-size:11px">* 거래처명·거래처구분·역할(매입/매출/외주 최소1)·사업자번호는 검증됩니다.</span>
@@ -3318,12 +3413,23 @@ function custMaint(host){
         st.form={cust_code:code,use_flag:1,in_flag:1,out_flag:1,outside_flag:0,cust_type:'',business_tag:'1'};render();};
       g('#cm-del').onclick=()=>del([...st.sel]);
       host.querySelectorAll('.cm-chk').forEach(ch=>ch.onclick=()=>{const cd=ch.dataset.code;ch.checked?st.sel.add(cd):st.sel.delete(cd);});
-      host.querySelectorAll('.cm-edit').forEach(b=>b.onclick=()=>{st.form=Object.assign({_edit:1},st.rows[+b.dataset.idx]);render();});
+      host.querySelectorAll('.cm-edit').forEach(b=>b.onclick=()=>{
+        st.form=Object.assign({_edit:1},st.rows[+b.dataset.idx]);st.mg=[];render();
+        mgLoad(st.form.cust_code);});   // ★마감적용일자 이력 비동기 로드(모달은 먼저 뜨게)
     }
     attachResizers(host);
     if(editing){
-      g('#cm-cancel').onclick=g('#cm-x').onclick=()=>{st.form=null;render();};
+      g('#cm-cancel').onclick=g('#cm-x').onclick=()=>{st.form=null;st.mg=[];render();};
       g('#cm-save').onclick=save;
+      // ★마감적용일자 — 수정 모드에서만
+      {const nb=g('#cm-mg-new');
+       if(nb)nb.onclick=()=>{
+         const ym=(()=>{const d=new Date();return String(d.getFullYear()).slice(2)+String(d.getMonth()+1).padStart(2,'0');})();
+         st.mg.unshift({ym,day:'',comp:'',user:'',dt:'',_new:1});
+         const box=g('#cm-mg');if(box){box.innerHTML=mgHtml();mgBind();}};
+       const db=g('#cm-mg-del'); if(db)db.onclick=mgDel;
+       const sb=g('#cm-mg-save'); if(sb)sb.onclick=mgSave;
+       mgBind();}
       host.querySelectorAll('[data-fk]').forEach(el=>{
         const k=el.dataset.fk;
         if(el.type==='checkbox')el.onchange=()=>{st.form[k]=el.checked?1:0;};
