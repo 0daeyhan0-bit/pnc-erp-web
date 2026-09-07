@@ -4600,14 +4600,20 @@ SCREEN.prodsheet=(host)=>{
       .lb{display:flex;align-items:center;gap:1mm;width:40mm;height:20mm;padding:1mm;
           page-break-after:always;page-break-inside:avoid;overflow:hidden}
       .lb:last-child{page-break-after:auto}
-      /* ★QR 축소 17→13mm(2026-09-04 사용자 요청 "QR이 크다").
+      /* ★QR 축소 17→13→11mm (2026-09-04 "QR이 크다" → 2026-09-07 "1단계 더 줄여달라").
            17mm 는 라벨 유효높이(20mm − 패딩 2mm = 18mm)를 거의 다 먹고 가로도 40mm 중
            17mm 를 써서, 우측 텍스트가 23mm 안에 눌려 있었다.
-           13mm 로 줄이면 텍스트 폭이 23→27mm 로 넓어져 도번(t4)이 덜 잘린다.
-           ※스캔은 문제없다 — QR 은 scale=3 으로 생성하고 인쇄 DPI 가 높아
-             13mm 면 QR3 셀 크기가 스캐너 판독 하한을 넉넉히 넘는다.
-           더 줄이지는 말 것 — 현장 스캐너·젖은 라벨에서 인식률이 떨어진다. */
-      .lb .qr{width:13mm;height:13mm;image-rendering:pixelated;flex:0 0 auto}
+           11mm 면 텍스트 폭이 24→26mm 로 더 넓어져 도번(t4)이 덜 잘린다.
+         ★스캔 안전선 — 실측으로 확인하고 정한 값이다(추측 아님).
+           QR 데이터 = 도번+날짜코드+일련4 (_qr_code). 최악 케이스는 한글 포함 도번
+           'AJR32883902-은납KPI6979999'(24자) → QR **버전3 = 29모듈**, border 포함 31칸.
+             17mm → 셀 0.548mm · 13mm → 0.419 · 11mm → 0.355 · 10mm → 0.323 · 9mm → 0.290
+           열전사 라벨 권장 하한이 0.33mm 이므로 **11mm 까지가 안전**하고 10mm 부터는 하한에 닿는다.
+           ⟹ 더 줄여야 하면 QR 크기가 아니라 데이터를 줄여야 한다(버전2=27칸이면 10mm 도 0.37mm).
+         ★PDF 경로(printjob.build_label_pdf)와 **반드시 같은 값**을 유지할 것 —
+           한쪽만 고치면 "화면에서는 줄었는데 실제 인쇄물은 그대로"가 된다
+           (에이전트 설치 PC 는 PDF 경로로 출력). */
+      .lb .qr{width:11mm;height:11mm;image-rendering:pixelated;flex:0 0 auto}
       .lb .tx{flex:1 1 auto;min-width:0;text-align:center;line-height:1.15}
       .t1{font-size:7pt;letter-spacing:1px}
       .t2{font-size:5.5pt;letter-spacing:.2px}
