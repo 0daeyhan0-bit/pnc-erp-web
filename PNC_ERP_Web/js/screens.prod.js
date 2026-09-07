@@ -863,16 +863,17 @@ SCREEN.partplan=(c)=>{
        ①실적행 ①-b공정별실적 ②BOM자재 ③준비재고 ④완성품입고.
        (⑤세트재고는 역함수가 없어 제외 — 세트입고 취소로 별도 처리)
      ★되돌릴 수 없는 작업이라 반드시 확인을 받는다. */
-  const dpCancel=async()=>{
+  const dpCancel=async(cxl)=>{
     if(st.dpBusy)return;
-    if(!st.dpSel.size)return alert('취소할 실적 셀을 선택하세요.');
-    // 도번·파트 단위로 중복 제거 — 같은 도번의 여러 셀을 골라도 취소는 한 번이다
+    /* 대상 = ①우클릭한 셀(cxl — 실적이 잡힌 .dp-x 셀) 우선
+              ②없으면 드래그 선택분(st.dpSel)
+       ★①이 기본이다. 취소해야 할 셀(31/31)은 계획잔여가 0 이라 드래그로 못 고른다. */
     const seen=new Set(), rows=[];
-    st.dpSel.forEach(v=>{
-      const k=(v.item||'')+'|'+(v.part||''); if(!k.trim()||seen.has(k))return;
-      seen.add(k); rows.push({item:v.item,part:v.part});
-    });
-    if(!rows.length)return alert('취소할 실적이 없습니다.');
+    const push=(it,pt)=>{const k=(it||'')+'|'+(pt||'');
+      if(!it||!pt||seen.has(k))return; seen.add(k); rows.push({item:it,part:pt});};
+    if(cxl&&cxl.item)push(cxl.item,cxl.part);
+    else st.dpSel.forEach(v=>push(v.item,v.part));
+    if(!rows.length)return alert('취소할 실적 셀에서 우클릭하세요.\n(실적이 잡힌 셀 = 「완료/계획」로 보이는 칸)');
     if(!confirm(`실적취소 ${rows.length}건\n`
       +rows.slice(0,6).map(x=>'  · '+x.item).join('\n')
       +(rows.length>6?`\n  … 외 ${rows.length-6}건`:'')
@@ -1159,7 +1160,10 @@ SCREEN.partplan=(c)=>{
     // 정렬: ★전 뷰 공통 = 백엔드(레거시 setsort: part_group→part_plan_ymd_hm→item→plan_ymd→output_hm→lg→wo→swo) 순서 유지.
     //   ★집계도 상세와 동일 순서(레거시 확인) — 도번순 재정렬하면 상세와 어긋남. Map은 삽입순 유지라 그대로 두면 됨.
     if(st.view==='제번') disp=disp.slice().sort((a,b)=>(a.item||'').localeCompare(b.item||'')||((a.part_ymd||'')+(a.inhm||'')).localeCompare((b.part_ymd||'')+(b.inhm||''))||(a.wo||'').localeCompare(b.wo||''));
-    const numTd=(v,bg,strong,fg)=>`<td class="center"${bg?` style="background:${bg}${strong?';font-weight:700':''}${fg?';color:'+fg:''}"`:''}>${v}</td>`;   // ★가운데정렬
+    /* ★가운데정렬. x = 추가 클래스·속성({cls,at}) — 실적취소 마킹(dp-x)처럼
+         셀에 정보를 실어야 할 때 쓴다. **완성된 td 를 정규식으로 고치지 말 것** —
+         class 가 두 개가 되어 HTML 이 첫 번째만 채택하고 가운데정렬이 날아간다. */
+    const numTd=(v,bg,strong,fg,x)=>`<td class="center${x&&x.cls?' '+x.cls:''}"${x&&x.at?x.at:''}${bg?` style="background:${bg}${strong?';font-weight:700':''}${fg?';color:'+fg:''}"`:''}>${v}</td>`;
     // 완료수량=생산실적(finish)만. 생산분 있으면 "생산/계획", 없으면 계획만(바 없이=키팅/미키팅은 색으로만 구분)
     // ★값 없는 셀은 공백(기존 '·' 표시 제거 — 빈칸이 많아 지저분해서)
     const pcell=r=>r.prior_plan>0?(r.prior_cover>0?`${nf(r.prior_cover)}/${nf(r.prior_plan)}`:`${nf(r.prior_plan)}`):'';
@@ -1284,7 +1288,20 @@ SCREEN.partplan=(c)=>{
         <td class="center mut">${isAgg?`<span style="color:#456">${open?'▼':'▶'}</span> `:''}${seq}</td>${headTd(r,firstInGrp)}
         ${d.map(x=>{const pl=(r.days&&r.days[x])||0,cv=(r.dcov&&r.dcov[x])||0,cf=(r.dfin&&r.dfin[x])||'0';
           if(!pl)return numTd('','',false);
-          const td=numTd(cv>0?`${nf(cv)}/${nf(pl)}`:`${nf(pl)}`,finBg(cf),cf!=='0',finFg(cf));
+          /* ★실적취소용 마킹 (2026-09-07) — 실적이 잡힌 셀(cv>0)에 정보를 심는다.
+               취소는 등록과 대상이 **정반대**다: 등록은 계획잔여가 남은 셀,
+               취소는 이미 잡힌 셀. 그런데 아래 planRem<=0 에서 return 하므로
+               31/31 처럼 다 잡은 셀에는 dp-c 가 아예 안 붙어, 우클릭해도
+               자동선택이 안 되고 메뉴가 회색이었다("실적취소시 아무 반응이 없어").
+             → dp-c(등록 드래그 영역)는 그대로 두고 취소용 속성만 따로 싣는다.
+               등록 영역을 넓히면 다 잡은 셀에서 또 실적이 잡혀버린다.
+             ★속성은 numTd 의 5번째 인자로 **셀을 만들 때 한 번에** 넣는다 —
+               완성된 td 를 정규식으로 고치면 class 가 두 개가 되어
+               가운데정렬·완료색이 날아간다(:1297 경위). */
+          const xa=(dpOn()&&!isAgg&&cv>0)
+            ? {cls:'dp-x', at:` data-cov="${cv}" data-cpart="${esc(r.gpc||'')}"`
+                            +` data-citem="${esc(r.item||'')}"`} : null;
+          const td=numTd(cv>0?`${nf(cv)}/${nf(pl)}`:`${nf(pl)}`,finBg(cf),cf!=='0',finFg(cf),xa);
           // ★드래그 실적 대상 셀 — 조건문에서 파트를 고르고 그 파트가 생산실적 설정돼 있을 때만
           if(!dpOn()||isAgg)return td;
           const planRem=Math.max(pl-cv,0); if(planRem<=0)return td;
@@ -1629,6 +1646,15 @@ SCREEN.partplan=(c)=>{
           td0.classList.add('dp-on');
           const el=c.querySelector('#pp-dp-cnt'); if(el)el.textContent=st.dpSel.size+'건';
         }
+        /* ★취소 대상(2026-09-07) — 실적이 잡힌 셀(.dp-x). 등록 대상(.dp-c)과 다르다.
+             31/31 처럼 다 잡은 셀은 계획잔여가 0 이라 .dp-c 가 안 붙어 위 자동선택에
+             안 걸린다 → 우클릭해도 0건이라 '실적취소'가 회색이었다.
+             취소는 여기서 따로 잡는다. 도번·파트만 있으면 되고(수량은 서버가 전량 계산)
+             st.dpSel 에는 넣지 않는다 — 넣으면 '확인'(등록)까지 활성화돼 위험하다. */
+        const tdx=ev.target&&ev.target.closest?ev.target.closest('td.dp-x[data-cov]'):null;
+        const cxl=tdx?{item:tdx.dataset.citem||'',part:tdx.dataset.cpart||'',
+                       cov:+tdx.dataset.cov||0}:null;
+        st.dpCxl=cxl;          // F11 단축키가 쓸 최근 우클릭 셀
         const n=st.dpSel.size;
         const m=document.createElement('div'); m.id='dp-menu';
         m.style.cssText='position:fixed;z-index:2000;background:#fff;border:1px solid #9fb3c8;'
@@ -1646,9 +1672,13 @@ SCREEN.partplan=(c)=>{
           m.appendChild(d);
         };
         row(`<b>확 인</b> <span style="color:#1c7c3a">${n}건</span>`,'F12',dpConfirm,!n);
-        // ★F11 = 실적취소(잡은 실적을 DB에서 되돌림). 종전엔 선택해제였다 —
-        //   선택해제는 아래 '전체 해제'가 맡는다.
-        row('<span style="color:#b4232a">실적취소</span>','F11',dpCancel,!n);
+        /* ★F11 = 실적취소(잡은 실적을 DB에서 되돌림). 종전엔 선택해제였다 —
+             선택해제는 아래 '전체 해제'가 맡는다.
+           ★활성 조건은 선택건수(n)가 아니라 **그 셀에 실적이 있는지(cxl)** 다.
+             다 잡은 셀은 n=0 이라 종전엔 영영 회색이었다. */
+        row(cxl?`<span style="color:#b4232a">실적취소</span> <span style="color:#8aa0bd">${nf(cxl.cov)}개</span>`
+                :'<span style="color:#b4232a">실적취소</span>',
+            'F11',()=>dpCancel(cxl),!cxl);
         const hr=document.createElement('div');
         hr.style.cssText='height:1px;background:#e3e9f0;margin:4px 0'; m.appendChild(hr);
         row('전체 해제','',dpClear,!n);
@@ -1672,13 +1702,17 @@ SCREEN.partplan=(c)=>{
     // 단축키 — F12 확인 / F11 실적취소 (레거시 동일)
     if(!window._dpKey){ window._dpKey=1;
       document.addEventListener('keydown',e=>{
-        const s2=(typeof st!=='undefined')?st:null;
-        if(!s2||!s2.dpSel||!s2.dpSel.size)return;
+        const s2=(typeof st!=='undefined')?st:null; if(!s2)return;
         // ★문서 캡처 리스너와 같은 이유로 c._dpFn(최신 핸들러)을 통해 부른다 —
         //   이미 열린 탭의 옛 클로저를 부르면 안 된다.
         const fn=(c&&c._dpFn)||{};
-        if(e.key==='F12'){e.preventDefault();(fn.ok||dpConfirm)();}
-        else if(e.key==='F11'){e.preventDefault();(fn.cancel||dpCancel)();}
+        // F12 등록 = 드래그 선택이 있어야 한다
+        if(e.key==='F12'){ if(!s2.dpSel||!s2.dpSel.size)return;
+          e.preventDefault();(fn.ok||dpConfirm)(); }
+        // ★F11 취소 = **최근 우클릭한 실적 셀**(s2.dpCxl) 기준. 드래그 선택과 무관하다 —
+        //   다 잡은 셀은 계획잔여 0 이라 애초에 드래그로 고를 수가 없다.
+        else if(e.key==='F11'){ if(!s2.dpCxl)return;
+          e.preventDefault();(fn.cancel||dpCancel)(s2.dpCxl); }
       });
     }
     g('#pp-line').onchange=()=>{st.line=g('#pp-line').value;redrawBody();};
