@@ -903,11 +903,24 @@ SCREEN.gagongprog420=(c)=>{
       ov.addEventListener('mousedown',e=>e.stopPropagation());
       ov.onclick=e=>{if(e.target===ov)ov.remove();};
       q('#g4cp-x').onclick=()=>ov.remove();
+      /* ★▲▼ 도 그룹 경계를 넘는다(2026-09-07 교정).
+           종전엔 `if(!sib)return` 으로 그룹 첫/끝에서 **아무 일도 안 일어났다**.
+           앞/뒤 컬럼이 서로 다른 <div>(#g4cp-h / #g4cp-t)라 형제가 아니기 때문.
+           사용자는 올렸다고 여기고 [적용]을 누르는데 순서가 그대로여서
+           "위로 올리면 제일 끝으로 저장된다"로 보였다(실사용 신고).
+           드래그는 이미 경계를 넘으므로(아래 onUp), ▲▼ 도 같은 규칙으로 맞춘다. */
       const move=(k,dir)=>{const row=ov.querySelector(`.g4cp-r[data-k="${k}"]`); if(!row)return;
         const box=row.parentElement;
         const sib=dir<0?row.previousElementSibling:row.nextElementSibling;
-        if(!sib)return;
-        if(dir<0)box.insertBefore(row,sib); else box.insertBefore(sib,row);};
+        if(sib){
+          if(dir<0)box.insertBefore(row,sib); else box.insertBefore(sib,row);
+          return;
+        }
+        const other=(box.id==='g4cp-h')?ov.querySelector('#g4cp-t'):ov.querySelector('#g4cp-h');
+        if(!other)return;                      // 단일 그룹이면 경계에서 멈춘다
+        if(dir<0)other.appendChild(row);       // 뒤 그룹 첫줄 ▲ → 앞 그룹 맨 끝
+        else     other.insertBefore(row,other.firstElementChild);  // 앞 그룹 끝줄 ▼ → 뒤 그룹 첫줄
+        row.dataset.grp=(other.id==='g4cp-h')?'head':'tail';};
       ov.querySelectorAll('.g4cp-up').forEach(b=>b.onclick=()=>move(b.dataset.k,-1));
       ov.querySelectorAll('.g4cp-dn').forEach(b=>b.onclick=()=>move(b.dataset.k, 1));
 
@@ -1542,11 +1555,19 @@ SCREEN.gagongmove580=(c)=>{
     ov.addEventListener('mousedown',e=>e.stopPropagation());
     ov.onclick=e=>{if(e.target===ov)ov.remove();};
     q('#mvcp-x').onclick=()=>ov.remove();
+    /* ★▲▼ 도 그룹 경계를 넘는다(2026-09-07 교정 — 420 항목보기와 동일 버그·동일 처방). */
     const move=(k,dir)=>{const row=ov.querySelector(`.mvcp-r[data-k="${k}"]`); if(!row)return;
       const box=row.parentElement;
       const sib=dir<0?row.previousElementSibling:row.nextElementSibling;
-      if(!sib)return;
-      if(dir<0)box.insertBefore(row,sib); else box.insertBefore(sib,row);};
+      if(sib){
+        if(dir<0)box.insertBefore(row,sib); else box.insertBefore(sib,row);
+        return;
+      }
+      const other=(box.id==='mvcp-h')?ov.querySelector('#mvcp-t'):ov.querySelector('#mvcp-h');
+      if(!other)return;
+      if(dir<0)other.appendChild(row);
+      else     other.insertBefore(row,other.firstElementChild);
+      row.dataset.grp=(other.id==='mvcp-h')?'head':'tail';};
     ov.querySelectorAll('.mvcp-up').forEach(b=>b.onclick=()=>move(b.dataset.k,-1));
     ov.querySelectorAll('.mvcp-dn').forEach(b=>b.onclick=()=>move(b.dataset.k, 1));
     /* 행 끌어서 순서 변경 — ★HTML5 draggable 은 쓰지 않는다(텍스트 선택이 먼저 잡혀
