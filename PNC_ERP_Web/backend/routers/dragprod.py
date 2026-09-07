@@ -432,13 +432,24 @@ def dragprod_cancel(payload: dict = Body(...)):
     win = "w_pr_input_410_drag"
     if not rows:
         return {"ok": False, "detail": "취소할 행이 없습니다."}
+
+    # ★save 와 **같은 판정**을 써야 엉뚱한 창고에서 빠지지 않는다 —
+    #   save 는 함수 안에서 import 하는데 취소는 빠뜨려 NameError 로 500 이 났다
+    #   (2026-09-07 롤백 테스트에서 검출. 실사용이었으면 취소가 통째로 실패).
+    try:
+        from routers.prodsheet import _prod_dest
+    except Exception:
+        _prod_dest = None
+
     cn = _nx_tx(); cur = cn.cursor()
     done, skipped = [], []
     try:
         for r in rows:
             item = str(r.get("item") or "").strip()
             part = str(r.get("part") or "").strip()
-            ymd = _d6(str(r.get("ymd") or "")) or datetime.now().strftime("%y%m%d")
+            # 일자 = YYMMDD 6자리. 화면이 YYYY-MM-DD 로 줄 수도 있어 숫자만 추려 뒤 6자리를 쓴다.
+            _y = "".join(ch for ch in str(r.get("ymd") or "") if ch.isdigit())
+            ymd = (_y[-6:] if len(_y) >= 6 else "") or datetime.now().strftime("%y%m%d")
             if not item or not part:
                 skipped.append({"item": item, "part": part, "reason": "도번·파트 필요"}); continue
             _assert_open(cur, ymd, "PRD", "드래그 실적 취소")
@@ -455,37 +466,79 @@ def dragprod_cancel(payload: dict = Body(...)):
                 skipped.append({"item": item, "part": part,
                                 "reason": f"취소수량 {qty:g} > 실적 {have:g}"}); continue
 
-            # ① 실적행 — 전량이면 삭제, 부분이면 수량 차감
+            # ① 실적행 — 전량이면 삭제, 부분이면 최신 행부터 차례로 깎는다.
+            #   ★종전 UPDATE TOP(1) ... AND PROD_QTY>=qty 는 부분취소에 구멍이 있었다:
+            #     행이 여러 개고 각 행 수량이 취소량보다 작으면(2+2 에서 3 취소)
+            #     조건에 걸리는 행이 없어 **아무것도 안 빠진다**(자재·재고만 되돌아가 어긋남).
+            #   ①-b 와 같은 방식으로 통일한다.
             if abs(qty - have) < 1e-9:
                 cur.execute("""DELETE FROM nx.PR_T_PROD_DTL
                                 WHERE ITEM_CODE=? AND PROD_YMD=? AND ISNULL(PART_CODE,'')=?
                                   AND ISNULL(UPDATE_WINDOW,'')=?""", item, ymd, part, win)
             else:
-                cur.execute("""UPDATE TOP(1) nx.PR_T_PROD_DTL SET PROD_QTY=PROD_QTY-?,
-                                  UPDATE_USER_ID=?, UPDATE_DATETIME=GETDATE()
+                _left = int(qty)
+                cur.execute("""SELECT WORK_ORDER, SPLIT_WORK_ORDER, PROD_HMS, ISNULL(PROD_QTY,0)
+                                 FROM nx.PR_T_PROD_DTL
                                 WHERE ITEM_CODE=? AND PROD_YMD=? AND ISNULL(PART_CODE,'')=?
-                                  AND ISNULL(UPDATE_WINDOW,'')=? AND PROD_QTY>=?""",
-                            int(qty), user, item, ymd, part, win, int(qty))
+                                  AND ISNULL(UPDATE_WINDOW,'')=? AND ISNULL(PROD_QTY,0)>0
+                                ORDER BY PROD_HMS DESC""", item, ymd, part, win)
+                for _wo, _swo, _hms, _q in cur.fetchall():
+                    if _left <= 0:
+                        break
+                    _cut = min(_left, int(_q or 0))
+                    cur.execute("""UPDATE nx.PR_T_PROD_DTL SET PROD_QTY=ISNULL(PROD_QTY,0)-?,
+                                      UPDATE_USER_ID=?, UPDATE_DATETIME=GETDATE()
+                                    WHERE ITEM_CODE=? AND PROD_YMD=? AND ISNULL(PART_CODE,'')=?
+                                      AND ISNULL(UPDATE_WINDOW,'')=?
+                                      AND ISNULL(WORK_ORDER,'')=ISNULL(?,'')
+                                      AND ISNULL(SPLIT_WORK_ORDER,'')=ISNULL(?,'')
+                                      AND PROD_HMS=?""",
+                                _cut, user, item, ymd, part, win, _wo, _swo, _hms)
+                    _left -= _cut
+                cur.execute("""DELETE FROM nx.PR_T_PROD_DTL
+                                WHERE ITEM_CODE=? AND PROD_YMD=? AND ISNULL(PART_CODE,'')=?
+                                  AND ISNULL(UPDATE_WINDOW,'')=? AND ISNULL(PROD_QTY,0)<=0""",
+                            item, ymd, part, win)
 
-            # ①-b 공정별 실적(실적현황 원천) — 같은 만큼 빼고, 0 이하면 지운다
-            cur.execute("""UPDATE nx.PR_T_PROD_DTL_PROC SET PROD_QTY=ISNULL(PROD_QTY,0)-?,
-                              UPDATE_USER_ID=?, UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW=?
+            # ①-b 공정별 실적(실적현황 원천) — 총량에서 정확히 qty 만 뺀다.
+            #   ★행마다 빼면 안 된다(2026-09-07 롤백 테스트에서 검출):
+            #     같은 (도번·일자·파트)에 행이 2개면(백필분 + 신규분) 조건에 둘 다 걸려
+            #     각각 qty 를 빼 **2배가 차감**됐다(실측 13 → 7, 정답 10).
+            #     ①은 UPDATE TOP(1) 로 막혀 있는데 ①-b 만 빠져 있었다.
+            #   → 최신 행부터 차례로 깎아 합계가 qty 만큼만 줄게 한다.
+            _left = int(qty)
+            cur.execute("""SELECT WORK_ORDER, SPLIT_WORK_ORDER, PROD_HMS, S_WORK_CODE,
+                                  ISNULL(PROD_QTY,0)
+                             FROM nx.PR_T_PROD_DTL_PROC
                             WHERE ITEM_CODE=? AND PROD_YMD=? AND ISNULL(PROC_CODE,'')=?
-                              AND ISNULL(UPDATE_WINDOW,'')=?""",
-                        int(qty), user, win, item, ymd, part, win)
+                              AND ISNULL(UPDATE_WINDOW,'')=? AND ISNULL(PROD_QTY,0)>0
+                            ORDER BY PROD_HMS DESC""", item, ymd, part, win)
+            for _wo, _swo, _hms, _sw, _q in cur.fetchall():
+                if _left <= 0:
+                    break
+                _cut = min(_left, int(_q or 0))
+                cur.execute("""UPDATE nx.PR_T_PROD_DTL_PROC SET PROD_QTY=ISNULL(PROD_QTY,0)-?,
+                                  UPDATE_USER_ID=?, UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW=?
+                                WHERE ITEM_CODE=? AND PROD_YMD=? AND ISNULL(PROC_CODE,'')=?
+                                  AND ISNULL(WORK_ORDER,'')=ISNULL(?,'')
+                                  AND ISNULL(SPLIT_WORK_ORDER,'')=ISNULL(?,'')
+                                  AND PROD_HMS=? AND ISNULL(S_WORK_CODE,0)=ISNULL(?,0)""",
+                            _cut, user, win, item, ymd, part, _wo, _swo, _hms, _sw)
+                _left -= _cut
             cur.execute("""DELETE FROM nx.PR_T_PROD_DTL_PROC
                             WHERE ITEM_CODE=? AND PROD_YMD=? AND ISNULL(PROC_CODE,'')=?
                               AND ISNULL(UPDATE_WINDOW,'')=? AND ISNULL(PROD_QTY,0)<=0""",
                         item, ymd, part, win)
 
-            # 실적처리방법(W/R) — save 와 같은 기준으로 다시 판정
-            cur.execute("""SELECT ISNULL(PROD_RESULT_TYPE,'') FROM nx.PR_M_PROC_GAGONG
-                            WHERE GAGONG_PROC_CODE=?""", part)
-            _t = cur.fetchone()
-            pt = (str(_t[0]).strip() if _t and _t[0] else "")
+            # 실적처리방법(W/R) — ★save 와 **같은 함수**를 쓴다.
+            #   직접 SELECT 하면 _part_conf 의 .upper() 가 빠져 소문자 'r' 일 때
+            #   준비재고 복원(③)이 통째로 건너뛰어진다. 취소는 등록의 정확한 역이어야 한다.
+            pt = _part_conf(cur, part)["pt"]
 
             # ② BOM 자재 복원(+)
-            boms = _bom_of(cur, item) if _bom_of else []
+            # ★save 와 같은 _bom() 을 쓴다 — 없는 이름(_bom_of)이라 NameError 였다.
+            #   BOM 소스가 다르면 되돌리는 자재가 달라져 재고가 어긋난다.
+            boms = _bom(cur, item)
             for mat, use, gpc in boms:
                 d = use * qty
                 if pt == "W":
@@ -506,11 +559,22 @@ def dragprod_cancel(payload: dict = Body(...)):
                             ymd, part, mat, item, d, "드래그실적 취소(복원)",
                             user, win, user, win, ymd)
 
-            # ③ 준비재고 복원(R)
+            # ③ 준비재고 복원(R) — 잔액 + ★원장행까지 save 와 대칭으로 되돌린다.
+            #   save 는 PU_T_READY_STOCK_MAINT 에 −qty 를 남기므로, 취소는 +qty 를 남긴다.
+            #   잔액만 되돌리면 준비재고 이력이 "빠진 적만 있고 돌아온 적은 없는" 상태가 된다.
             if pt == "R":
                 _upd(cur, "PU_T_READY_STOCK",
                      [("ITEM_CODE", item), ("CUST_CODE", "Z99990"), ("PROC_GUBUN", part)],
                      qty, user, win)
+                cur.execute("""INSERT INTO nx.PU_T_READY_STOCK_MAINT
+                       (MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,ITEM_CODE,PROC_GUBUN,
+                        WORK_ORDER,SPLIT_WORK_ORDER,PLAN_YMD,MAINT_QTY,
+                        INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,
+                        UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                       SELECT ?,ISNULL(MAX(MAINT_SEQ),0)+1,'A','Z99990',?,?,'','','',?,
+                              ?,GETDATE(),?,?,GETDATE(),?
+                         FROM nx.PU_T_READY_STOCK_MAINT WHERE MAINT_YMD=?""",
+                            ymd, item, part, qty, user, win, user, win, ymd)
 
             # ④ 완성품 입고 취소(−) — save 와 **같은 판정**이어야 엉뚱한 창고에서 빠지지 않는다
             dest = "ASSY"

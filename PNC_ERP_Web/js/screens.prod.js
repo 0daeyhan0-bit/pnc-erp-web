@@ -855,6 +855,53 @@ SCREEN.partplan=(c)=>{
     catch(e){ st.dpConf=null; }
   };
   const dpClear=()=>{st.dpSel.clear();st.dpQov.clear();render();};
+  /* ★실적취소 (F11) — 2026-09-07 신설.
+       종전 F11 은 dpClear(드래그 선택만 해제)였다. 잡은 실적을 되돌릴 방법이
+       화면에 없어서 "실적 취소는 안되네"(사용자 보고). 선택해제는 '전체 해제'가 맡는다.
+     대상 = 선택한 셀의 **그날 드래그 실적 전량**(도번·파트 단위).
+       서버(/api/dragprod/cancel)가 save 의 6가지 효과를 부호 반대로 되돌린다 —
+       ①실적행 ①-b공정별실적 ②BOM자재 ③준비재고 ④완성품입고.
+       (⑤세트재고는 역함수가 없어 제외 — 세트입고 취소로 별도 처리)
+     ★되돌릴 수 없는 작업이라 반드시 확인을 받는다. */
+  const dpCancel=async()=>{
+    if(st.dpBusy)return;
+    if(!st.dpSel.size)return alert('취소할 실적 셀을 선택하세요.');
+    // 도번·파트 단위로 중복 제거 — 같은 도번의 여러 셀을 골라도 취소는 한 번이다
+    const seen=new Set(), rows=[];
+    st.dpSel.forEach(v=>{
+      const k=(v.item||'')+'|'+(v.part||''); if(!k.trim()||seen.has(k))return;
+      seen.add(k); rows.push({item:v.item,part:v.part});
+    });
+    if(!rows.length)return alert('취소할 실적이 없습니다.');
+    if(!confirm(`실적취소 ${rows.length}건\n`
+      +rows.slice(0,6).map(x=>'  · '+x.item).join('\n')
+      +(rows.length>6?`\n  … 외 ${rows.length-6}건`:'')
+      +'\n\n오늘 드래그로 잡은 실적을 되돌립니다.\n'
+      +'· 실적행 삭제 · BOM 자재 복원 · 준비재고 복원 · 완성품 입고 취소\n'
+      +'※세트재고는 되돌아가지 않습니다(세트입고 취소로 별도 처리).\n\n계속할까요?'))return;
+    st.dpBusy=true;
+    const bk=c.querySelector('#pp-dp-ok'); if(bk){bk.disabled=true;bk.textContent='취소중…';}
+    try{
+      const r=await fetch(`${API}/api/dragprod/cancel`,{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({rows,
+          user:(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹')})}).then(x=>x.json());
+      if(!r.ok&&!r.done)throw new Error(r.detail||'실패');
+      let m='실적취소 완료 — '+(r.done||0)+'건';
+      if(r.skipped)m+='\n\n제외 '+r.skipped+'건\n'
+        +(r.skips||[]).slice(0,5).map(x=>'  · '+x.item+' — '+x.reason).join('\n');
+      st.dpSel.clear(); st.dpQov.clear();
+      /* ★취소는 되돌림 폭이 넓어(실적·자재·준비재고·완성품) 캐시 부분갱신으로
+           흉내내면 화면과 DB 가 어긋나기 쉽다 → 전체 재조회로 정확히 맞춘다.
+           (등록은 부분갱신 — 자주 쓰는 조작이라 스크롤 유지가 중요하지만,
+            취소는 드물고 정확성이 우선이다) */
+      alert(m);
+      await load();
+    }catch(e){ alert('실적취소 실패: '+e.message); }
+    st.dpBusy=false;
+    const bd=c.querySelector('#pp-dp-cnt'); if(bd)bd.textContent=st.dpSel.size+'건';
+    const bk2=c.querySelector('#pp-dp-ok'); if(bk2){bk2.disabled=false;bk2.textContent='✅ 확인';}
+  };
   const dpConfirm=async()=>{
     if(st.dpBusy)return;
     if(!st.dpSel.size)return alert('실적을 잡을 셀을 드래그로 선택하세요.');
@@ -1373,8 +1420,10 @@ SCREEN.partplan=(c)=>{
           <span style="font-size:11px;color:#5a6b82">선택 <b id="pp-dp-cnt">${st.dpSel.size}건</b></span>
           <button class="btn" id="pp-dp-ok" ${st.dpBusy?'disabled':''}
             style="background:#1c7c3a;color:#fff;padding:1px 9px;font-size:12px">${st.dpBusy?'처리중…':'✅ 확인'}</button>
-          <button class="btn ghost" id="pp-dp-clr" style="padding:1px 7px;font-size:12px">취소</button>
-          <span style="font-size:10px;color:#8aa0bd">드래그 후 <b>우클릭</b>/<b>F12</b> · <b>더블클릭</b>=수량조정</span>
+          <!-- ★라벨 '취소'→'선택해제' (2026-09-07). 우클릭 메뉴의 '실적취소'(F11, DB 되돌림)와
+                 이름이 같아 헷갈렸다. 이 버튼은 드래그 선택만 푸는 것이다. -->
+          <button class="btn ghost" id="pp-dp-clr" style="padding:1px 7px;font-size:12px">선택해제</button>
+          <span style="font-size:10px;color:#8aa0bd">드래그 후 <b>우클릭</b>/<b>F12</b> · <b>더블클릭</b>=수량조정 · <b>F11</b>=실적취소</span>
         </span>`:(st.part&&st.dpConf&&!st.dpConf.enabled
           ?`<span style="margin-left:10px;font-size:11px;color:#c0392b">🔒 ${esc(st.dpConf.msg||'')}</span>`:'')}
        <div style="flex-basis:100%;height:0"></div>
@@ -1499,7 +1548,7 @@ SCREEN.partplan=(c)=>{
         document.addEventListener('mouseup',()=>{_on=false;}); }
     }
     // ★문서 캡처 리스너(파일 상단)가 찾아 쓰는 최신 핸들러. 이미 열린 탭에서도 확인이 먹는 이유.
-    c._dpFn={ok:dpConfirm,no:dpClear};
+    c._dpFn={ok:dpConfirm,no:dpClear,cancel:dpCancel};
     const dok=g('#pp-dp-ok'); if(dok)dok.onclick=dpConfirm;   // 직접배선도 유지(이중안전)
     const dcl=g('#pp-dp-clr'); if(dcl)dcl.onclick=dpClear;
 
@@ -1597,10 +1646,12 @@ SCREEN.partplan=(c)=>{
           m.appendChild(d);
         };
         row(`<b>확 인</b> <span style="color:#1c7c3a">${n}건</span>`,'F12',dpConfirm,!n);
-        row('취 소','F11',dpClear,!n);
+        // ★F11 = 실적취소(잡은 실적을 DB에서 되돌림). 종전엔 선택해제였다 —
+        //   선택해제는 아래 '전체 해제'가 맡는다.
+        row('<span style="color:#b4232a">실적취소</span>','F11',dpCancel,!n);
         const hr=document.createElement('div');
         hr.style.cssText='height:1px;background:#e3e9f0;margin:4px 0'; m.appendChild(hr);
-        row('전체 해제','',()=>{st.dpSel.clear();render();},!n);
+        row('전체 해제','',dpClear,!n);
         /* ★항목보기·복사를 이 메뉴에도 넣는다(2026-09-03).
              드래그 실적모드(dpOn)에서는 .grid-wrap 의 이 핸들러가 표의 우클릭을 먼저 가져가
              **항목보기 메뉴가 아예 안 떴다**(사용자 보고). 메뉴를 하나로 합쳐 어느 모드에서도
@@ -1618,13 +1669,16 @@ SCREEN.partplan=(c)=>{
         setTimeout(()=>{document.addEventListener('click',dpMenuClose,{once:true});},0);
       };
     }
-    // 단축키 — F12 확인 / F11 취소 (레거시 동일)
+    // 단축키 — F12 확인 / F11 실적취소 (레거시 동일)
     if(!window._dpKey){ window._dpKey=1;
       document.addEventListener('keydown',e=>{
         const s2=(typeof st!=='undefined')?st:null;
         if(!s2||!s2.dpSel||!s2.dpSel.size)return;
-        if(e.key==='F12'){e.preventDefault();dpConfirm();}
-        else if(e.key==='F11'){e.preventDefault();dpClear();}
+        // ★문서 캡처 리스너와 같은 이유로 c._dpFn(최신 핸들러)을 통해 부른다 —
+        //   이미 열린 탭의 옛 클로저를 부르면 안 된다.
+        const fn=(c&&c._dpFn)||{};
+        if(e.key==='F12'){e.preventDefault();(fn.ok||dpConfirm)();}
+        else if(e.key==='F11'){e.preventDefault();(fn.cancel||dpCancel)();}
       });
     }
     g('#pp-line').onchange=()=>{st.line=g('#pp-line').value;redrawBody();};
