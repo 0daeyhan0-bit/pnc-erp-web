@@ -251,6 +251,18 @@ SCREEN.users=(c)=>{
     if(!r.ok)return null; const j=await r.json(); return Array.isArray(j.users)?j.users:null;}catch(e){return null;}};
   let users=[], editMode=false, loadErr='';
   let users_orig=[];   // 서버에 실제로 있는 계정 id — ✕ 가 '신규행 제거'인지 '서버 삭제'인지 가른다
+  /* 거래처코드 → 이름 (협력사 칸 표시용). 한 번만 받아 캐시.
+     ★이 화면은 관리자 전용이라 /api/cust/list 호출에 제약이 없다
+       (협력사 포털에서는 COOP_ALLOW 밖이라 못 쓴다 — core.js 쪽 주석 참조). */
+  let CUSTNM={};
+  const loadCustNm=async()=>{
+    try{ const r=await fetch(`${API_BASE}/api/cust/list`);
+      const j=await r.json(); const m={};
+      (j.rows||[]).forEach(x=>{const c=String(x.cust_code||'').trim();
+        if(c)m[c]=String(x.cust_name||'').trim();});
+      CUSTNM=m;
+    }catch(e){}
+  };
   const CT=['내부','협력사'], ST=['사용','정지'];
   const cols=[{f:'id',h:'ID'},{f:'pw',h:'비밀번호',pw:1},{f:'nm',h:'이름'},{f:'type',h:'구분',sel:CT},{f:'dept',h:'부서'},{f:'pos',h:'직책'},{f:'roles',h:'역할',roles:1},{f:'partner',h:'협력사'},{f:'email',h:'이메일'},{f:'tel',h:'연락처'},{f:'status',h:'상태',sel:ST},
     // ★잠금상태(2026-09-07) — 10회 실패하면 잠기고 관리자가 풀어줘야 한다. 읽기전용 표시.
@@ -290,6 +302,15 @@ SCREEN.users=(c)=>{
                    title="실패횟수와 잠금을 지웁니다(비밀번호는 그대로)">잠금해제</button>
                 <button class="btn xs ghost" data-reset="${esc(u.id)}"
                    title="초기비번으로 되돌리고 다음 로그인 때 새 비번을 정하게 합니다">비번초기화</button>`;
+      }
+      /* ★협력사 = 코드 + 거래처명(레거시 '외주협력사코드 | 외주협력사명' 두 칸과 같은 정보).
+           코드만 보이면 누구인지 알 수 없어 확인하려면 거래처마스터를 따로 열어야 했다.
+           저장값은 코드 그대로다 — 표시만 덧붙인다. */
+      if(cc.f==='partner'){
+        const code=String(u.partner||'').trim();
+        if(!code)return '';
+        const nm=CUSTNM[code]||'';
+        return `<b>${esc(code)}</b>${nm?` <span style="color:#5a6b82">${esc(nm)}</span>`:''}`;
       }
       return esc(''+(u[cc.f]||'')); };
     const editCell=(cc,u,i)=>{
@@ -368,7 +389,9 @@ SCREEN.users=(c)=>{
   (async()=>{const u=await load();
     if(u){users=u;users_orig=u.map(x=>({id:x.id}));}
     else loadErr='서버에서 계정을 읽지 못했습니다(권한 또는 연결 확인).';
-    draw();})();
+    draw();
+    await loadCustNm(); draw();   // 거래처명은 뒤늦게 와도 되니 화면을 막지 않는다
+  })();
 };
 SCREEN.setinreq=(c)=>{
   const API=API_BASE;
