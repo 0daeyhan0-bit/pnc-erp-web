@@ -21,6 +21,9 @@
 2-d. **★백데이트 픽업(2026-08-31 신설 — 윈도우 밖 수정분)** — 싱크 후 `_migration/sub_norm/r_backdate_pickup.py --commit`(DRY 기본·멱등·PK 스코프). **`r_delta_sync` 는 최근 30일 윈도우만 재복사하므로 그보다 오래된 전표를 라이브에서 고치면 nx 에 영원히 안 들어온다.** `do_window` 의 자가치유는 **행수만** 비교해서 내용만 바뀐 경우를 못 잡는다(§ 매일유의 2번이 경고한 바로 그 케이스).
      **실측 2026-08-31**: `PU_T_STOCK_MAINT` 2607 구간 **25행** 어긋나 recon RED — 11:26 김미진 님이 `w_pu_sale_010` 에서 7/30 전표를 손봤고 그중 **2건은 단가 정정(2,373.50→2,412.00)**, 나머지 23건은 감사컬럼만. **금액이 걸린 진짜 수정이라 놓치면 안 된다.** 픽업 후 recon GREEN(52/52).
      전 거래테이블 DRY 스캔 = 11개 3,031행이 후보이나 recon RED 는 이 1개뿐이었다(나머지는 이미 일치) → **RED 난 테이블만 `--only` 로 최소침습** 반영. 한계: UPDATE_DATETIME/PK 없는 테이블은 스킵(보고함)·라이브 **삭제**분은 못 잡음(그건 recon 행수가 잡는다) → **최종 판정은 언제나 recon**.
+2-e. **★★bom_line ↔ 레거시 구조 sync(2026-09-08 신설·항구화)** — 싱크 후 `_migration/sub_norm/r_bomline_sync.py --commit`(멱등·백업자동). **delta_sync 는 미러(pr_m_item_bom)만 맞추고 `nx.bom_line`(클린=편성/원가/소요 정본)은 별도라 안 따라간다** → 레거시 BOM 편집이 쌓이면 bom_line 이 다필드 드리프트(gagong_proc·vir_item·except/엣지·sagub_default) → **생산계획 자재소요가 레거시와 어긋남**(일순위 위반). 이 스크립트가 순서대로(reconcile→procmeta_fill→gagong_align→vir_align→sagub_align) PR 정합.
+     **실측 2026-09-08(재컷오버 준비)**: 미적용 상태에서 편성 소요엣지 미러만32/클린만184 드리프트 → sync 후 **미러만0·클린만0·편성수량(USE_QTY_PR) diff0**(잔여6=용접봉RAC=엔진 별도산출 무관). 원가 diff0·prodsheet diff0 동시 확인. **★적용 후 편성 소요 diff0 상시 확인**(생산계획 절대정확이 일순위). 정본 = `BOM_LINE_LEGACY_SYNC_260908.md`.
+     ※컷오버 후엔 BOM 편집이 웹(bom_line)에서 직접 → 이 sync 불요(레거시 소멸). 병행운영 중에만.
 3. **다시 recon → GREEN 확인.** GREEN이면 그날 마이그 끝.
 4. **로그 남김** (recon 결과·타임스탬프).
 
