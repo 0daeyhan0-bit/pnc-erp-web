@@ -5604,13 +5604,17 @@ SCREEN.gongsu=(c)=>{
   let sup={open:false,ymd:iso(T),spart:'',rows:[],saving:false};
   let wkCache=null;                                // 작업자→파트 전체 맵(1회 로드)
   const loadParts=async()=>{try{const r=await fetch(`${API}/api/partmaster/list`);parts=(await r.json()).rows||[];}catch(e){parts=[];}};
-  /* ★부서 드롭다운 = 레거시 근무공수등록 '작업처'와 **같은 순서**로 낸다.
+  /* ★파트 드롭다운 = 레거시 근무공수등록 '작업처'와 **같은 순서**(01라인→02라인→…).
        /api/partmaster/list 는 파트마스터 화면용이라 WORK_CODE 우선 정렬이고(생산 PART 가 먼저 온다),
-       레거시 드롭다운은 SORT_KEY 순(01라인→02라인→…)이다. 그 API 를 고치면 마스터 화면이
-       흐트러지므로 여기서만 sortkey 로 다시 세운다. */
-  const deptOpts=()=>[...(parts||[])]
-    .sort((a,b)=>((+a.sortkey||9999)-(+b.sortkey||9999))||String(a.code).localeCompare(String(b.code)))
-    .map(p=>`<option value="${esc(p.code)}"${F.dept===p.code?' selected':''}>${esc(p.code)}${p.nm?' · '+esc(p.nm):''}</option>`).join('');
+       레거시 드롭다운은 SORT_KEY 순이다. 그 API 를 고치면 마스터 화면이 흐트러지므로
+       여기서만 sortkey 로 다시 세운다.
+     ★조회조건(부서)·투입파트·지원파트·행별 소속파트가 **전부 같은 목록**이라 한 곳에서 만든다
+       (2026-09-07 지시 "투입파트도 부서처럼 정렬을 해줘"). */
+  const partsSorted=()=>[...(parts||[])]
+    .sort((a,b)=>((+a.sortkey||9999)-(+b.sortkey||9999))||String(a.code).localeCompare(String(b.code)));
+  const partOpts=(sel)=>partsSorted()
+    .map(p=>`<option value="${esc(p.code)}"${sel===p.code?' selected':''}>${esc(p.code)}${p.nm?' · '+esc(p.nm):''}</option>`).join('');
+  const deptOpts=()=>partOpts(F.dept);
   const load=async()=>{loading=true;draw();
     const qs=new URLSearchParams({from_ymd:F.from,to_ymd:F.to,gubun:F.gubun,dept:F.dept,user:F.user});
     try{const r=await fetch(`${API}/api/gongsu/list?${qs}`);data=await r.json();msg='';}
@@ -5681,7 +5685,7 @@ SCREEN.gongsu=(c)=>{
         <label class="tl">지원파트</label>
         <select class="inp" id="sp-part" style="min-width:200px" title="지원을 받는 파트 — 이 파트의 공수가 올라갑니다">
           <option value="">선택</option>
-          ${parts.map(p=>`<option value="${esc(p.code)}"${sup.spart===p.code?' selected':''}>${esc(p.code)}${p.nm?' · '+esc(p.nm):''}</option>`).join('')}
+          ${partOpts(sup.spart)}
         </select>
         <span style="color:#5a6b82;white-space:nowrap">합계 <b>${_wnf(tot)}</b>h</span>
         <div style="flex:1"></div>
@@ -5730,7 +5734,7 @@ SCREEN.gongsu=(c)=>{
         <label class="tl">기준일</label><input class="inp" type="date" id="gs-eymd" value="${entry.ymd}">
         <label class="tl">구분</label><select class="inp" id="gs-egubun" style="width:80px">${['근무','지원'].map(g=>`<option${entry.gubun===g?' selected':''}>${g}</option>`).join('')}</select>
         <label class="tl">투입파트</label>
-        <select class="inp" id="gs-epart" style="min-width:200px"><option value=""${entry.part===''?' selected':''}>전체</option>${parts.map(p=>`<option value="${esc(p.code)}"${entry.part===p.code?' selected':''}>${esc(p.code)}${p.nm?' · '+esc(p.nm):''}</option>`).join('')}</select>
+        <select class="inp" id="gs-epart" style="min-width:200px"><option value=""${entry.part===''?' selected':''}>전체</option>${partOpts(entry.part)}</select>
         <button class="btn" id="gs-call" style="background:#1c47a0;color:#fff">📥 인원정보호출</button>
         ${entry.rows.length?`<div style="flex:1"></div><span style="color:#5a6b82">선택 ${entry.rows.filter(r=>r._sel).length}/${entry.rows.length}명</span>
         ${ed?`<button class="btn" id="gs-bulksave" style="background:#1c7c3a;color:#fff">💾 선택 일괄저장</button>`:''}`:''}
@@ -5755,7 +5759,13 @@ SCREEN.gongsu=(c)=>{
     body.innerHTML=`
      <div class="toolbar">
        <label class="tl">근무일</label><input class="inp" type="date" id="gs-from" value="${F.from}"> ~ <input class="inp" type="date" id="gs-to" value="${F.to}">
-       <label class="tl">구분</label><input class="inp" id="gs-gubun" value="${esc(F.gubun)}" style="width:60px">
+       <!-- ★구분 = 드롭다운(2026-09-07 지시) — 값이 '근무'/'지원' 둘뿐인데 텍스트 입력이라
+              오타·부분입력으로 조회가 빗나갔다. 고르면 즉시 조회한다. -->
+       <label class="tl">구분</label><select class="inp" id="gs-gubun" style="width:78px">
+         <option value=""${F.gubun===''?' selected':''}>전체</option>
+         <option value="근무"${F.gubun==='근무'?' selected':''}>근무</option>
+         <option value="지원"${F.gubun==='지원'?' selected':''}>지원</option>
+       </select>
        <!-- ★부서 = 드롭다운(레거시 근무공수등록 '작업처'). 이 화면이 이미 쓰는 parts
               (/api/partmaster/list)를 그대로 재사용 — 아래 지원공수·인원정보호출 셀렉트와 같은 목록이다.
               코드를 화면에 하드코딩하지 않으므로 파트가 늘어도 자동 반영된다. -->
@@ -5873,9 +5883,10 @@ SCREEN.gongsu=(c)=>{
          foot});
     };}
     g('#gs-search').onclick=()=>{F.from=g('#gs-from').value;F.to=g('#gs-to').value;F.gubun=g('#gs-gubun').value;F.dept=g('#gs-dept').value;F.user=g('#gs-user').value;load();};
-    ['#gs-gubun','#gs-user'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter')g('#gs-search').click();};});
-    // 부서는 드롭다운 — 고르는 즉시 조회(입력칸이 아니라 Enter 를 기다릴 이유가 없다)
+    {const el=g('#gs-user');if(el)el.onkeyup=e=>{if(e.key==='Enter')g('#gs-search').click();};}
+    // 부서·구분은 드롭다운 — 고르는 즉시 조회(입력칸이 아니라 Enter 를 기다릴 이유가 없다)
     {const el=g('#gs-dept');if(el)el.onchange=()=>{F.dept=el.value;load();};}
+    {const el=g('#gs-gubun');if(el)el.onchange=()=>{F.gubun=el.value;load();};}
     const nb=g('#gs-newentry');if(nb)nb.onclick=()=>{if(!entry.open){entry.part='';entry.rows=[];}entry.open=!entry.open;draw();};   // 열 때마다 투입파트=전체로 초기화
     /* ★지원공수등록 열기 — 작업자 목록을 먼저 받아 두어야 지원자칸 자동완성·파트 자동채움이 된다. */
     const sb=g('#gs-newsup');if(sb)sb.onclick=async()=>{
