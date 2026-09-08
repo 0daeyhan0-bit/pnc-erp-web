@@ -60,9 +60,12 @@
 | PR_M_MODEL_BOM | 63,035 | nx.model_bom | **0(빈)** | ★clean 재빌드 필요 or 미러 유지판정 |
 | PR_M_ITEM_BLOB | 121,832 | (없음) | — | 도면 blob·클린 신설 or 이관대상 판정 |
 
-### (판별 보류·case-insensitive 재확인) 
-PR_M_WORK(2)·PR_M_WORK_SINGLE(450)·PR_M_PART_CALENDAR(372)·PR_M_LINE_NO(42)·PR_M_LINE_CALENDAR(18,264)
-= nx 테이블 자체(별도 클린 아님). 레거시-fed인지 웹유지인지 개별 확인(prodinfo가 line_*/calendar 쓰는지) → 웹유지면 (b).
+### (보류 5종 → 확정: 웹 쓰기 0 = 레거시-fed (a), 대부분 별도 클린 존재)
+검증(2026-09-09): PR_M_WORK·WORK_SINGLE·PART_CALENDAR·LINE_NO·LINE_CALENDAR **웹 쓰기 라우터 0 = 읽기전용 (a)**.
+단 a2 대조서 별도 클린이 있었음(카운트 다름=case-sensitive 별개 테이블):
+- PR_M_LINE_CALENDAR(18,264) → **nx.line_calendar(18,895)** (prodinfo 클린) · PR_M_PART_CALENDAR(372) → nx.part_calendar(360) · PR_M_LINE_NO(42) → nx.line_no(42).
+- **PR_M_WORK(2)·PR_M_WORK_SINGLE(450)** = 클린 불명(소량) → 판정 필요.
+⟹ 캘린더/라인은 읽기 repoint(클린), PR_M_WORK류는 소량이라 이관/유지 개별 판정.
 
 **A2 결론**: 진짜 컷오버 blocker(미러 직독) = **위 (a) 5종**(PR_M_ITEM_PROC_GAGONG·ITEM_BOM/CS·ITEM_SUB·MODEL_BOM·ITEM_BLOB). 나머지는 웹 store거나 보류 재확인. 클린 대체가 있는 것(routing·bom_line)은 읽기 repoint, 빈 것(model_bom)/없는 것(blob)은 clean 확보 선행.
 
