@@ -875,6 +875,25 @@ def dong_weight_by_spec(eng, item):
     return out
 
 
+def dong_unit_weight(eng, item):
+    """[가공 원소재 차감용] 제작동관(가공품) 1개의 동 unit 중량(kg) = ★bom_flat.weight_actual(우리실측 정본).
+    완제품 무관 일관 확인(2026-09-08: 4060종 불일치0). nx.item.item_weight 는 17.7% 0·15.3% placeholder(1.0)라 부정확 → bom_flat 우선.
+    bom_flat 에 없으면 nx.item.item_weight 폴백(비동 가공품 등). 반환 float(kg)."""
+    if not hasattr(eng, '_duw'):
+        eng._duw = {}
+    k = item.strip().upper()
+    if k not in eng._duw:
+        eng.cur.execute("SELECT MAX(CAST(ISNULL(weight_actual,0) AS float)) FROM nx.bom_flat WHERE UPPER(LTRIM(RTRIM(leaf_code)))=? AND ISNULL(weight_actual,0)>0", k)
+        r = eng.cur.fetchone()
+        w = float(r[0] or 0) if r and r[0] else 0.0
+        if w <= 0:
+            eng.cur.execute("SELECT ISNULL(item_weight,0) FROM nx.item WHERE UPPER(LTRIM(RTRIM(item_code)))=?", k)
+            r2 = eng.cur.fetchone()
+            w = float(r2[0] or 0) if r2 else 0.0
+        eng._duw[k] = w
+    return eng._duw[k]
+
+
 def std_rawmat_of(eng, item):
     """[가공 원소재 차감] 가공품(item)의 소재스펙 5키 → 표준원소재(STD_WON_MAT_FLAG='1') 품번 TOP1. 캐시.
     ★레거시 정본 로직(w_pr_input 원소재 차감): 5키=[diam, thick, metal_gubun, pipe_kind(isnull→'1'), item_pipe_material]

@@ -62,6 +62,16 @@ def _bc_ctx(cur, box):
         cur.execute("SELECT ISNULL(WORK_CODE,''), ISNULL(in_cust,'') FROM nx.item WHERE ITEM_CODE=?", code)
         w = cur.fetchone()
         c[k + "_work"], c[k + "_cust"] = (w[0], w[1]) if w else ("", "")
+    # ★가공품 동 unit 중량 = bom_flat.weight_actual(우리실측 정본)로 교체 — nx.item.item_weight는 부정확
+    #   (17.7% 0·15.3% placeholder 1.0, 실측 2026-09-08). 엔진 dong_unit_weight(bom_flat 우선·item_weight 폴백).
+    #   ⟹ 원소재 차감량(수량×중량)·CUT_WEIGHT 정확화. §1-10 중량정본=bom_flat.
+    try:
+        if _soyo is not None:
+            _w = _soyo.dong_unit_weight(_get_cost_engine(), c["mat"])
+            if _w and _w > 0:
+                c["weight"] = _w
+    except Exception:
+        pass
     # 표준원소재(규격 동일). 레거시: PIPE_KIND=isnull(B.PIPE_KIND,'1')
     c["won"] = None
     if c["weight"]:
