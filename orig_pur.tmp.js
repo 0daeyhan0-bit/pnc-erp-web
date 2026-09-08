@@ -780,19 +780,17 @@ SCREEN.matledger=(c)=>{
      <div class="summary-bar" id="sum"></div>
      <div class="grid-wrap" style="max-height:510px;overflow:auto"><table class="tbl fit"><thead id="th"></thead><tbody id="body"></tbody></table></div>
      <div class="rowcount" id="cnt"></div>`;
-    // ★기말재고 = 창고(sq/sa) + 이월(cq/ca). 백엔드 fq/fa 가 없으면(생산·영업) 창고값 그대로.
-    pool.forEach(r=>{r._fq=(r.fq!==undefined?+r.fq:+r.sq)||0;r._fa=(r.fa!==undefined?+r.fa:+r.sa)||0;
-      r._su=upr(r._fa,r._fq);r._bu=upr(r.ba,r.bq);r._iu=upr(r.ia,r.iq);r._ou=upr(r.oa,r.oq);r._tu=upr(r.ta,r.tq);
+    pool.forEach(r=>{r._su=upr(r.sa,r.sq);r._bu=upr(r.ba,r.bq);r._iu=upr(r.ia,r.iq);r._ou=upr(r.oa,r.oq);r._tu=upr(r.ta,r.tq);
       r._sgn=sgName(r.sg);r._ctn=ctName(r.ctype);r._chg=chg(r.custcd);r._lin=fmtYmd(r.lastin);});
     c.querySelector('#th').innerHTML=`<tr>
       <th>품목코드</th><th class="cap">품명</th>${dom==='PRD'?'<th>재고위치</th>':''}
-      <th class="num gstock" title="기말재고 = 창고 + 협력사 보관(이월)">재고수량</th><th class="num gstock">재고단가</th><th class="num gstock" title="기말재고 = 창고 + 협력사 보관(이월)">재고금액</th>
+      <th class="num gstock">재고수량</th><th class="num gstock">재고단가</th><th class="num gstock">재고금액</th>
       <th>소분류</th><th>매입유형</th><th class="center">단위</th>
       <th class="num">기초재고</th><th class="num">기초단가</th><th class="num">기초금액</th>
       <th class="num">입고수량</th><th class="num">입고단가</th><th class="num">입고금액</th>
       <th class="num">출고수량</th><th class="num">출고단가</th><th class="num">출고금액</th>
       <th class="num">기타수량</th><th class="num">기타단가</th><th class="num">기타금액</th>
-      ${dom==='MAT'?'<th class="num">창고기말</th><th class="num" title="불출했으나 협력사와 협의해 이월 — 당월 매출 아님, 협력사 보관 중인 우리 재고">이월재고수량</th><th class="num" title="이월재고수량 × 기말 이동평균단가(원가)">이월재고금액</th>':''}
+      ${dom==='MAT'?'<th class="num" title="불출했으나 협력사와 협의해 이월 — 당월 매출 아님">이월수량</th><th class="num" title="협력사 보관 중인 우리 재고(원가평가)">이월금액</th>':''}
       <th class="num">평가조정</th>
       <th>담당자</th><th class="cap">매입처명</th><th class="center">최종입고일</th></tr>`;
     const T=(rs,k)=>rs.reduce((a,b)=>a+(+b[k]||0),0);
@@ -800,32 +798,32 @@ SCREEN.matledger=(c)=>{
         <div class="s-item">기초금액 <b>${wonI(T(rows,'ba'))}</b></div>
         <div class="s-item">입고금액 <b>${wonI(T(rows,'ia'))}</b></div>
         <div class="s-item">출고금액 <b>${wonI(T(rows,'oa'))}</b></div>
-        <div class="s-item">재고수량 <b>${won(T(rows,'_fq'))}</b></div>
+        <div class="s-item">재고수량 <b>${won(T(rows,'sq'))}</b></div>
         <div class="s-item ${T(rows,'sa')<0?'neg':''}">재고금액 <b>${wonI(T(rows,'sa'))} 원</b></div>`;};
-    const gbf=r=>{const gb=c.querySelector('#gubun').value;return gb==='all'||(gb==='plus'?r._fq>0:r._fq<0);};
+    const gbf=r=>{const gb=c.querySelector('#gubun').value;return gb==='all'||(gb==='plus'?r.sq>0:r.sq<0);};
     const gtRow=rows=>rows.length?`<tr class="grandtot">
       <td colspan="${dom==='PRD'?3:2}" class="right">총계 (${won(rows.length)}건)</td>
-      <td class="num">${won(T(rows,'_fq'))}</td><td></td><td class="num">${wonI(T(rows,'_fa'))}</td>
+      <td class="num">${won(T(rows,'sq'))}</td><td></td><td class="num">${wonI(T(rows,'sa'))}</td>
       <td></td><td></td><td></td>
       <td class="num">${won(T(rows,'bq'))}</td><td></td><td class="num">${wonI(T(rows,'ba'))}</td>
       <td class="num">${won(T(rows,'iq'))}</td><td></td><td class="num">${wonI(T(rows,'ia'))}</td>
       <td class="num">${won(T(rows,'oq'))}</td><td></td><td class="num">${wonI(T(rows,'oa'))}</td>
       <td class="num">${won(T(rows,'tq'))}</td><td></td><td class="num">${wonI(T(rows,'ta'))}</td>
-      ${dom==='MAT'?`<td class="num"><b>${won(T(rows,'sq'))}</b></td><td class="num" style="background:#fff5e6"><b>${won(T(rows,'cq'))}</b></td><td class="num" style="background:#fff5e6"><b>${wonI(T(rows,'ca'))}</b></td>`:''}
+      ${dom==='MAT'?`<td class="num" style="background:#fff5e6"><b>${won(T(rows,'cq'))}</b></td><td class="num" style="background:#fff5e6"><b>${wonI(T(rows,'ca'))}</b></td>`:''}
       <td class="num">${wonI(T(rows,'va'))}</td>
       <td></td><td></td><td></td></tr>`:'';
     const render=rows=>{cur=rows;c.querySelector('#body').innerHTML=rows.length?rows.map(r=>`<tr>
       <td><b>${esc(r.cd)}</b></td><td class="cap" title="${esc(r.nm)}">${esc(r.nm)}</td>${dom==='PRD'?`<td>${esc(r.loc)||'가공창고'}</td>`:''}
-      <td class="num gstock qty"><b>${won(r._fq)}</b></td><td class="num gstock">${won(r._su)}</td><td class="num gstock amt"><b>${wonI(r._fa)}</b></td>
+      <td class="num gstock qty"><b>${won(r.sq)}</b></td><td class="num gstock">${won(r._su)}</td><td class="num gstock amt"><b>${wonI(r.sa)}</b></td>
       <td>${esc(r._sgn)}</td><td>${esc(r._ctn)}</td><td class="center">${esc(r.unit)||''}</td>
       <td class="num">${won(r.bq)}</td><td class="num">${won(r._bu)}</td><td class="num">${wonI(r.ba)}</td>
       <td class="num">${won(r.iq)}</td><td class="num">${won(r._iu)}</td><td class="num">${wonI(r.ia)}</td>
       <td class="num">${won(r.oq)}</td><td class="num">${won(r._ou)}</td><td class="num">${wonI(r.oa)}</td>
       <td class="num">${won(r.tq)}</td><td class="num">${won(r._tu)}</td><td class="num">${wonI(r.ta)}</td>
-      ${dom==='MAT'?`<td class="num">${won(r.sq)}</td><td class="num" style="background:#fff5e6">${(+r.cq||0)?won(r.cq):''}</td><td class="num" style="background:#fff5e6">${(+r.ca||0)?wonI(r.ca):''}</td>`:''}
+      ${dom==='MAT'?`<td class="num" style="background:#fff5e6">${(+r.cq||0)?won(r.cq):''}</td><td class="num" style="background:#fff5e6">${(+r.ca||0)?wonI(r.ca):''}</td>`:''}
       <td class="num" ${Math.abs(+r.va||0)>1?'style="color:#c0392b;font-weight:700"':''} title="단가0 보정·마이너스재고 단가리셋 분">${(+r.va||0)?wonI(r.va):''}</td>
       <td>${esc(r._chg)||'-'}</td><td class="cap" title="${esc(r.cust)||''}">${esc(r.cust)||'-'}</td><td class="center">${esc(r._lin)||'-'}</td></tr>`).join('')+gtRow(rows)
-      :`<tr><td colspan="${dom==='PRD'?25:27}" class="empty">${pool.length===0?'해당 기간 자료 없음':'검색 결과 없음(필터 조건 확인)'}</td></tr>`;
+      :`<tr><td colspan="${dom==='PRD'?25:26}" class="empty">${pool.length===0?'해당 기간 자료 없음':'검색 결과 없음(필터 조건 확인)'}</td></tr>`;
       sumbar(rows);c.querySelector('#cnt').textContent=`${rows.length}건 / 대상 ${pool.length}건`;};
     const cutoffYmd=()=>{const v=c.querySelector('#dto').value; if(!v)return null;
       const d=new Date(v); if(isNaN(d))return null; d.setMonth(d.getMonth()-3);
@@ -847,15 +845,12 @@ SCREEN.matledger=(c)=>{
     c.querySelector('#longstk').onchange=apply;
     c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#sg').value='';c.querySelector('#cust').value='';c.querySelector('#gubun').value='all';c.querySelector('#longstk').checked=false;apply();};
     c.querySelector('#xls').onclick=()=>downloadCSV(`${({MAT:'자재',PRD:'생산',SAL:'영업'})[dom]}수불장_${date2ymd(dFrom)}_${date2ymd(dTo)}.csv`,
-      ['품목코드','품명','재고수량','재고단가','재고금액','소분류','매입유형','단위','기초재고','기초단가','기초금액','입고수량','입고단가','입고금액','출고수량','출고단가','출고금액','기타수량','기타단가','기타금액',...(dom==='MAT'?['창고기말','이월재고수량','이월재고금액']:[]),'평가조정','담당자','매입처명','최종입고일'],
-      cur.map(r=>[r.cd,r.nm,r._fq,r._su,Math.round(r._fa),r._sgn,r._ctn,r.unit,r.bq,r._bu,Math.round(r.ba),r.iq,r._iu,Math.round(r.ia),r.oq,r._ou,Math.round(r.oa),r.tq,r._tu,Math.round(r.ta),...(dom==='MAT'?[r.sq,r.cq||0,Math.round(r.ca||0)]:[]),Math.round(r.va||0),r._chg,r.cust,r._lin]));
+      ['품목코드','품명','재고수량','재고단가','재고금액','소분류','매입유형','단위','기초재고','기초단가','기초금액','입고수량','입고단가','입고금액','출고수량','출고단가','출고금액','기타수량','기타단가','기타금액',...(dom==='MAT'?['이월수량','이월금액']:[]),'평가조정','담당자','매입처명','최종입고일'],
+      cur.map(r=>[r.cd,r.nm,r.sq,r._su,Math.round(r.sa),r._sgn,r._ctn,r.unit,r.bq,r._bu,Math.round(r.ba),r.iq,r._iu,Math.round(r.ia),r.oq,r._ou,Math.round(r.oa),r.tq,r._tu,Math.round(r.ta),...(dom==='MAT'?[r.cq||0,Math.round(r.ca||0)]:[]),Math.round(r.va||0),r._chg,r.cust,r._lin]));
     if(loading){c.querySelector('#body').innerHTML=spinRow(dom==='PRD'?25:24);c.querySelector('#cnt').textContent='';}
-    else if(msg){c.querySelector('#body').innerHTML=`<tr><td colspan="${dom==='PRD'?25:27}" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`;c.querySelector('#cnt').textContent='';}
+    else if(msg){c.querySelector('#body').innerHTML=`<tr><td colspan="${dom==='PRD'?25:26}" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`;c.querySelector('#cnt').textContent='';}
     else{render(pool);
-      // ★정렬 필드는 **열 순서와 1:1** 이어야 한다 — 자재에만 창고기말·이월재고 3열이 더 있다.
-      enableSort(c,['cd','nm','_fq','_su','_fa',...(dom==='PRD'?['loc']:[]),'_sgn','_ctn','unit',
-        'bq','_bu','ba','iq','_iu','ia','oq','_ou','oa','tq','_tu','ta',
-        ...(dom==='MAT'?['sq','cq','ca']:[]),'va','_chg','cust','lastin'],()=>cur,render);}
+      enableSort(c,['cd','nm','sq','_su','sa','_sgn','_ctn','unit','bq','_bu','ba','iq','_iu','ia','oq','_ou','oa','tq','_tu','ta','va','_chg','cust','lastin'],()=>cur,render);}
   };
   load();
 };

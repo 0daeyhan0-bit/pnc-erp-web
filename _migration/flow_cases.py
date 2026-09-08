@@ -997,9 +997,18 @@ def _ck_carry(res, ctx):
     # 창고 이동·잔량이 전부 0 인데 이월만 있는 행 = 전량 협력사 보관. 이게 안 보이면 회귀다.
     onlyc = [r for r in rows if float(r.get("cq") or 0)
              and not any(abs(float(r.get(k) or 0)) > 1e-9 for k in ("bq", "iq", "oq", "tq", "sq"))]
-    return ok, (f"이월 {car.get('items')}품목 · 수량 {float(car.get('qty') or 0):,.0f} · "
-                f"금액 {float(car.get('amt') or 0):,.0f}원(원가) · 전량이월 행 {len(onlyc)} · "
-                f"행합{'일치' if ok else '★불일치'}")
+    # ★기말재고 = 창고 + 이월 이어야 한다(대표 확정) — 합계에 반영 안 되면 회귀.
+    t = res.get('totals') or {}
+    def _f(k): return float(t.get(k) or 0)
+    f_ok = (abs(_f('fq') - (_f('sq') + _f('cq'))) < 0.01
+            and abs(_f('fa') - (_f('sa') + _f('ca'))) < 0.01)
+    bad = [r for r in rows
+           if abs(float(r.get('fq') or 0) - (float(r.get('sq') or 0) + float(r.get('cq') or 0))) > 0.01]
+    note = (f"이월 {car.get('items')}품목 · 수량 {_f('cq'):,.0f} · 금액 {_f('ca'):,.0f}원(원가) · "
+            f"전량이월 행 {len(onlyc)} · 행합{'일치' if ok else '★불일치'} · "
+            f"기말재고 {_f('fq'):,.0f} = 창고 {_f('sq'):,.0f} + 이월 {_f('cq'):,.0f} "
+            f"{'반영' if (f_ok and not bad) else '★미반영(행불일치 ' + str(len(bad)) + ')'}")
+    return (ok and f_ok and not bad), note
 
 
 LEDGER_HTTP_CASES = [

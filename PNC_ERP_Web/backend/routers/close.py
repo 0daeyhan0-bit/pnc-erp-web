@@ -2028,7 +2028,8 @@ def _mat_ledger(cur, fr6, to6, zero):
                      "oq": round(a["outq"], 4), "oa": round(a["outamt"], 2),
                      "tq": round(a["trans"], 4), "ta": round(a["transamt"], 2),
                      "sq": round(eq, 4), "sa": round(eq * eavg, 2), "avg": round(eavg, 4),
-                     "cq": 0.0, "ca": 0.0})   # 이월(협력사 보관) — 아래에서 채운다
+                     "cq": 0.0, "ca": 0.0,      # 이월(협력사 보관) — 아래에서 채운다
+                     "fq": round(eq, 4), "fa": round(eq * eavg, 2)})   # 기말재고 = 창고 + 이월
     # ★이월재고 = 창고에서 나갔지만(tag5) 매출로 인식하지 않고 **협력사에 있는 우리 재고**.
     #   기말(창고)에 섞지 않고 별도 컬럼으로 둔다. 평가는 그 품목의 기말 이동평균단가(원가).
     _cq = _cq0
@@ -2038,6 +2039,10 @@ def _mat_ledger(cur, fr6, to6, zero):
             if q:
                 r["cq"] = round(q, 4)
                 r["ca"] = round(q * r["avg"], 2)
+                # ★기말재고 합계에 이월을 **반영**한다(대표 확정 2026-09-08) —
+                #   협력사에 있어도 우리 재고다. 창고기말(sq)은 불변식 검산용으로 그대로 둔다.
+                r["fq"] = round(r["sq"] + r["cq"], 4)
+                r["fa"] = round(r["sa"] + r["ca"], 2)
     _attach_item_info(cur, rows, to6)
     return rows, breaks, (f"기초 {base_ymd} {src}" + (f" → 전표이월 {pre_start}~{pre_end}" if pre_start <= pre_end else ""))
 
@@ -2090,10 +2095,12 @@ def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str 
             k = q.strip().upper()
             rows = [r for r in rows if k in r["cd"] or k in str(r.get("nm", "")).upper()]
         tot = {f: round(sum(r.get(f, 0) for r in rows), 2)
-               for f in ("bq", "ba", "iq", "ia", "oq", "oa", "tq", "ta", "va", "sq", "sa", "cq", "ca")}
+               for f in ("bq", "ba", "iq", "ia", "oq", "oa", "tq", "ta", "va", "sq", "sa",
+                         "cq", "ca", "fq", "fa")}
         va_rows = [r["cd"] for r in rows if abs(r["va"]) > 1.0]
         return {"domain": d, "from": fr6, "to": to6, "count": len(rows), "rows": rows, "totals": tot,
                 # ★이월 = 매출 아님·협력사 보관 중인 우리 재고. 기말(창고)과 **별도**다.
+                # ★기말재고(fq/fa) = 창고(sq/sa) + 이월(cq/ca). 화면 헤드라인 재고는 이 값을 쓴다.
                 "carry": {"qty": tot["cq"], "amt": tot["ca"],
                           "items": len([r for r in rows if r.get("cq")]),
                           "why": "불출(tag5)했으나 협력사와 협의해 이월 — 당월 매출 아님, 협력사 보관 우리 재고(원가평가)"},
