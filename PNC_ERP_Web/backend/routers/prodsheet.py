@@ -791,7 +791,7 @@ def _prod_dest(cur, item, upper_item=None):
     _up = str(upper_item or "").strip()
     if _up and _up != it:
         cur.execute("""SELECT ISNULL(m.in_cust,''),
-                              ISNULL((SELECT TOP 1 b.VIR_ITEM_FLAG FROM nx.CS_M_ITEM_BOM b WITH(NOLOCK)
+                              ISNULL((SELECT TOP 1 b.VIR_ITEM_FLAG FROM nx.v_pr_bom b WITH(NOLOCK)
                                        WHERE b.MAT_CODE=? ),'0')
                          FROM nx.item m WITH(NOLOCK) WHERE m.ITEM_CODE=?""", _up, _up)
         _r = cur.fetchone()
@@ -812,7 +812,7 @@ def _prod_dest(cur, item, upper_item=None):
             depth += 1
             _c = stack.pop(0)
             cur.execute("""SELECT b.ITEM_CODE, ISNULL(b.VIR_ITEM_FLAG,'0'), ISNULL(m.in_cust,'')
-                             FROM nx.CS_M_ITEM_BOM b WITH(NOLOCK)
+                             FROM nx.v_pr_bom b WITH(NOLOCK)
                              LEFT JOIN nx.item m WITH(NOLOCK) ON m.ITEM_CODE=b.ITEM_CODE
                             WHERE b.MAT_CODE=?""", _c)
             for p, vir, incust in [(str(r[0] or '').strip(), str(r[1] or '0'), str(r[2] or '').strip())
@@ -1584,9 +1584,9 @@ def procbc_save(payload: dict = Body(...)):
             stock["mats"].append({"mat": mat, "part": part_code, "qty": round(dq, 4)})
 
         # ⑧ 준비재고 차감 — 하위 자도번의 파트별
-        cur.execute("""SELECT DISTINCT ISNULL(GAGONG_PROC_CODE,'') g FROM nx.PR_M_ITEM_BOM WITH(NOLOCK)
+        cur.execute("""SELECT DISTINCT ISNULL(GAGONG_PROC_CODE,'') g FROM nx.v_pr_bom WITH(NOLOCK)
                         WHERE ITEM_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')<>''
-                          AND ISNULL(EXCEPT_FLAG,'0')<>'1'""", item)
+                          AND ISNULL(EXCEPT_FLAG,'0')<>'1'""", item)  # ★미러→클린(v_pr_bom·DISTINCT gpc diff0 80/80·2026-09-09)
         parts = [str(r[0]).strip() for r in cur.fetchall()
                  if r[0] and str(r[0]).strip().upper() not in ('Q1000', 'Q2000')]
         if not parts:

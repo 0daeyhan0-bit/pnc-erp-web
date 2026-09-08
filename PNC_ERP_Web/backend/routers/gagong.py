@@ -860,8 +860,8 @@ def gagong_sheet_lookup(jado: str = Query("")):
         if not m:
             return {"ok": False, "msg": "자도번 %s 없음" % j}
         # 상위도번(이 자도번을 쓰는 BOM 부모) 1건
-        cur.execute("""SELECT TOP 1 b.ITEM_CODE FROM nx.PR_M_ITEM_BOM b
-                        WHERE b.MAT_CODE=? AND ISNULL(b.EXCEPT_FLAG,'0')<>'1'""", j)
+        cur.execute("""SELECT TOP 1 b.ITEM_CODE FROM nx.v_pr_bom b
+                        WHERE b.MAT_CODE=? AND ISNULL(b.EXCEPT_FLAG,'0')<>'1'""", j)  # ★미러→클린(v_pr_bom·부모집합 diff0 80/80·2026-09-09)
         up = cur.fetchone()
         upper = up[0] if up else ''
         # 작업처명
