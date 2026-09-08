@@ -7,6 +7,10 @@ from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile,
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
 
 from common import _d
+try:
+    import nx_soyo_engine as _soyo   # 통일 소요엔진(CLAUDE §1-10) — common.py가 _harness를 sys.path에 추가
+except Exception:
+    _soyo = None
 router = APIRouter()
 
 # ================= 조달경로(SUB변형) 그룹 — 접미사 품번을 '동일결과 SUB' 그룹으로 묶어 조달처 배분 =================
@@ -2368,7 +2372,15 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
         # ★2026-08-20 생산 BOM(v_pr_bom)+전개제외(EXCEPT_FLAG)로 전환: 발주=생산 조달이므로 생산구조·생산flag를 씀(compose STEP6/7 동일).
         #   전개제외 자식(상위 SUB가 통째조달=명진 등)은 발주 대상 아님(그 SUB로 귀속) → 명진 SUB 내부 MJU(미래정밀 등) 제거. + 사급여부(SAGUB_FLAG) 수집.
         #   ★v_cs_bom(원가구조)+except_flag는 구조불일치로 실 발주부품 유실(회귀검증) → v_pr_bom 사용이 정답(레거시 외부부품 유실 최소).
-        cur.execute("""WITH tree AS (
+        # ★소요엔진 이관(2026-09-08·§1-10): 발주 조달부품 소요 = nx_soyo_engine.order_soyo
+        #   (v_pr_bom 재귀·except≠1·USE_QTY·MAKE_TYPE='1' 자식만 재귀·RAC 제외). 구 ad-hoc 재귀CTE와
+        #   diff0(40/40 qty+sagub) 검증 후 전환. bom_line↔레거시 sync 전제(BOM_LINE_LEGACY_SYNC_260908).
+        if _soyo is not None:
+            _os = _soyo.order_soyo(_get_cost_engine(), item)
+            agg = {c: v[0] for c, v in _os.items()}
+            sagub = {c: v[1] for c, v in _os.items()}
+        else:
+            cur.execute("""WITH tree AS (
             SELECT LTRIM(RTRIM(MAT_CODE)) c, CAST(USE_QTY AS decimal(28,10)) q, CAST(ISNULL(SAGUB_FLAG,'0') AS int) sg, 1 lvl
             FROM PARTNER_ERP_TEST3.nx.v_pr_bom WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' AND ISNULL(EXCEPT_FLAG,'0')<>'1'
             UNION ALL
@@ -2377,9 +2389,9 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
             JOIN PARTNER_ERP_TEST3.nx.item pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'
             WHERE t.lvl < 10)
             SELECT c, SUM(q) qty, MAX(sg) sg FROM tree GROUP BY c OPTION(MAXRECURSION 60)""", item)
-        agg = {}; sagub = {}
-        for r in cur.fetchall():
-            _c = str(r[0]).strip(); agg[_c] = float(r[1] or 0); sagub[_c] = int(r[2] or 0)
+            agg = {}; sagub = {}
+            for r in cur.fetchall():
+                _c = str(r[0]).strip(); agg[_c] = float(r[1] or 0); sagub[_c] = int(r[2] or 0)
         if not agg:
             return {"item": item, "asof": asof, "rows": [], "n": 0, "note": "현행 BOM 구성 없음"}
         codes = [c for c in agg if not c.upper().startswith("RAC")]   # 용접봉 제외

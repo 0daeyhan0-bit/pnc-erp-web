@@ -146,7 +146,7 @@ LG BOM(Assembly Pull) 기준 전개. 소스 = `nx.lg_bom_ver`(point-in-time).
 | 3 | `backflush.py:133/163/198/254` | 재고차감축(중량·다단계) | walker 신설(별도축) | nx.bom L169/206 잔존·단순치환 아님 |
 | 4 | `ready.py:106`(setcheck)·`kitting.py:89/296/832` | 키팅 물량/충당 | explode walker | |
 | 5 | `setin.py:351`(_set_bom_expand)·`procbc.py:74`(_bc_bom) | 세트입고 명세/차감 | prod_input_soyo 계열 | coopplan:1593이 setin 소비 |
-| 6 | `sourcing.py:2371`(current_order) | 자동발주 소요량 | **신규 walker 필요**(prod_soyo 재사용 불가·실증) | ★2026-09-08 diff0검증: sourcing(MAKE_TYPE게이트 재귀·USE_QTY·발주조달부품) vs prod_soyo(전관통 최하위·USE_QTY_PR) = 20표본중 8 다름 → **계산대상 상이·재사용 무효**. 새 walker(make_type게이트) 필요 |
+| 6 | `sourcing.py:2371`(current_order) | 자동발주 소요량 | **`order_soyo`(신규 walker)** | ✅**완료(2026-09-08)**: prod_soyo 재사용 불가 실증(20중8다름) → 전용 walker `order_soyo`(make_type게이트·USE_QTY·sagub·RAC제외) 신설. 옛 CTE와 **diff0 40/40(qty+sagub)** 후 스왑(레거시 CTE=폴백 보존). feat/single-source-price |
 
 **★2026-09-08 재사용 검증 교훈(대표 지적)**: "기존 walker 재사용"도 반드시 옛 로직과 **diff0로 적합성 먼저 증명**해야 한다(추측금지). 실증 결과 setin(거래처-path)·sourcing(make_type게이트) 모두 기존 walker와 계산대상이 달라 **각자 새 walker 필요**. prodsheet만 prod_input_soyo와 정확히 일치(diff0)해 재사용 성공.
 | 7 | `gagong.py:213/539/622` | 가공진척 재고충당 롤업 | (저순위·표시성) | |
