@@ -479,9 +479,23 @@ def dailypurissue(date: str = Query(""), frm: str = Query(""), nocache: str = Qu
             WHERE domain=? AND ptype='M' AND period=(SELECT MAX(period) FROM nx.stock_snapshot WHERE domain=? AND ptype='M' AND period<?)""", dom, dom, ym)
         b = float(_lcur.fetchone()[0] or 0)
         # 기말 = 조회일 이하 최신 일마감(D, period<=d6). 없으면 기초(변동0).
-        _lcur.execute("""SELECT ISNULL(SUM(stock_amt),0) FROM nx.stock_snapshot
-            WHERE domain=? AND ptype='D' AND period=(SELECT MAX(period) FROM nx.stock_snapshot WHERE domain=? AND ptype='D' AND period<=?)""", dom, dom, d6)
-        e = float(_lcur.fetchone()[0] or 0)
+        # ★stale 스킵 — 여기는 성능 때문에 스냅샷을 **직독**한다(수불장 ledger 는 월 전체 재생이라 30초).
+        #   그래서 기초 해석기(_mv_base/_prd_base/_sal_base)를 안 거치는 **유일한 우회 경로**다.
+        #   잠정 일마감이 낡았는데 그대로 SUM 하면 **조용히 틀린 금액**이 화면에 뜬다.
+        #   ⟹ 마감 엔진과 **같은 공용 판정**(close._fp_stale)을 써서 낡은 일마감은 건너뛰고
+        #      그 다음 최신 일마감으로 내려간다. 다 낡았으면 기초(월마감)를 쓴다.
+        #   (판정을 여기서 따로 짜면 또 갈린다 — §0-★★ "같은 규칙은 한 곳에서")
+        from routers.close import _fp_stale
+        _lcur.execute("""SELECT TOP 5 period FROM nx.period_close
+            WHERE domain=? AND ptype='D' AND close_flag=1 AND period<=? ORDER BY period DESC""", dom, d6)
+        e = 0.0
+        for (_p,) in _lcur.fetchall():
+            if _fp_stale(_lcur, dom, 'D', _p):
+                continue
+            _lcur.execute("""SELECT ISNULL(SUM(stock_amt),0) FROM nx.stock_snapshot
+                WHERE domain=? AND ptype='D' AND period=?""", dom, _p)
+            e = float(_lcur.fetchone()[0] or 0)
+            break
         return round(b), round(e if e else b)
     try: base_m, cur_m = _snapsum('MAT')
     except Exception: pass

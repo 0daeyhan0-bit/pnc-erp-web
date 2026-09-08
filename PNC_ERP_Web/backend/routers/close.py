@@ -80,8 +80,11 @@ def close_status():
                                WHERE domain=? AND ptype=? AND close_flag=1 ORDER BY period DESC""", d, t)
                 r = cur.fetchone()
                 # ★firm = 확정 여부. 월마감만 확정·잠금이고 일마감은 잠정이다(CLOSE_REDESIGN §5·§7).
+                # ★stale = 그 스냅샷 확정 이후에 그 구간 전표가 바뀌었다 → 화면에 '갱신필요'.
+                #   값은 이미 안전하다(기초로 안 쓴다). 이건 "다시 돌리면 빨라진다"는 안내다.
+                stale = 1 if (r and t == "D" and _fp_stale(cur, d, t, r[0])) else 0
                 rows.append({"domain": d, "domain_nm": dnm, "ptype": t, "ptype_nm": tnm,
-                             "firm": 1 if t == "M" else 0,
+                             "firm": 1 if t == "M" else 0, "stale": stale,
                              "last": (r[0] if r else None), "user": (r[1] if r else None),
                              "dt": (str(r[2]) if r and r[2] else None),
                              "snap_ready": 1 if d in SNAP_READY else 0})
@@ -666,6 +669,105 @@ def _snapshot_rows(cur, domain, ptype, period, with_loc=False):
     return out
 
 
+# ===== 잠정 스냅샷 stale 방지 — 지문(fingerprint) **공용 판정** =====
+# ★2026-09-08. 일마감이 '잠정'이 되면서(§3·§5) 생긴 유일한 위험을 막는다:
+#   **잠정 스냅샷 일자 이전에 전표가 나중에 들어오면 그 스냅샷이 낡는다** → 기초가 틀리면
+#   그 뒤 전부가 틀린다. 순차강제를 걷어냈으므로 더 쉽게 생긴다.
+#
+# 왜 훅이 아니라 읽기시점 대조인가:
+#   common.stock_changed() 호출부가 **42곳인데 아무도 일자를 안 넘긴다**. 42곳에 일자를 흘리면
+#   한 곳만 빠져도 그대로 구멍이다(재고게이팅 "예외 없음" 과 같은 함정).
+#   ⟹ 쓰는 쪽이 뭘 하든 **읽을 때 매번 확인**한다 = 빠뜨릴 수가 없다.
+#
+# 핵심: stale 이면 표시만 하는 게 아니라 **기초로 쓰지 않는다.** 표시만 하고 계속 쓰면
+#   사람이 잊는 순간 틀린 재고가 남는다(STOCK_GATING_CLOSE_LOCK_RULES 가 순차마감 완화를
+#   보류했던 바로 그 이유). 안 쓰면 더 이전 확정(월마감)에서 재생 → 값은 항상 정확하다.
+#
+# 지문 = (행수, 수량합, 최근 INSERT, 최근 UPDATE)
+#   행수·수량합이 있어야 **삭제**가 잡힌다(삭제는 datetime 으로 안 잡힌다).
+#   창 = 직전 확정 월마감 다음날 ~ 스냅샷일. 월마감 구간은 규칙B로 잠겨 변할 수 없다.
+#   실측 비용 0.03~0.07초/테이블 → 도메인당 0.1~0.3초, 캐시되면 0.
+#   ※pu_t_cut_dtl(INSERT만)·pr_t_prod_dtl(UPDATE만) 은 시각이 한쪽뿐이나 행수·수량합으로 커버된다.
+_FP_SRC = {
+    "MAT": [("PU_T_STOCK_MAINT", "MAINT_YMD", "MAINT_QTY"),
+            ("PU_T_STOCK_MAINT_C", "MAINT_YMD", "MAINT_QTY")],
+    "PRD": [("PU_T_STOCK_MAINT", "MAINT_YMD", "MAINT_QTY"),
+            ("pu_t_cut_dtl", "CUT_YMD", "CUT_QTY"),
+            ("pr_t_prod_dtl", "PROD_YMD", "PROD_QTY"),
+            ("PR_T_STOCK_MAINT_MAT", "MAINT_YMD", "MAINT_QTY"),
+            ("SA_T_STOCK_MAINT", "MAINT_YMD", "MAINT_QTY")],
+    "SAL": [("SA_T_STOCK_MAINT", "MAINT_YMD", "MAINT_QTY"),
+            ("PU_T_STOCK_MAINT", "MAINT_YMD", "MAINT_QTY"),
+            ("prod_stock_adjust", "MAINT_YMD", "MAINT_QTY")],
+}
+_FP_HAS_DT = {}          # {테이블: (INSERT_DATETIME 있나, UPDATE_DATETIME 있나)} 1회 조회 캐시
+
+
+def _fp_dt_cols(cur, tbl):
+    if tbl not in _FP_HAS_DT:
+        cur.execute("SELECT UPPER(name) FROM sys.columns WHERE object_id=OBJECT_ID(?)", "nx." + tbl)
+        c = {r[0] for r in cur.fetchall()}
+        _FP_HAS_DT[tbl] = ("INSERT_DATETIME" in c, "UPDATE_DATETIME" in c)
+    return _FP_HAS_DT[tbl]
+
+
+def _fp_window(cur, domain, ptype, period):
+    """지문 창 = (직전 확정 월마감 다음날, 스냅샷 기준일). 월마감 구간은 잠겨 있어 볼 필요가 없다."""
+    end = period if ptype == "D" else _month_end(period)
+    cur.execute("""SELECT TOP 1 period FROM nx.period_close
+                    WHERE domain=? AND ptype='M' AND close_flag=1 AND period < ?
+                    ORDER BY period DESC""", domain, end[:4])
+    r = cur.fetchone()
+    return (_next_ymd(_month_end(r[0])) if r else "000000"), end
+
+
+def _fp_calc(cur, domain, ptype, period):
+    """현재 지문. 반환 (행수, 수량합, 최근INSERT, 최근UPDATE). 조회 실패 테이블은 건너뛴다."""
+    fr, to = _fp_window(cur, domain, ptype, period)
+    rows = 0; qsum = 0.0; ins = None; upd = None
+    for tbl, ycol, qcol in _FP_SRC.get(str(domain).upper(), []):
+        has_i, has_u = _fp_dt_cols(cur, tbl)
+        sel = [f"COUNT_BIG(*)", f"ISNULL(SUM(CAST({qcol} AS float)),0)",
+               ("MAX(INSERT_DATETIME)" if has_i else "NULL"),
+               ("MAX(UPDATE_DATETIME)" if has_u else "NULL")]
+        try:
+            cur.execute(f"SELECT {', '.join(sel)} FROM nx.{tbl} WHERE {ycol} BETWEEN ? AND ?", fr, to)
+            c, q, i, u = cur.fetchone()
+        except Exception:
+            continue          # 테이블 부재(구 배포본) → 그 소스는 지문에서 제외
+        rows += int(c or 0); qsum += float(q or 0)
+        if i and (ins is None or i > ins):
+            ins = i
+        if u and (upd is None or u > upd):
+            upd = u
+    return rows, round(qsum, 4), ins, upd
+
+
+def _fp_store(cur, domain, ptype, period):
+    """마감 실행 시 지문을 같이 남긴다(같은 트랜잭션)."""
+    r, q, i, u = _fp_calc(cur, domain, ptype, period)
+    cur.execute("""UPDATE nx.period_close SET src_rows=?, src_sum=?, src_ins=?, src_upd=?
+                    WHERE domain=? AND ptype=? AND period=?""", r, q, i, u, domain, ptype, period)
+    return r, q, i, u
+
+
+def _fp_stale(cur, domain, ptype, period):
+    """이 스냅샷이 낡았는가. **지문이 없으면(NULL) stale 로 보지 않는다** —
+       이 기능 이전에 만든 스냅샷을 전부 무효로 돌리면 기존 마감이 통째로 재생돼 위험하다.
+       (그런 스냅샷은 다시 마감하면 지문이 붙는다.)"""
+    try:
+        cur.execute("""SELECT src_rows, src_sum, src_ins, src_upd FROM nx.period_close
+                        WHERE domain=? AND ptype=? AND period=?""", domain, ptype, period)
+        r = cur.fetchone()
+    except Exception:
+        return False          # 컬럼 미적용 환경(구 배포본) → 종전 동작 유지
+    if not r or r[0] is None:
+        return False
+    now = _fp_calc(cur, domain, ptype, period)
+    return (int(r[0]) != now[0] or round(float(r[1] or 0), 4) != now[1]
+            or r[2] != now[2] or r[3] != now[3])
+
+
 def _mv_base(cur, target, monthly=False):
     """기초 = target 직전의 가장 최근 확정 스냅샷(일·월 통합). 없으면 레거시 월마감 시드.
        반환 (state{mat:[qty,avg]}, base_ymd, 출처).
@@ -680,7 +782,9 @@ def _mv_base(cur, target, monthly=False):
                         WHERE domain='MAT' AND ptype='D' AND close_flag=1 AND period < ?
                         ORDER BY period DESC""", target)
         r = cur.fetchone()
-        if r:
+        # ★stale 이면 기초로 쓰지 않는다(§9-1). 버리면 아래 월마감 후보로 내려가 그 지점부터
+        #   재생하므로 값은 항상 정확하다 — 사람이 재마감을 잊어도 안전하다.
+        if r and not _fp_stale(cur, "MAT", "D", r[0]):
             cand = [(r[0], "D", r[0])]
     # ★"가장 최신 월마감" 하나만 보고 target 보다 뒤면 버리면 안 된다 — 그러면 그 아래
     #   쓸 수 있는 월마감이 있는데도 **레거시 시드로 떨어진다**(2026-08-28 실측).
@@ -1162,7 +1266,7 @@ def _prd_base(cur, target):
                     ORDER BY CASE WHEN ptype='D' THEN period ELSE period+'99' END DESC""", target)
     for pt, per in cur.fetchall():
         end = per if pt == 'D' else _month_end(per)
-        if end < target:
+        if end < target and not (pt == 'D' and _fp_stale(cur, 'PRD', pt, per)):   # ★stale 잠정 스냅샷 건너뜀
             st = {}
             for it, lo, q, amt, av in _snapshot_rows(cur, 'PRD', pt, per, with_loc=True):
                 q = float(q or 0); amt = float(amt or 0)
@@ -1423,6 +1527,7 @@ def close_run(payload: dict = Body(...)):
         if cur.rowcount == 0:
             cur.execute("""INSERT INTO nx.period_close(domain,ptype,period,close_flag,close_user,close_dt,note)
                            VALUES(?,?,?,1,?,GETDATE(),?)""", d, t, p, user, note)
+        _fp_store(cur, d, t, p)    # ★지문 기록 — 이후 이 스냅샷이 낡았는지 판정하는 근거
         cn.commit()
         return {"ok": True, "domain": d, "ptype": t, "period": p, "snapshot_rows": n, "snapshot_asof": asof,
                 "firm": 1 if t == "M" else 0, "refresh": 1 if refresh else 0,
@@ -1706,7 +1811,7 @@ def _sal_base(cur, target):
                     ORDER BY CASE WHEN ptype='D' THEN period ELSE period+'99' END DESC""")
     for pt, per in cur.fetchall():
         end = per if pt == 'D' else _month_end(per)
-        if end < target:
+        if end < target and not (pt == 'D' and _fp_stale(cur, 'SAL', pt, per)):   # ★stale 잠정 스냅샷 건너뜀
             st = {}
             for it, _lo, q, amt, av in _snapshot_rows(cur, 'SAL', pt, per):
                 q = float(q or 0); amt = float(amt or 0)

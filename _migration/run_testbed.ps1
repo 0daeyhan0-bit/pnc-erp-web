@@ -89,3 +89,11 @@ Write-Host ""
 Write-Host "── 수불장 부호 전수검증 (자재·생산·영업 × 입고/출고/반품) ──"
 & python _schema/ledger_signs_verify.py 2>&1 | Tee-Object -FilePath $out -Append
 if ($LASTEXITCODE -ne 0) { Write-Host "  ★수불장 부호검증 FAIL — 위 목록 확인" }
+
+# ── 6. ★잠정 스냅샷 stale 방지 (기초가 낡으면 안 쓰는가) ──────
+#   일마감이 '잠정'이 된 뒤의 유일한 위험 = 스냅샷 일자 이전에 전표가 나중에 들어오는 것.
+#   지문이 안 맞으면 그 스냅샷을 기초로 **쓰지 않아야** 한다(표시만으론 부족).
+Write-Host ""
+Write-Host "── 잠정 스냅샷 stale 방지 (자재·생산·영업) ──"
+& python _schema/snapshot_stale_verify.py 2>&1 | Tee-Object -FilePath $out -Append
+if ($LASTEXITCODE -ne 0) { Write-Host "  ★stale 방지 FAIL — 위 목록 확인" }
