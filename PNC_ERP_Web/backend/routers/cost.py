@@ -983,13 +983,13 @@ def cost_proc_save(payload: dict = Body(...)):
 def weld_get(node: str = Query(..., description="용접 관경별 조회 대상 노드(제품/SUB)"),
              roll: int = Query(1, description="1=제품 레벨 전노드(subtree) 롤업(평면모델·기본), 0=해당 노드 자체만")):
     """노드의 용접봉별 관경별 용접점수(nx.item_weld) 반환 — 내부원가/BOM구성 조립공정(용접) 편집 프리로드.
-       roll=1(기본): node + nx.bom 하위 전노드 관경별 횟수 롤업(제품 레벨=전노드 합, 평면 모델 정합 = 소요량 0.0495 등).
+       roll=1(기본): node + ★bom_line 하위 전노드 관경별 횟수 롤업(제품 레벨=전노드 합. 실쿼리=nx.bom_line+bom_header, nx.bom 아님).
        ★프리로드/표시 전용. 저장(weld/save)은 노드 단위 — 제품 롤업 저장 분배는 별도 설계."""
     node = node.strip()
     nx = _nx(); cur = nx.cursor()
     try:
         nodes = {node}
-        if roll:                                   # nx.bom 하위 전노드 수집(용접봉 RAC 제외한 구성 자식 전개)
+        if roll:                                   # bom_line 하위 전노드 수집(용접봉 RAC 제외한 구성 자식 전개. 실쿼리=nx.bom_line, nx.bom 아님)
             frontier = [node]; seen = set()
             while frontier:
                 batch = [x for x in frontier if x not in seen]

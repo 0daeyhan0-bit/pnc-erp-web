@@ -1,5 +1,9 @@
 # backflush 이관 분석 (2026-09-08) — 조사만·코드무변경
 
+> ★★정정(2026-09-08 후속감사): 이 문서 §4~7의 "(a)nx.bom 유지 vs (b)bom_line 전환" 프레이밍은 **폐기**한다.
+> 확정 정본 = **원소재 중량소요 = `_dong_of`(nx.bom_flat·CU/고강도·규격별), backflush는 이걸로 이관**(bom_line 아님).
+> `weight_explode`/`copper_by_spec`는 원가 primitive(변형SUB 2배)라 소요 금지. 최신 정본 = **`WEIGHT_BOM_SOURCE_AUDIT_260908.md`**.
+
 > 대표 지시 "먼저 분석만 보고". 소요엔진 통일(§1-10)·미러 은퇴(§1-9-2) 관점에서 backflush.py 의
 > ad-hoc BOM 재귀·nx.bom 직독을 전수 조사. **결론: 앞선 5건(use_qty 축)과 계보가 다르다 — 단순 diff0 스왑 불가.**
 

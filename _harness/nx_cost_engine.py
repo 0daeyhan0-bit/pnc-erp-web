@@ -923,7 +923,8 @@ class NxCostEngine:
         return 0.0
 
     def _weld_parts(self, item, ymd):
-        """어셈블리 용접봉(RAC) 재료+가공 = nx.bom(레거시 내부용 diff0) RAC노드 합산(base코드별).
+        """어셈블리 용접봉(RAC) 재료+가공 = naewon_nodes(★bom_line 엔진 전개, nx.bom 직독 아님) 중 RAC노드 합산(base코드별).
+           ※'레거시 내부용 diff0'=내부원가가 레거시 내부용값과 일치한다는 뜻(소스는 bom_line). nx.bom 실쿼리는 이 엔진에 없음(2026-09-08 감사).
            용접ST→proc51 가공 + 소요량×단가 재료가 이미 레거시정합으로 계산됨 → LG 용접봉에 그대로 매핑."""
         d = self.naewon_nodes(item, ymd)
         out = {}
@@ -958,7 +959,7 @@ class NxCostEngine:
         def walk(node, cumq, cumea, lvl, parent, seen, sup=''):
             info=self._load_item(node)
             if (node!=item) and self._is_weld(node):
-                # 용접봉 = 공정종속. 재료(소요량×단가) + 가공(용접ST×임율)을 레거시정합값(nx.bom RAC)으로 매핑.
+                # 용접봉 = 공정종속. 재료(소요량×단가) + 가공(용접ST×임율)을 레거시정합값(_weld_parts=naewon RAC·bom_line 엔진)으로 매핑.
                 base=node.split('-')[0]
                 wp = weld_parts.get(base) if base not in weld_used else None
                 weld_used.add(base)
@@ -1007,7 +1008,7 @@ class NxCostEngine:
         jae=round(sum(r['mat'] for r in rows),2); gg=round(sum(r['gag'] for r in rows),2)
         # overhead(일반/운반/이윤) = 레거시정합 산식(율91×(재료−LME+가공)·이윤율93×(가공+일반)·운반92) 롤업.
         # 재료·가공이 이미 diff0라 overhead도 동일 → overhead_nae(LG 노드기준)가 용접부 율을 못잡으므로 레거시정합값 사용.
-        ob=self.overhead_nae(item, ymd)   # (ilban,unban,profit) — nx.bom 롤업(레거시 내부용 diff0)
+        ob=self.overhead_nae(item, ymd)   # (ilban,unban,profit) — overhead_nae 롤업(bom_line 엔진·레거시 내부용 diff0. nx.bom 직독 아님)
         ilban,unban,profit=ob
         nae=round(jae+gg+ilban+unban+profit,2); lg=self.lg_cost(item,ymd)
         return {'rows':rows,'agg':{'jae':jae,'gagong':gg,'ilban':ilban,'unban':unban,'profit':profit,

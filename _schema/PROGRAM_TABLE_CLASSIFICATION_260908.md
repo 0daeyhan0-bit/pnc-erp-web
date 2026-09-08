@@ -1,5 +1,7 @@
 # 전 프로그램 × 사용 테이블 전수 분류 (2026-09-08)
 
+> ★정정(후속감사): §6 backflush 절의 "nx.bom 중량 원장 승격 vs bom_flat" 는 폐기. 확정 = **원소재 중량소요 = `_dong_of`(bom_flat), backflush 이관·nx.bom 제거**. 함수레벨 정본감사 = **`WEIGHT_BOM_SOURCE_AUDIT_260908.md`**.
+
 > 대표 지시로 **모든 프로그램(라우터 70 + 엔진 3)이 쓰는 테이블을 코드 grep 실측 + 기존 기록 대조로 전면 재분류**.
 > 목적 = "지금 어떤 프로그램이 어떤 테이블을 쓰는지" 한눈 지도 + 정본/미러/은퇴 구분 확정.
 > 근거: `PNC_ERP_Web/backend/routers/*.py`, `_harness/nx_{soyo,cost,lgbom}_engine.py` 전수 스캔 + `MIRROR_CLEAN_DUAL_TABLE_AUDIT.md`·`BOM_FLAT_DESIGN.md` 대조.
