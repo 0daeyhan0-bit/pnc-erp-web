@@ -403,6 +403,61 @@ def setcheck_soyo(eng, item, ymd):
     return occ
 
 
+def _wc_incust(eng, code):
+    """nx.item 의 (work_code, in_cust). 캐시. gagong P2 전개용."""
+    if not hasattr(eng, '_wcic'):
+        eng._wcic = {}
+    k = code.strip().upper()
+    if k not in eng._wcic:
+        eng.cur.execute("SELECT ISNULL(LTRIM(RTRIM(work_code)),''), ISNULL(LTRIM(RTRIM(in_cust)),'') FROM nx.item WHERE UPPER(LTRIM(RTRIM(item_code)))=?", k)
+        r = eng.cur.fetchone()
+        eng._wcic[k] = (str(r[0]).strip(), str(r[1]).strip()) if r else None   # None = nx.item 없음(=INNER JOIN 탈락)
+    return eng._wcic[k]
+
+
+def gagong_p2_parts(eng, seed_items, wcp):
+    """[가공 P2 멤버십 walker] gagong_plan4w CTE_BOM(w_pr_master P2필터) 재현(§1-10).
+    seed 도번들의 BOM전개(except_flag=0·level<10)에서 수집조건:
+      work_code=wcp AND in_cust='' AND (조상 경로에 mwc==wcp 등장 없음) AND mat∉pr_m_mat AND mat∈nx.item.
+      mwc = work_code>'' ? work_code : in_cust. cum_use = Π use_qty(경로). 반환 {root_item: {mat: int(Σcum_use)}}.
+    ※미러 pr_m_item_bom 재귀CTE 대체(컷오버 안전 §1-9-1)·bom_line 직독(_stk_lines, 용접브랜치 회피).
+      pr_m_mat 노드도 재귀는 계속(출력만 제외)·노드 재방문 허용(level<10 만 제한)=원문 동일."""
+    inmat = _prmmat_set(eng)
+    out = {}   # (root, mat) -> cum_use(float)
+
+    def walk(root, node, wcp_in_anc, cum_use, level):
+        if level >= 10:
+            return
+        for (c, uq, ex) in _stk_lines(eng, node):
+            if ex == '1':            # 원문 EXCEPT_FLAG='0' (bit 0/1, NULL 없음)
+                continue
+            m = _wc_incust(eng, c)
+            if m is None:            # nx.item 없음 = INNER JOIN 탈락(재귀도 안 함)
+                continue
+            wc, inc = m
+            mwc = wc if wc else inc
+            ncu = cum_use * uq
+            if wc == wcp and inc == '' and not wcp_in_anc and c not in inmat:
+                out[(root, c)] = out.get((root, c), 0.0) + ncu
+            walk(root, c, wcp_in_anc or (mwc == wcp), ncu, level + 1)
+
+    for it in seed_items:
+        k = it.strip().upper()
+        m = _wc_incust(eng, k)
+        if m is None:
+            continue
+        wc, inc = m
+        mwc = wc if wc else inc
+        if wc == wcp and inc == '' and k not in inmat:   # anchor(조상 없음)
+            out[(k, k)] = out.get((k, k), 0.0) + 1.0
+        walk(k, k, (mwc == wcp), 1.0, 1)
+
+    res = {}
+    for (root, mat), q in out.items():
+        res.setdefault(root, {})[mat] = int(q or 0)
+    return res
+
+
 def _setin_lines(eng, item):
     """세트입고 전개용 v_pr_bom 자식 (child, USE_QTY, except, set_except, in_gagong_proc). 캐시."""
     if not hasattr(eng, '_setl'):
