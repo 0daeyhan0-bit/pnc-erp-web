@@ -55,7 +55,7 @@
 | 미러(읽기전용) | 행수 | 클린 대체 | 클린 행수 | 조치 |
 |---|---|---|---|---|
 | PR_M_ITEM_PROC_GAGONG | 9,899 | nx.routing | 173,099 | 읽기 repoint(grain 매핑 검증) |
-| PR_M_ITEM_BOM · CS_M_ITEM_BOM | 42,550·42,495 | nx.bom_line/v_pr_bom | 37,714 | 읽기 repoint(소요엔진/bom_line) |
+| ~~PR_M_ITEM_BOM · CS_M_ITEM_BOM~~ ✅완료 | — | v_pr_bom / bom_line | — | **7/7 repoint 완료(2026-09-09·diff0)**: gagong/prodsheet(3)/procbc는 v_pr_bom(부모·VIR·gpc 80/80 diff0), ready 재귀CTE는 bom_line+header(60/60 diff0·용접브랜치회피). 미러 read=0 |
 | PR_M_ITEM_SUB | 71,043 | nx.item_sub | 14,466 | ★커버리지 격차 확인 후 repoint |
 | PR_M_MODEL_BOM | 63,035 | nx.model_bom | **0(빈)** | ★clean 재빌드 필요 or 미러 유지판정 |
 | PR_M_ITEM_BLOB | 121,832 | (없음) | — | 도면 blob·클린 신설 or 이관대상 판정 |
