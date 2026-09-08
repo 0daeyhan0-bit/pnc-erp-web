@@ -11,6 +11,7 @@
   ③ gagongproc_align= non-empty gagong_proc 차이 PR 정합
   ④ vir_align       = vir_item PR 정합(재귀 영향)
   ⑤ sagub_align     = sagub_default PR 정합
+  ⑥ kitting_align   = kitting(KITTING_FLAG) PR 정합(키팅/준비재고체크 분류용·소요/원가 무영향)
 전부 멱등·백업 자동. 검증: 후속 mirror_recon + (필요시) 편성 소요 diff0 대조.
 ★★생산계획 절대정확이 일순위(대표) → 편입 후 편성 소요 diff0 상시 확인.
 
@@ -26,6 +27,7 @@ STEPS = [
     ('③ gagong_proc 정합', 'r_bomline_gagongproc_align.py'),
     ('④ vir_item 정합', 'r_bomline_vir_align.py'),
     ('⑤ sagub_default 정합', 'r_bomline_sagub_align.py'),
+    ('⑥ kitting 정합', 'r_bomline_kitting_align.py'),
 ]
 print("=== bom_line 구조 sync %s ===" % ('(COMMIT)' if COMMIT else '(DRY)'))
 for label, script in STEPS:

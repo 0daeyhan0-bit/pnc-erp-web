@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _assert_open, stock_changed)
+import nx_soyo_engine as _soyo   # ★준비재고체크 BOM전개 = 통일 소요엔진 walker(§1-10). CS_M_ITEM_BOM 재귀 대체(컷오버 안전 §1-9-1)
 
 router = APIRouter()
 
@@ -52,8 +53,9 @@ def ready_plan(from_ymd: str = Query(""), to_ymd: str = Query(""), line: str = Q
 def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Query(0),
                    src: str = Query("nx")):
     """★키팅 [확인] 팝업(레거시 w_pr_input_466) — 도번의 자도번별 사용수량·재고·세트가능수량·협력사.
-       ★BOM 소스 = CS_M_ITEM_BOM(웹 정본). 레거시 화면은 PR_M_ITEM_BOM을 쓰지만 실측 결과 두 테이블이
-         동일(자도번·USE_QTY·KITTING_FLAG 일치)이라, 웹 다른 화면(bom.py 등)과 기준을 통일함.
+       ★BOM 소스 = 통일 소요엔진 walker `setcheck_soyo`(bom_line 직독, §1-10·컷오버 안전 §1-9-1).
+         종전엔 CS_M_ITEM_BOM(미러) 직독이었으나, 일부 품목서 CS≠PR(구조 자체가 다름)이라 레거시 466(=PR)과 어긋났다.
+         bom_line 은 PR 파생이라 legacy 466 과 일치(diff0 표본250 vs PR 250/250, 2026-09-08). kitting_flag 는 PR 로 정렬완.
        필터(레거시 dw_pr_master_120_l02 조건 이식):
          · 유효일자: FROM_APPLY_YMD<=ymd<=TO_APPLY_YMD
          · ★VIR_ITEM_FLAG='1'(가상도번)은 묶음 → 자기 자신 대신 하위를 전개(소요량 곱해서 내림).
@@ -103,55 +105,40 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
         #      (걸렀더니 26→24로 2건 모자랐음. 조건 추가 금지 — 재삽질 방지 메모.)
         #    ※제외분은 버리지 않고 excluded 로 모아 팝업 하단에 참고표시한다
         #      (BOM 마스터 미비를 숨기지 않고 드러냄 — 담당자가 파트를 채워야 할 대상).
-        _SQL = """
-            SELECT a.MAT_CODE,
-                   CAST(ISNULL(a.USE_QTY,0) AS float) use_qty,
+        # ★BOM 전개 = 통일 소요엔진 walker setcheck_soyo(§1-10). 종전 CS_M_ITEM_BOM 재귀BFS(미러 직독=컷오버시 동결)
+        #   대체. VIR='1' 하위전개·except≠1·use>0·유효일자·(mat,gpc,kit) 규칙은 walker 안에서 동일 재현.
+        #   ★소스=bom_line 직독(v_pr_bom 용접브랜치 2배 회피). bom_line≡PR(레거시 466 실소스)·kitting_flag 정렬완.
+        #   diff0 검증완(2026-09-08 setck_verify: 계획품목 표본250 vs PR 250/250 동일).
+        #   ※제외사유 규칙 보존: 투입파트(gpc) 미지정 OR 키팅제외(kit≠1) → excluded(팝업 하단 사유표시).
+        with _COST_LOCK:
+            eng = _get_cost_engine()
+            occ = _soyo.setcheck_soyo(eng, it, d6)   # [(mat, use_qty, gpc, kit)] (mat 집계前·경로별)
+        # cust/nm 배치 로드 = 종전 _SQL 의 nx.item INNER JOIN 재현(nx.item 없는 mat 은 탈락)
+        occmats = list({m for (m, _q, _g, _k) in occ})
+        nmmap, custmap = {}, {}
+        for _i in range(0, len(occmats), 900):
+            ch = occmats[_i:_i + 900]; ph = ",".join("?" * len(ch))
+            cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(m.ITEM_CODE))), ISNULL(m.item_name,''),
                    ISNULL(CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
-                               ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE cust_code=m.in_cust) END,'') cust_desc,
-                   ISNULL(m.item_name,'') nm,
-                   ISNULL(a.VIR_ITEM_FLAG,'0') vir,
-                   LTRIM(RTRIM(ISNULL(a.GAGONG_PROC_CODE,''))) gpc,
-                   ISNULL(a.KITTING_FLAG,'0') kit
-              FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM a WITH(NOLOCK)
-              JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON m.ITEM_CODE=a.MAT_CODE
-             WHERE a.ITEM_CODE=?
-               AND a.FROM_APPLY_YMD<=? AND a.TO_APPLY_YMD>=?
-               AND ISNULL(a.EXCEPT_FLAG,'0')<>'1'
-               AND CAST(ISNULL(a.USE_QTY,0) AS float) > 0
-             ORDER BY a.MAT_CODE"""
-
-        def _lvl(code):
-            cur.execute(_SQL, code, d6, d6)
-            return [{"mat": str(r[0] or '').strip(), "use_qty": float(r[1] or 0),
-                     "cust": str(r[2] or '').strip(), "nm": str(r[3] or '').strip(),
-                     "vir": str(r[4] or '0'), "gpc": str(r[5] or '').strip(),
-                     "kit": str(r[6] or '0').strip()} for r in cur.fetchall()]
-
-        bom, excluded, _seen, _stack = [], [], set(), [(it, 1.0, 0)]
-        while _stack:
-            _code, _mult, _dep = _stack.pop(0)
-            if _dep > 8:          # 순환/과도한 깊이 방어
+                               ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE cust_code=m.in_cust) END,'') cust_desc
+              FROM PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK)
+             WHERE UPPER(LTRIM(RTRIM(m.ITEM_CODE))) IN ({ph})""", *[str(x).upper() for x in ch])
+            for r in cur.fetchall():
+                nmmap[r[0]] = str(r[1] or '').strip(); custmap[r[0]] = str(r[2] or '').strip()
+        bom, excluded = [], []
+        for (mat, uq, gpc, kit) in occ:
+            mk = mat.upper()
+            if mk not in nmmap:      # nx.item 없음 = 종전 INNER JOIN 서 탈락
                 continue
-            for b in _lvl(_code):
-                if b["vir"] == '1':
-                    # 가상도번 = 묶음. 자기 자신은 목록에 넣지 않고 하위를 전개한다.
-                    #   소요량은 곱해서 내려간다(상위 use_qty × 하위 use_qty).
-                    if b["mat"] not in _seen:
-                        _seen.add(b["mat"])
-                        _stack.append((b["mat"], _mult * b["use_qty"], _dep + 1))
-                    continue
-                b["use_qty"] *= _mult
-                _kit, _gpc = b.pop("kit", '0'), b.pop("gpc", '')
-                b.pop("vir", None)
-                # 제외사유 판정(둘 다 해당되면 사유를 합쳐 표시)
-                _why = []
-                if not _gpc:     _why.append("투입파트 미지정")
-                if _kit != '1':  _why.append("키팅제외")
-                if _why:
-                    b["why"] = " · ".join(_why)
-                    excluded.append(b)
-                    continue
-                bom.append(b)
+            b = {"mat": mat, "use_qty": uq, "cust": custmap.get(mk, ''), "nm": nmmap.get(mk, '')}
+            _why = []
+            if not gpc:      _why.append("투입파트 미지정")
+            if kit != '1':   _why.append("키팅제외")
+            if _why:
+                b["why"] = " · ".join(_why)
+                excluded.append(b)
+                continue
+            bom.append(b)
         # 같은 자도번이 여러 경로로 오면 소요량 합산(레거시 전개 동일)
         _agg = {}
         for b in bom:
