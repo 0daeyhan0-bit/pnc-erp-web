@@ -405,8 +405,8 @@ def _kit_lines(eng, item):
         eng._kitl = {}
     k = item.strip().upper()
     if k not in eng._kitl:
-        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(mat_code))), ISNULL(LTRIM(RTRIM(gagong_proc)),''),
-                ISNULL(LTRIM(RTRIM(wh_gagong)),''), ISNULL(vir_item_flag,'0')
+        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(mat_code))), ISNULL(LTRIM(RTRIM(GAGONG_PROC_CODE)),''),
+                ISNULL(LTRIM(RTRIM(WH_GAGONG_PROC_CODE)),''), ISNULL(VIR_ITEM_FLAG,'0')
             FROM nx.v_pr_bom WHERE UPPER(LTRIM(RTRIM(item_code)))=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
             ORDER BY BOM_SEQ""", k)
         eng._kitl[k] = [(str(r[0]).strip(), str(r[1]).strip(), str(r[2]).strip(), str(r[3]).strip())
