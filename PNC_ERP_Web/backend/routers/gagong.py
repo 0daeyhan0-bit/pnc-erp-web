@@ -7,6 +7,7 @@ from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile,
 from common import (_prod_stock_map, _conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
 
 from routers.kitting import kitting_grid
+import nx_soyo_engine as _soyo   # ★재고충당 상향롤업 = 통일 소요엔진 walker(§1-10). 미러 pr_m_item_bom 재귀CTE 대체(컷오버 안전 §1-9-1)
 router = APIRouter()
 
 # ===== 가공생산진척관리 nx 재현본(레거시 암호화 SP 탈피) — 확정사양 _legacy_analysis/GAGONGPROG_420_NX_REBUILD_PLAN.md =====
@@ -209,23 +210,22 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
         for a, it, cap in cur.fetchall(): sale2[(a, it)] = float(cap or 0)
         # fix(도번고정): 재귀 BOM 롤업 → 레거시 SP는 (UPPER_ITEM_CODE, MAT_CODE) 키로 매핑(부모재고를 하위에 use_qty로 전개)
         try:
-            cur.execute(f"IF OBJECT_ID('tempdb..#tmsg') IS NOT NULL DROP TABLE #tmsg")
+            # ★도번고정fix = 재고충당 상향롤업 → 통일 소요엔진 walker stock_flow_rollup(§1-10). 종전 pr_m_item_bom
+            #   재귀CTE(미러 직독=컷오버시 동결) 대체. seed = 창고재고 4축(자재/파트/사급/생산 part_code=P0001) 합.
+            #   ★diff0 검증완(2026-09-08 gagong214_verify: fixm 2325/2325·음수재고 전파 포함). bom_line 직독(용접브랜치 회피).
             cur.execute(f"""
-                ;WITH T (item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, sg_stock_qty, proc_stock_qty, fix_pr_stock_qty) AS (
-                    SELECT s.mat_code, s.mat_code, s.mat_code, CONVERT(int,ISNULL(SUM(s.st),0)), CONVERT(int,ISNULL(SUM(s.pr),0)),
-                           CONVERT(int,ISNULL(SUM(s.sg),0)), CONVERT(int,ISNULL(SUM(s.pc),0)), 0
-                      FROM (SELECT mat_code, 0 st, STOCK_QTY pr, 0 sg, 0 pc FROM {S}.pr_t_mat_stock_wh WHERE stock_qty<>0 AND part_code<>'P0001'
-                            UNION ALL SELECT mat_code, STOCK_QTY, 0,0,0 FROM {S}.pu_t_mat_stock_wh WHERE cust_code='Z99990' AND stock_qty<>0
-                            UNION ALL SELECT mat_code, 0,0,STOCK_QTY,0 FROM {S}.PU_T_SAGUB_STOCK WHERE stock_qty<>0
-                            UNION ALL SELECT mat_code, 0,0,0,STOCK_QTY FROM {S}.pr_t_mat_stock_wh WHERE stock_qty<>0 AND part_code='P0001') s
-                     GROUP BY s.mat_code HAVING SUM(s.st)<>0 OR SUM(s.pr)<>0 OR SUM(s.sg)<>0 OR SUM(s.pc)<>0
-                    UNION ALL
-                    SELECT cb.item_code, b.item_code, b.mat_code, 0,0,0,0,
-                           CONVERT(int,(CASE WHEN cb.fix_pr_stock_qty<>0 THEN cb.fix_pr_stock_qty ELSE (cb.pr_stock_qty+cb.sg_stock_qty+cb.stock_qty+cb.proc_stock_qty) END)*b.use_qty)
-                      FROM T cb JOIN {S}.pr_m_item_bom b WITH(NOLOCK) ON cb.mat_code=b.item_code WHERE ISNULL(b.except_flag,'0')<>'1')
-                SELECT upper_item_code, mat_code, SUM(fix_pr_stock_qty) fx INTO #tmsg FROM T GROUP BY upper_item_code, mat_code OPTION(MAXRECURSION 0)""")
-            cur.execute("SELECT upper_item_code, mat_code, fx FROM #tmsg")
-            for u, m, v in cur.fetchall(): fixm[(u, m)] = float(v or 0)
+                SELECT s.mat_code,
+                       CONVERT(int,ISNULL(SUM(s.st),0))+CONVERT(int,ISNULL(SUM(s.pr),0))+CONVERT(int,ISNULL(SUM(s.sg),0))+CONVERT(int,ISNULL(SUM(s.pc),0))
+                  FROM (SELECT mat_code, 0 st, STOCK_QTY pr, 0 sg, 0 pc FROM {S}.pr_t_mat_stock_wh WHERE stock_qty<>0 AND part_code<>'P0001'
+                        UNION ALL SELECT mat_code, STOCK_QTY, 0,0,0 FROM {S}.pu_t_mat_stock_wh WHERE cust_code='Z99990' AND stock_qty<>0
+                        UNION ALL SELECT mat_code, 0,0,STOCK_QTY,0 FROM {S}.PU_T_SAGUB_STOCK WHERE stock_qty<>0
+                        UNION ALL SELECT mat_code, 0,0,0,STOCK_QTY FROM {S}.pr_t_mat_stock_wh WHERE stock_qty<>0 AND part_code='P0001') s
+                 GROUP BY s.mat_code HAVING SUM(s.st)<>0 OR SUM(s.pr)<>0 OR SUM(s.sg)<>0 OR SUM(s.pc)<>0""")
+            _seedg = {str(r[0]).strip(): int(r[1] or 0) for r in cur.fetchall()}
+            with _COST_LOCK:
+                _engg = _get_cost_engine()
+                for (u, m), v in _soyo.stock_flow_rollup(_engg, _seedg).items():
+                    fixm[(u, m)] = float(v)
         except Exception: pass
         # 배분
         _TAGCLR = {90: '#fac090', 70: '#ffff00', 30: '#ffff00', 20: '#66ff99', 10: '#669900', 0: ''}
@@ -617,25 +617,22 @@ def gagong_plan4w(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
         try:  # 중간공정 자재/생산재고 롤업 = kitting_grid 캐시 재사용, 없으면 자체계산(전역·필터무관, 색tag70용)
             _rc = getattr(kitting_grid, "_rollup_cache", None)
             if not (_rc and _rc.get("mid")):
-                cur.execute("IF OBJECT_ID('tempdb..#tms4') IS NOT NULL DROP TABLE #tms4")
+                # ★kitting_grid 캐시 미가동시 자체계산 = 통일 소요엔진 walker(§1-10). 종전 pr_m_item_bom 재귀CTE 대체.
+                #   창고재고 앵커집계(비재귀 SQL) + 상향롤업(stock_flow_rollup). kitting_grid 와 동일 구성·diff0 검증완.
                 cur.execute("""
-                    ;WITH T_SUB_CTE (item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty) AS (
-                        SELECT s.mat_code, s.mat_code, s.mat_code, CONVERT(int, ISNULL(SUM(s.stock_qty),0)), CONVERT(int, ISNULL(SUM(s.pr_stock_qty),0)), 0
-                          FROM ( SELECT mat_code, 0 stock_qty, STOCK_QTY pr_stock_qty FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK)
-                                 UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
-                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2')
-                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP_TEST3.nx.PU_T_STACKER_STOCK WITH(NOLOCK) ) s
-                         GROUP BY s.mat_code HAVING SUM(s.stock_qty)<>0 OR SUM(s.pr_stock_qty)<>0
-                        UNION ALL
-                        SELECT cb.item_code, b.item_code, b.mat_code, 0, 0, CONVERT(int, (CASE WHEN cb.fix_pr_stock_qty<>0 THEN cb.fix_pr_stock_qty ELSE (cb.pr_stock_qty+cb.stock_qty) END) * b.use_qty)
-                          FROM T_SUB_CTE cb JOIN PARTNER_ERP_TEST3.nx.pr_m_item_bom b WITH(NOLOCK) ON cb.mat_code=b.item_code WHERE ISNULL(b.except_flag,'0')<>'1'
-                    )
-                    SELECT item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty INTO #tms4 FROM T_SUB_CTE OPTION(MAXRECURSION 0)""")
-                _mid = {}; _fix = {}
-                cur.execute("SELECT mat_code, SUM(stock_qty)+SUM(pr_stock_qty) FROM #tms4 GROUP BY mat_code")
-                for rr in cur.fetchall(): _mid[str(rr[0]).strip()] = float(rr[1] or 0)
-                cur.execute("SELECT upper_item_code, mat_code, SUM(fix_pr_stock_qty) FROM #tms4 GROUP BY upper_item_code, mat_code")
-                for rr in cur.fetchall(): _fix[(str(rr[0]).strip(), str(rr[1]).strip())] = float(rr[2] or 0)
+                    SELECT s.mat_code, CONVERT(int, ISNULL(SUM(s.stock_qty),0)), CONVERT(int, ISNULL(SUM(s.pr_stock_qty),0))
+                      FROM ( SELECT mat_code, 0 stock_qty, STOCK_QTY pr_stock_qty FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK)
+                             UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
+                             UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2')
+                             UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP_TEST3.nx.PU_T_STACKER_STOCK WITH(NOLOCK) ) s
+                     GROUP BY s.mat_code HAVING SUM(s.stock_qty)<>0 OR SUM(s.pr_stock_qty)<>0""")
+                _mid = {}; _seed4 = {}
+                for rr in cur.fetchall():
+                    _mid[str(rr[0]).strip()] = float(rr[1] or 0) + float(rr[2] or 0)
+                    _seed4[str(rr[0]).strip()] = int(rr[1] or 0) + int(rr[2] or 0)
+                with _COST_LOCK:
+                    _eng4 = _get_cost_engine()
+                    _fix = {k: float(v) for k, v in _soyo.stock_flow_rollup(_eng4, _seed4).items()}
                 import time as _tm
                 kitting_grid._rollup_cache = {"ts": _tm.time(), "mid": _mid, "fix": _fix}
                 _rc = kitting_grid._rollup_cache
