@@ -320,12 +320,26 @@ def itemmaster_save(payload: dict = Body(...)):
             cur.execute(f"""INSERT INTO nx.item(item_code,{','.join(allcols)},silver_flag,has_gagong,nature,active,prod_group,prod_line)
                 VALUES(?,{','.join(['?']*len(allcols))},0,0,?,?,?,?)""", code, *ivals, nature, active, prod_group, prod_line)
 
-        # ── item_sub upsert (delete→insert) ──
-        cur.execute("DELETE FROM nx.item_sub WHERE item_code=?", code)
+        # ── item_sub upsert (★내 컬럼만 UPDATE — 2026-09-08 교정) ──
+        #   ★종전 DELETE→INSERT 는 **이 화면이 안 가진 컬럼까지 통째로 지웠다.**
+        #     nx.item_sub 는 13컬럼인데 이 화면은 _SUB_STR+_SUB_INT 8개만 보낸다.
+        #     나머지 5개(pack_kind·prod_worker·insp_worker·lg_obtain_flag·min_pur_qty 등)는
+        #     행이 통째로 지워졌다 재삽입되면서 **NULL 로 날아갔다.**
+        #     이 파일 머리말(:34)이 이미 "저장 미터치, 데이터 보존" 이라 적어 둔 항목들인데
+        #     구현이 그 약속을 어기고 있었다.
+        #   ★왜 지금 고치나 — 생산정보등록(w_pr_master_090)에서 포장종류·포장수량·
+        #     용접자·검사자를 편집하기로 확정(2026-09-08 대표). 같은 행을 두 화면이 나눠 쓰므로
+        #     이걸 먼저 고치지 않으면 **생산정보등록에서 넣은 값이 품목마스터 저장 한 번에 지워진다.**
+        #   ⟹ 행이 있으면 내 컬럼만 UPDATE, 없을 때만 INSERT. 남의 컬럼은 건드리지 않는다.
+        _sub_cols = _SUB_STR + _SUB_INT
         sub_vals = [sval(k, 500) for k in _SUB_STR] + [ival(k) for k in _SUB_INT]
-        if any(v not in (None, "") for v in sub_vals):
-            cur.execute(f"INSERT INTO nx.item_sub(item_code,{','.join(_SUB_STR + _SUB_INT)}) "
-                        f"VALUES(?,{','.join(['?']*len(_SUB_STR + _SUB_INT))})", code, *sub_vals)
+        cur.execute("SELECT 1 FROM nx.item_sub WHERE item_code=?", code)
+        if cur.fetchone():
+            cur.execute(f"UPDATE nx.item_sub SET {','.join(c + '=?' for c in _sub_cols)} "
+                        f"WHERE item_code=?", *sub_vals, code)
+        elif any(v not in (None, "") for v in sub_vals):
+            cur.execute(f"INSERT INTO nx.item_sub(item_code,{','.join(_sub_cols)}) "
+                        f"VALUES(?,{','.join(['?']*len(_sub_cols))})", code, *sub_vals)
 
         # ── item_valve upsert (설치품, 값 있을 때만) ──
         cur.execute("DELETE FROM nx.item_valve WHERE item_code=?", code)

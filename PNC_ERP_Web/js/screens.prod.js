@@ -4669,7 +4669,9 @@ SCREEN.prodsheet=(host)=>{
     g('#rp-print').onclick=()=>{
       const s=+g('#rp-s').value||1, e=+g('#rp-e').value||j.org_qty;   // 순번 기준
       close();
-      printLabel(printSeq,{start:s,end:e,worker:g('#rp-w').value.trim(),inspector:g('#rp-i').value.trim()});
+      // save:1 — 여기서 고친 이름을 품목마스터에 반영한다(다음 출력부터 기본값이 됨).
+      printLabel(printSeq,{start:s,end:e,worker:g('#rp-w').value.trim(),
+                           inspector:g('#rp-i').value.trim(),save:1});
     };
     document.body.appendChild(ov);
     ov.onclick=e=>{if(e.target===ov)close();};
@@ -4684,6 +4686,9 @@ SCREEN.prodsheet=(host)=>{
     if(o.end)qs.set('end_no',o.end);
     if(o.worker)qs.set('worker',o.worker);
     if(o.inspector)qs.set('inspector',o.inspector);
+    // ★재발행 팝업에서 고친 용접사/검사자를 품목마스터(nx.item_sub)에 저장(2026-09-08 대표 요청).
+    //   종전엔 이번 출력에만 쓰고 버려 다음에 뽑으면 옛 이름이 다시 나왔다.
+    if(o.save)qs.set('save','1');
     // ★에이전트가 살아있으면 인쇄창 없이 라벨프린터로 바로 출력.
     //   출력방식(TSPL 직송/PDF)은 그 PC 의 에이전트 설정을 따른다.
     if(await tryAgent('label',ag=>{
