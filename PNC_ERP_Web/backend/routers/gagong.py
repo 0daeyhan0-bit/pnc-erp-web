@@ -344,9 +344,17 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
         #   그 잔량에 반영돼 있다. 또 빼면 이중차감이라 뒤 일자가 충당을 못 받음.
         #   → 계획셀의 미충족분(계획−완료)만 재고로 순서대로 덮는다.
         _cvd = set()      # 재고가 배정된 행(완료 컬럼 재계산 대상)
-        # 앞 일자부터(당일이전 → dates 순), 같은 일자면 Assy도번 순
+        # 앞 일자부터(당일이전 → dates 순), 같은 일자면 **레거시 커서순**(_cur).
+        # ★2026-09-08 — 종전엔 sorted(out, key=assy)(ASSY도번 알파벳순)였다. 여기서 쓰는 풀은
+        #   _pkey 대로 **자도번(item) 단위 공유풀**이라, 같은 자도번을 여러 ASSY 가 같은 날
+        #   나눠 쓸 때 '계획이 이른 행'이 아니라 'ASSY도번이 앞선 행'이 먼저 가져갔다.
+        #   위 태그/색상 배분(shared(...sortkey=_cur), L255~262)은 이미 커서순이라 두 패스가
+        #   서로 다른 순서로 풀을 소진하고 있었다 ⟹ 커서순으로 통일.
+        #   ※실측(260908 기준 505행) 이 정렬 변경만으로 달라지는 행은 0 이었다.
+        #     화면에서 보이는 이상값의 원인은 이 정렬이 아니라 아래 `if not took: continue`
+        #     (충당 0 인 셀에 태그패스 값이 그대로 남는 것)다 — 그건 별도 사안이다.
         for y in ['P'] + list(dates):
-            for r in sorted(out, key=lambda x: x["assy"]):
+            for r in sorted(out, key=_cur):
                 if y == 'P':
                     pl, dn = float(r.get("prior_pl") or 0), float(r.get("prior_fn") or 0)
                 else:
@@ -511,7 +519,20 @@ def gagong_plan4w(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
             _y = _dt.date(2000+int(d6f[:2]), int(d6f[2:4]), int(d6f[4:6])) + _dt.timedelta(days=30)
             d6t = _y.strftime('%y%m%d')
         wcp = (wc.strip() or 'P2')
-        # ★계획소스는 라이브 직독(PARTNER_ERP.dbo) — 레거시 SP가 라이브를 읽고, nx 계획미러는 이 조인분이 stale(6222 vs 9521행)이라 diff0 위해 라이브 필수. (nx 계획테이블 동기화는 컷오버 과제)
+        # ★계획소스 = nx (2026-09-08 주석 정정).
+        #   종전 주석은 "라이브 직독(PARTNER_ERP.dbo) — nx 미러가 stale(6222 vs 9521행)이라
+        #   diff0 위해 라이브 필수" 였는데, 컷오버 커밋(5a9941d·03b06c0)이 S 를 nx 로 바꾼 뒤에도
+        #   주석만 남아 **코드와 반대**였다. 화면 부제의 '🔴 라이브' 배지도 같은 이유로 틀렸었다.
+        #   재측정(2026-09-08): PR_T_PLAN_PART_DTL_FOR_CUST  nx 20,928 / 라이브 20,640
+        #     → stale 아님(오히려 nx 가 288행 많다). 옛 수치 6222 vs 9521 은 지금 사실이 아니다.
+        #
+        # ★★남은 컷오버 리스크(별건) — 이 테이블은 **레거시 배치가 만든다**.
+        #   레거시 STEP6 SP 가 PR_T_PLAN_PART_DTL 을 만든 뒤 TRUNCATE+복제로 _FOR_CUST 를 만들고,
+        #   nx 의 것은 _migration/sub_norm/r_delta_sync.py 가 라이브에서 전량 복사해 온 사본이다.
+        #   웹 계획엔진(soyo.py STEP6)은 _FOR_WH/_FOR_CUST 파생을 **만들지 않는다**.
+        #   ⟹ 레거시가 은퇴하면 만드는 쪽이 사라져 이 테이블이 얼어붙는다(조용한 실패).
+        #     대체 후보 = nx.plan_part_dtl(웹계획, 20,336행·일자 26종, 필요컬럼 5/5 보유).
+        #     전환은 값이 달라질 수 있으므로 580 처럼 diff 게이트를 만들어 확인한 뒤 한다.
         S = "PARTNER_ERP_TEST3.nx"
         # 날짜 캘린더: dates[0]=기준일(=col1 당일이전누적 plan_ymd<=기준일), 이후 plan_ymd=기준일+1..
         da = _dt.date(2000+int(d6f[:2]), int(d6f[2:4]), int(d6f[4:6]))

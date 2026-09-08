@@ -13,18 +13,23 @@ SCREEN.prodinvout=(c)=>{
   const d2ymd=v=>{v=(''+(v||'')).trim();return v.length>=10?v.slice(2,4)+v.slice(5,7)+v.slice(8,10):'';};
   // ★2026-08-25 source 의미 통일: nx=라이브+웹실적(기본) / live=라이브만 / ledger=웹원장 파생
   let sel=null, curL=[], source='nx';
+  let basis='', asof='';   // ★재고기준(2026-09-08): live=실시간 잔액(당일) / hist=이력합계(어제 이전)
   const load=async()=>{loading=true;msg='';sel=null;
     const st=c.querySelector('#lbody');if(st)st.innerHTML=spinRow(4);
     const qs=`frm=${encodeURIComponent(frm)}&to=${encodeURIComponent(to)}`;
     if(source==='ledger'){loading=false;return nxDerivedView(c,`${API}/api/live/prodinvout?${qs}&source=ledger`,{title:'제품입출고현황(웹원장)',onBack:()=>{source='nx';load();}});}
     try{const r=await fetch(`${API}/api/live/prodinvout?${qs}&source=${encodeURIComponent(source)}`);if(!r.ok)throw new Error('HTTP '+r.status);
-      const j=await r.json();curYm=j.ym||to.slice(0,4)||'';rows=j.stock||[];mv=j.moves||{};}
-    catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';rows=[];mv={};}
+      const j=await r.json();curYm=j.ym||to.slice(0,4)||'';rows=j.stock||[];mv=j.moves||{};basis=j.basis||'';asof=j.asof||'';}
+    catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';rows=[];mv={};basis='';asof='';}
     loading=false;
     const fi=c.querySelector('#frm'),ti=c.querySelector('#to');if(fi)fi.value=ymd2d(frm);if(ti)ti.value=ymd2d(to);
     const ws=[...new Set(rows.map(r=>r[2]).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
     const wsel=c.querySelector('#work');if(wsel){const v=wsel.value;wsel.innerHTML='<option value="">전체</option>'+ws.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('');wsel.value=v;}
-    const sub=c.querySelector('#piv-sub');if(sub)sub.innerHTML=`제품(P/N)별 재고 + 선택품목 입출고이력(누적재고) · 원본 <code>SA_T_STOCK_MAINT</code> 외 · 🟢 수불기간 ${esc(ymd2d(frm))}~${esc(ymd2d(to))}(이월기준 2502) · 0재고 숨김`;
+    // ★재고기준 표기(2026-09-08) — 종료일이 당일이면 실시간 잔액, 어제 이전이면 이력합계
+    const bTx = basis==='live'
+      ? `<b style="color:#1c7c3a">재고기준 실시간 잔액</b>(SA_T_ITEM_STOCK)`
+      : (basis==='hist' ? `<b style="color:#a0641c">재고기준 이력합계</b> ${esc(ymd2d(asof||to))}까지(이월 2502)` : '');
+    const sub=c.querySelector('#piv-sub');if(sub)sub.innerHTML=`제품(P/N)별 재고 + 선택품목 입출고이력(누적재고) · 원본 <code>SA_T_STOCK_MAINT</code> 외 · 수불기간 ${esc(ymd2d(frm))}~${esc(ymd2d(to))} · ${bTx} · 0재고 숨김`;
     renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
   c.innerHTML=`
    <div class="page-title">🔁 제품입출고현황</div>
@@ -1330,7 +1335,9 @@ SCREEN.lgsale=(c)=>{
     return new Date(2000+ +s.slice(0,2),+s.slice(2,4)-1,+s.slice(4,6)).getDay();};
   const dcls=s=>{const w=dow(s);return w===0?' s4sun':(w===6?' s4sat':'');};
   const T=new Date();
-  // ★기본 소스 = 신규DB(웹계획). 레거시 대조는 소스를 nx/라이브로 바꿔서 본다(2026-08-26).
+  // ★소스 = 신규DB(웹계획) **고정**(2026-09-08 사용자 확정, 드롭다운 제거).
+  //   남은 갈래('우리(nx)'·'레거시 대사')는 이미 같은 곳을 본다 — sales.py:1488 SCH 가
+  //   live 든 아니든 PARTNER_ERP_TEST3.nx 이고 :1503 _conn() 도 컷오버로 nx 다.
   // ★기준일 = 마지막 계획업로드의 일자축 첫날(planBaseIso, 2026-08-28 사용자 확정)
   const st={from:planBaseIso(),gigan:4,line:'',wo:'',item:'',view:'전체',src:'new',
             dates:[],rows:[],cnt:0,loading:false,msg:'',lines:[],sel:new Set(),
@@ -1595,7 +1602,8 @@ SCREEN.lgsale=(c)=>{
      </style>
      <div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="flex:0 0 auto">🚚 출하실적등록 <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_input_040 · 제번단위 출하실적(ASSY재고 차감)</span></div>
-     <div class="page-sub" style="flex:0 0 auto">계획셀 <b>드래그 선택 → 우클릭 [확인]</b> = 완제품(ASSY)재고 있는 만큼만 출하처리 · <b>더블클릭</b>=수량조정(부분출하) ·<span style="background:#fac090;padding:0 4px">살구</span>=출하완료 · ${st.src==='live'?'🔴 레거시(라이브 직독·대사용)':(st.src==='new'?'🟣 신규DB(웹계획) — LG계획만 웹편성(예외생산·전일잔여는 웹 미구현→레거시)':'🟢 nx')}</div>
+     <!-- ★소스 고정 표기(2026-09-08) — 드롭다운 제거에 맞춰 조건부 문구를 없앴다. -->
+     <div class="page-sub" style="flex:0 0 auto">계획셀 <b>드래그 선택 → 우클릭 [확인]</b> = 완제품(ASSY)재고 있는 만큼만 출하처리 · <b>더블클릭</b>=수량조정(부분출하) ·<span style="background:#fac090;padding:0 4px">살구</span>=출하완료 · 소스 nx(웹계획) — LG계획은 웹편성(<code>nx.sale_plan_item</code>), 예외생산·전일잔여는 웹 미구현이라 레거시 미러 그대로</div>
      <div class="toolbar" style="flex:0 0 auto">
        <label class="tl">기준일자</label><input class="inp" type="date" id="s4-from" value="${st.from}">
        <label class="tl">라인</label>
@@ -1605,8 +1613,13 @@ SCREEN.lgsale=(c)=>{
        <select class="inp" id="s4-gigan" style="max-width:72px">${[1,2,3,4,5,6,7,8,14].map(d=>`<option value="${d}"${st.gigan===d?' selected':''}>${d}일</option>`).join('')}</select>
        <label class="tl">구분</label>
        ${['전체','집계','제번'].map(v=>`<label class="rl"><input type="radio" name="s4-vw" value="${v}"${st.view===v?' checked':''}> ${v}</label>`).join('')}
-       <label class="tl">소스</label>
-       <select class="inp src-new" id="s4-src" data-src="${esc2(st.src)}" style="width:auto;min-width:150px" title="신규DB(웹계획)=웹 STEP5(nx.plan_item_dtl)로 LG계획을 갈아끼움 — 예외생산·전일잔여는 웹에 대응물이 없어 레거시 그대로 / 우리(nx)=레거시 미러 / 레거시 대사=라이브 직독"><option value="new"${st.src==='new'?' selected':''}>🟣 신규DB(웹계획)</option><option value="nx"${st.src==='nx'?' selected':''}>🟢 우리(nx)</option><option value="live"${st.src==='live'?' selected':''}>🔴 레거시 대사</option></select>
+       <!-- ★소스 드롭다운 제거(2026-09-08 사용자 확정) — 신규DB(웹계획) 고정.
+            ① 웹 기준(nx.sale_plan_item)으로 운영하므로 대사용 갈래를 실무 화면에 둘 이유가 없다
+               (580·420·410 과 동일 조치).
+            ② 남은 두 갈래는 이미 같은 곳을 본다 — sales.py:1488 SCH 가 live 든 아니든
+               PARTNER_ERP_TEST3.nx 이고, :1503 _conn() 도 컷오버로 nx 다.
+               즉 '레거시 대사' 는 이름만 레거시였다.
+            st.src 는 'new' 고정(초기값). API 는 src 를 그대로 받으므로 백엔드 변경 없음. -->
        <button class="btn" id="s4-search">🔍 조회</button>
        <div class="spacer"></div>
        <span class="rowcount" id="s4-selinfo">${selN?`선택 <b>${nf(selN)}</b>칸 · 수량 <b>${nf(selQ)}</b>`:''}</span>
@@ -1634,10 +1647,8 @@ SCREEN.lgsale=(c)=>{
 
     const g=id=>c.querySelector(id);
     g('#s4-search').onclick=()=>{st.from=g('#s4-from').value;st.gigan=+g('#s4-gigan').value;
-      st.line=g('#s4-line').value;st.src=g('#s4-src').value;load();};
+      st.line=g('#s4-line').value;load();};   // ★src 는 'new' 고정(드롭다운 제거)
     g('#s4-gigan').onchange=()=>g('#s4-search').click();
-    g('#s4-src').onchange=(e)=>{e.target.dataset.src=e.target.value;   // 고르는 즉시 색 반영
-      st.src=g('#s4-src').value;loadLines().then(load);};
     g('#s4-line').onchange=()=>{st.line=g('#s4-line').value;draw();};
     c.querySelectorAll('input[name=s4-vw]').forEach(rd=>rd.onchange=()=>{st.view=rd.value;st.exp.clear();draw();});
     // ★집계행 클릭 = 상세 펼침/접힘(키팅·410 동일). 셀 드래그선택과 겹치지 않게 집계행에만 건다.

@@ -2687,7 +2687,9 @@ const _mkMagam=(CFG)=>(c)=>{
     c.innerHTML=`
      <div class="sm-root" style="display:flex;flex-direction:column;height:100%;min-height:0">
      <div class="page-title">${CFG.title} <span style="font-size:12px;color:var(--muted);font-weight:400">${CFG.sub} · 거래처별 마감 · nx 저장</span></div>
-     <div class="page-sub">거래처별 ${CFG.verb} 집계 → [마감]에서 품목×일자·단가변경·총액조정·사유 입력 후 확정. 원본 <code>${CFG.src}</code> · 🔴 라이브 마감기준 ${esc(ymToInput(ym)||'-')}</div>
+     <!-- ★배지 정정(2026-09-08) — 백엔드 라이브(PARTNER_ERP.dbo) 직독은 0곳이다.
+          _conn() 도 PARTNER_ERP_TEST3(nx) 로 붙는다(common.py:111). '🔴 라이브' 는 오표기였다. -->
+     <div class="page-sub">거래처별 ${CFG.verb} 집계 → [마감]에서 품목×일자·단가변경·총액조정·사유 입력 후 확정. 원본 <code>${CFG.src}</code> · 소스 nx · 마감기준 ${esc(ymToInput(ym)||'-')}</div>
      ${CFG.weight?`<div class="page-sub" style="color:#3a6ea5">⚖️ LME 중량정산(견적기준): [출고(tag5) − 견적소요] × (현물가 − 사급가). <b>원소재</b>=규격(재질·외경)별 nx.price_metal · <b>용접봉</b>=1% 단일단가(현물 62,700 / 사급 21,100). 협력사(수테크=소요만). 원소재정산 셀 툴팁=규격내역.</div>`:''}
      <div class="toolbar">
        <label class="tl">보기</label>

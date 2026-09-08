@@ -112,7 +112,8 @@ SCREEN.meeting=(c)=>{
     c.innerHTML=`
      <style>.mt-tbl th,.mt-tbl td{text-align:center!important}</style>
      <div class="page-title">📝 품질 반성회일지 <span style="font-size:12px;color:var(--muted);font-weight:400">Daily Issue Review · 작성/조회</span></div>
-     <div class="page-sub">레거시 <code>w_pr_input_590</code>(조회)+<code>595</code>(등록) 이식 · 원천 <code>PR_T_DAILY_ISSUE_REVIEW</code>. 🔴 라이브 조회 / 🟢 등록은 nx</div>
+     <!-- ★배지 정정(2026-09-08) — 조회도 nx(qareview.py:92 {NXS}.PR_T_DAILY_ISSUE_REVIEW). 라이브 직독 아님. -->
+     <div class="page-sub">레거시 <code>w_pr_input_590</code>(조회)+<code>595</code>(등록) 이식 · 원천 <code>nx.PR_T_DAILY_ISSUE_REVIEW</code>. 조회·등록 모두 nx</div>
      <div class="toolbar" style="flex-wrap:wrap;gap:6px;align-items:center">
        <label class="tl">대상기간</label><input class="inp" type="date" id="mt-from" value="${st.from}"> ~ <input class="inp" type="date" id="mt-to" value="${st.to}">
        <label class="tl">검색</label><input class="inp" id="mt-q" value="${esc(st.q)}" style="width:170px" placeholder="작성자/장소/대상" autocomplete="off">
@@ -277,7 +278,10 @@ function openReviewModal(st,cur,onSaved){
 SCREEN.qcerror=(c)=>{
   wrShell(c,{sid:'qcerror',
     title:`🚫 품질불량관리 <span style="font-size:12px;color:var(--muted);font-weight:400">공정 불량 발생·조치 이력(등록·수정·삭제)</span>`,
-    sub:`레거시 <code>w_qa_input_020</code> 전체 컬럼(옆스크롤). 🔴 라이브(<code>QA_T_ERROR</code>) 조회 + 🟢 등록·수정은 nx(<code>qc_error</code>) · ➕신규·수정은 팝업 · 코드→이름`,
+    // ★배지 정정(2026-09-08) — 조회도 nx 다(qc.py:104 PARTNER_ERP_TEST3.nx.QA_T_ERROR).
+    //   '🔴 라이브' 는 오표기였다. 다만 미러(QA_T_ERROR)와 클린(qc_error)을 함께 읽는
+    //   구조는 그대로라(§18-3 위반, 감사문서 A4) 그 사실은 남겨 표기한다.
+    sub:`레거시 <code>w_qa_input_020</code> 전체 컬럼(옆스크롤). 조회 <code>nx.QA_T_ERROR</code>(미러) + 등록·수정 <code>nx.qc_error</code>(클린) — 둘 다 nx · ➕신규·수정은 팝업 · 코드→이름`,
     nxOnly:true,
     cfg:{
       listEp:'/api/qc/error/list', saveEp:'/api/qc/error/save', delEp:'/api/qc/error/delete', days:30,
@@ -410,7 +414,10 @@ SCREEN.qcspec=(c)=>{
   ];
   const HFORM=[
     {k:'rev_ymd',label:'접수일',type:'date'},{k:'rev_no',label:'순번',type:'num'},
-    {k:'eco_no',label:'ECO번호'},{k:'item_code',label:'PART NO',type:'auto',optKind:'item',showCode:1},
+    {k:'eco_no',label:'ECO번호'},
+    // ★PART NO 선택입력(2026-09-08 사용자 확정) — 품번이 아직 안 정해진 시방변경도 접수한다.
+    //   종전엔 필수라 저장 자체가 막혔다. 적용대상(우측)에서 나중에 붙이면 된다.
+    {k:'item_code',label:'PART NO',type:'auto',optKind:'item',showCode:1,optional:1},
     {k:'rev_mark',label:'시방기호'},{k:'issue_ymd',label:'발행일',type:'date'},
     {k:'dept_name',label:'부서'},{k:'charge_name',label:'담당'},{k:'apply_ymd',label:'적용일',type:'date'},
     {k:'apply_type',label:'적용구분',type:'select',opts:[{v:'1',t:'즉시적용'},{v:'2',t:'재고소진후'},{v:'3',t:'지정일'}]},
@@ -761,6 +768,15 @@ SCREEN.matinsp=(host)=>{
           <option value="90">검사완료</option>
           <option value="">전체</option>
         </select>
+        <!-- ★2026-09-08 검사구분 필터 — 수입검사는 **유검사품만** 대상이다(대표 지시).
+             판정 = 품목마스터 검사구분 IN ('F','S') · 원천 nx.item_sub(클린) 우선.
+             무검사품은 입고 즉시 재고가 잡히므로 검사 대상이 아니다. 기본=유검사 고정. -->
+        <label style="white-space:nowrap">검사구분</label>
+        <select id="mi-insp" class="inp" style="width:96px;min-width:96px">
+          <option value="Y" selected>유검사</option>
+          <option value="N">무검사</option>
+          <option value="">전체</option>
+        </select>
         <button class="btn" id="mi-q">조회</button>
         <button class="btn primary" id="mi-ok">검사완료</button>
         <button class="btn" id="mi-no">검사취소</button>
@@ -794,9 +810,15 @@ SCREEN.matinsp=(host)=>{
       $('#mi-sum').textContent='';$('#mi-cnt').textContent='';return;}
     b.innerHTML=st.rows.map(r=>{
       const k=key(r), on=st.sel.has(k), done=r.stat==='90';
+      /* ★2026-09-08 무검사품은 '검사완료' 가 아니라 '무검사' 로 표시(대표 지시).
+         무검사는 입고 즉시 재고가 잡혀 status 가 90 이 되지만, 검사를 한 것이 아니다.
+         판정 = r.insp('1'=유검사) — 서버가 품목마스터(nx.item_sub) 기준으로 내려준다. */
+      const noInsp = (r.insp!=='1');
+      const stTx = noInsp ? '무검사' : (ST[r.stat]||r.stat);
+      const stCol = noInsp ? '#888' : (done?'#1c7c3a':'#c0392b');
       return `<tr data-k="${esc(k)}" style="${on?'background:#eaf3ff':''}">
         <td class="center"><input type="checkbox" class="mi-ck" data-k="${esc(k)}"${on?' checked':''}></td>
-        <td class="center" style="color:${done?'#1c7c3a':'#c0392b'};font-weight:600">${esc(ST[r.stat]||r.stat)}</td>
+        <td class="center" style="color:${stCol};font-weight:600" title="${esc(ST[r.stat]||r.stat)}">${esc(stTx)}</td>
         <td class="center">${esc(r.insp_dt||'')}</td>
         <td class="center">${esc(r.insp_user||'')}</td>
         <td class="center">${esc(ymd2disp(r.ymd))}</td>
@@ -822,7 +844,8 @@ SCREEN.matinsp=(host)=>{
 
   const load=async()=>{
     const q=new URLSearchParams({frm:date2ymd($('#mi-f').value),to:date2ymd($('#mi-t').value),
-      cust:$('#mi-c').value.trim(),item:$('#mi-i').value.trim(),stat:$('#mi-s').value});
+      cust:$('#mi-c').value.trim(),item:$('#mi-i').value.trim(),stat:$('#mi-s').value,
+      insp:($('#mi-insp')?$('#mi-insp').value:'Y')});   // ★검사구분(기본 Y=유검사만)
     $('#mi-msg').textContent='조회중…';
     try{
       const r=await fetch(`${API}/api/setinsp/list?${q}`);
