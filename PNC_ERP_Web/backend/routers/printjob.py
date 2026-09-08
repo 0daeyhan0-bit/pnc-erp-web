@@ -103,6 +103,74 @@ def _finish(doc) -> bytes:
     return out
 
 
+def _tspl_text_bitmap(txt: str, x: int, y: int, height_dot: int = 20,
+                      bold: bool = True) -> str:
+    """한글 문자열을 **1비트 비트맵**으로 그려 TSPL BITMAP 명령으로 만든다.
+
+    ★왜 필요한가 (2026-09-08 현장 실측)
+      TSPL 의 `TEXT` 는 **프린터 내장 폰트**로 찍는다. 내장 폰트("1"~"5")는 ASCII 전용이라
+      한글 글자가 통째로 **누락**된다 — 현장 라벨에 용접사/검사자가 `/` 만 찍히고
+      이름이 안 나온 것이 정확히 이 증상이다(CODEPAGE UTF-8 을 줘도 글리프 자체가 없다).
+      같은 데이터를 PDF 경로로 뽑으면 맑은 고딕이 embed 돼 멀쩡히 나온다 —
+      즉 데이터·좌표 문제가 아니라 **폰트 문제**다.
+
+    ⟹ 그 줄만 서버에서 그려 비트맵으로 보낸다. TSPL 의 선명함·속도는 유지하면서
+      한글이 확실히 나온다(프린터 기종·펌웨어에 의존하지 않는다).
+
+    ※BITMAP 형식 = `BITMAP x,y,width_bytes,height,mode,<raw>`
+      · width_bytes = 가로 픽셀/8 (8픽셀=1바이트, 부족하면 오른쪽을 흰색으로 채운다)
+      · mode 0 = OVERWRITE
+      · 비트 1 = **흰색**, 0 = 검정 (TSPL 은 반전이다 — 그대로 보내면 배경이 새까맣게 나온다)
+    """
+    txt = str(txt or "")
+    if not txt.strip():
+        return ""
+    fitz = _fitz()
+    fp = _font_path(bold)
+    if not fp:
+        # 한글 폰트가 없으면 비트맵을 만들 수 없다 → 호출측이 TEXT 로 폴백하게 빈 문자열
+        return ""
+    # 텍스트를 딱 맞는 크기의 흑백 이미지로 렌더 — 여백 없이 뽑아야 좌표가 어긋나지 않는다.
+    fs = height_dot * 0.78          # dot 높이 → 글자 크기(어센더/디센더 여유)
+    try:
+        font = _measure_font(fp)
+        w_pt = font.text_length(txt, fontsize=fs)
+    except Exception:
+        w_pt = len(txt) * fs * 0.6
+    w_dot = max(8, int(w_pt) + 2)
+    h_dot = max(8, int(height_dot))
+    doc = fitz.open()
+    page = doc.new_page(width=w_dot, height=h_dot)
+    try:
+        page.insert_font(fontname="kf", fontfile=fp)
+        page.insert_text((1, h_dot * 0.78), txt, fontname="kf", fontsize=fs)
+    except Exception:
+        doc.close()
+        return ""
+    # 1배율 그레이스케일 → 임계값으로 1비트화
+    pm = page.get_pixmap(colorspace=fitz.csGRAY, alpha=False)
+    W, H = pm.width, pm.height
+    wb = (W + 7) // 8
+    samples = pm.samples
+    out = bytearray()
+    for row in range(H):
+        for byte_i in range(wb):
+            b = 0
+            for bit in range(8):
+                px = byte_i * 8 + bit
+                # 범위 밖(패딩) = 흰색(1). 밝으면 흰색(1), 어두우면 검정(0).
+                white = 1
+                if px < W:
+                    white = 0 if samples[row * W + px] < 128 else 1
+                b = (b << 1) | white
+            out.append(b)
+    doc.close()
+    head = f"BITMAP {int(x)},{int(y)},{wb},{H},0,".encode("ascii")
+    # ★latin-1 로 되돌려 문자열에 실어 보낸다 — 바이트 1:1 대응이라 값이 보존된다.
+    #   (에이전트가 이 문자열을 다시 latin-1 로 인코딩해 프린터에 그대로 흘린다)
+    return (head + bytes(out)).decode("latin-1")
+
+
 def _mkdoc(w_mm: float, h_mm: float):
     """지정 mm 크기의 빈 PDF 문서 생성."""
     fitz = _fitz()
@@ -490,6 +558,12 @@ def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3, gap: float = 0,
     if LABEL_GAPDETECT and not _GAP_DONE:
         out.append("GAPDETECT")      # ★첫 1회만 — 측정값은 프린터에 저장된다
         _GAP_DONE = True
+    # ★용접사/검사자 줄은 한글이라 비트맵으로 그린다(장마다 같은 값이므로 한 번만 만든다).
+    #   실패 시 빈 문자열 → 아래에서 종전 TEXT 로 폴백.
+    try:
+        _wi_cmd = _tspl_text_bitmap(wi, 104, 130, height_dot=20, bold=True)
+    except Exception:
+        _wi_cmd = ""
     for L in labels:
         out += [
             "CLS",
@@ -508,7 +582,11 @@ def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3, gap: float = 0,
             f'TEXT 104,42,"1",0,1,1,"{L.get("disp","")}"',
             f'TEXT 104,66,"2",0,1,1,"{L.get("n","")} / {tot}"',
             f'TEXT 104,96,"3",0,1,1,"{item}"',
-            f'TEXT 104,130,"1",0,1,1,"{wi}"',
+            # ★용접사/검사자 = 한글이라 내장폰트로는 **안 찍힌다**(2026-09-08 현장 실측).
+            #   서버에서 맑은 고딕으로 그려 비트맵으로 보낸다(_tspl_text_bitmap 주석 참조).
+            #   폰트를 못 찾는 등으로 비트맵 생성이 실패하면 종전 TEXT 로 폴백한다
+            #   — 최소한 ASCII(사번·영문)라도 나오게.
+            (_wi_cmd or f'TEXT 104,130,"1",0,1,1,"{wi}"'),
             "PRINT 1,1",
         ]
     return "\r\n".join(out) + "\r\n"
@@ -547,8 +625,14 @@ def print_label(print_seq: str = Query(...), start_no: int = Query(0), end_no: i
         raise HTTPException(404, j.get("detail") or "라벨 조회 실패")
     doc = f"제품스티커 {j.get('item','')} ({j.get('qty',0)}장)"
     if str(mode).lower() == "tspl":
+        # ★b64 로 보낸다(2026-09-08) — 용접사/검사자 줄이 **비트맵 바이너리**를 품고 있어
+        #   그대로 문자열로 흘리면 에이전트의 `str(data).encode("utf-8")` 에서 값이 바뀐다
+        #   (latin-1 로 실은 0x80~0xFF 바이트가 UTF-8 2바이트로 부풀어 비트맵이 깨진다).
+        #   에이전트는 예전부터 b64 플래그를 지원하므로 **에이전트 재설치 없이** 동작한다.
+        tspl = build_label_tspl(j, darkness, speed, gap, shift)
         return {"ok": True, "kind": "label", "mode": "tspl", "cnt": j.get("qty", 0), "doc": doc,
-                "tspl": build_label_tspl(j, darkness, speed, gap, shift)}
+                "b64": True,
+                "tspl": base64.b64encode(tspl.encode("latin-1")).decode("ascii")}
     return {"ok": True, "kind": "label", "mode": "pdf", "cnt": j.get("qty", 0), "doc": doc,
             "pdf": base64.b64encode(build_label_pdf(j)).decode("ascii")}
 

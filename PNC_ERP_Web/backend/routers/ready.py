@@ -52,8 +52,23 @@ def ready_plan(from_ymd: str = Query(""), to_ymd: str = Query(""), line: str = Q
 def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Query(0),
                    src: str = Query("nx")):
     """★키팅 [확인] 팝업(레거시 w_pr_input_466) — 도번의 자도번별 사용수량·재고·세트가능수량·협력사.
-       ★BOM 소스 = CS_M_ITEM_BOM(웹 정본). 레거시 화면은 PR_M_ITEM_BOM을 쓰지만 실측 결과 두 테이블이
-         동일(자도번·USE_QTY·KITTING_FLAG 일치)이라, 웹 다른 화면(bom.py 등)과 기준을 통일함.
+       ★BOM 소스 = nx.bom_line + nx.bom_header (클린 정본). 2026-09-08 전환.
+         ★왜 바꿨나 — 종전 CS_M_ITEM_BOM(원가 BOM 미러)은 "PR과 동일"이라는 전제로 골랐는데
+           그 전제가 깨졌다. 라이브 PR_M_ITEM_BOM(생산 정본)을 판정기준으로 전수 실측한 결과:
+             · 행수      클린 35,380 ≡ 라이브PR 35,380  /  CS 35,350 (30행 부족)
+             · 사용수량  차이 34쌍 중 클린이 맞음 30 · CS 맞음 3 · 둘다 1
+                         실측 AJR30157301: 3H01582A/E 가 CS 에서만 5↔2 로 뒤바뀌어 있었다
+                         (레거시 화면·라이브PR·클린 전부 2/5).
+             · 투입파트  차이 289쌍 → ★전부 클린이 맞음(100%). CS 파트가 낡음
+                         (5211A22074A-2 → CS=S11 / 클린·라이브=RAC 등)
+             · 누락      클린에만 329쌍 → 329/329 전부 라이브PR 에 존재(CS 가 빠뜨린 것)
+             · 유령      CS 에만 227쌍 → 223쌍은 라이브PR 에도 없음(CS 전용 잔재)
+                         나머지 4쌍은 라이브PR KITTING_FLAG=0 인데 CS 만 1 → 원래 키팅대상 아님
+           ⟹ CS 를 읽는 동안 준비등록은 낡은 수량·파트로 나가고 있었다. 클린 결손 0건.
+         ★컷오버 대비(CLAUDE.md §1-9-1) — 화면(품목 BOM관리)이 편집하는 것과 준비등록이 읽는 것이
+           같은 테이블이어야 한다. 종전엔 화면=nx.bom_line, 준비등록=CS 미러로 축이 갈라져 있었다.
+         ※유효기간 컬럼 주의: nx.bom_line 의 from_ymd/to_ymd 는 nvarchar 이고 **빈 문자열이 다수**다
+           (NULL 아님). NULLIF 로 빈값을 무제한으로 바꿔야 정상 판정된다(NULL 만 처리하면 오탈락).
        필터(레거시 dw_pr_master_120_l02 조건 이식):
          · 유효일자: FROM_APPLY_YMD<=ymd<=TO_APPLY_YMD
          · ★VIR_ITEM_FLAG='1'(가상도번)은 묶음 → 자기 자신 대신 하위를 전개(소요량 곱해서 내림).
@@ -103,22 +118,27 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
         #      (걸렀더니 26→24로 2건 모자랐음. 조건 추가 금지 — 재삽질 방지 메모.)
         #    ※제외분은 버리지 않고 excluded 로 모아 팝업 하단에 참고표시한다
         #      (BOM 마스터 미비를 숨기지 않고 드러냄 — 담당자가 파트를 채워야 할 대상).
+        # ★클린 BOM(nx.bom_line+bom_header) 직독 — 컬럼 별칭은 종전(CS)과 동일하게 유지해
+        #   아래 _lvl()·전개 로직·excluded 처리는 한 줄도 바꾸지 않는다(축만 교체).
+        #   bit(except_flag/kitting/vir_item) → 종전 varchar('0'/'1') 의미로 맞춰 캐스팅한다.
         _SQL = """
-            SELECT a.MAT_CODE,
-                   CAST(ISNULL(a.USE_QTY,0) AS float) use_qty,
+            SELECT LTRIM(RTRIM(l.child_item)) MAT_CODE,
+                   CAST(ISNULL(l.qty,0) AS float) use_qty,
                    ISNULL(CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
                                ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=m.in_cust) END,'') cust_desc,
                    ISNULL(m.item_name,'') nm,
-                   ISNULL(a.VIR_ITEM_FLAG,'0') vir,
-                   LTRIM(RTRIM(ISNULL(a.GAGONG_PROC_CODE,''))) gpc,
-                   ISNULL(a.KITTING_FLAG,'0') kit
-              FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM a WITH(NOLOCK)
-              JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON m.ITEM_CODE=a.MAT_CODE
-             WHERE a.ITEM_CODE=?
-               AND a.FROM_APPLY_YMD<=? AND a.TO_APPLY_YMD>=?
-               AND ISNULL(a.EXCEPT_FLAG,'0')<>'1'
-               AND CAST(ISNULL(a.USE_QTY,0) AS float) > 0
-             ORDER BY a.MAT_CODE"""
+                   CASE WHEN ISNULL(l.vir_item,0)=1 THEN '1' ELSE '0' END vir,
+                   LTRIM(RTRIM(ISNULL(l.gagong_proc,''))) gpc,
+                   CASE WHEN ISNULL(l.kitting,0)=1 THEN '1' ELSE '0' END kit
+              FROM PARTNER_ERP_TEST3.nx.bom_line l WITH(NOLOCK)
+              JOIN PARTNER_ERP_TEST3.nx.bom_header h WITH(NOLOCK) ON h.bom_id=l.bom_id
+              JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON m.ITEM_CODE=l.child_item
+             WHERE LTRIM(RTRIM(h.item_code))=?
+               AND ISNULL(NULLIF(LTRIM(RTRIM(l.from_ymd)),''),'000000')<=?
+               AND ISNULL(NULLIF(LTRIM(RTRIM(l.to_ymd)),''),'991231')>=?
+               AND ISNULL(l.except_flag,0)=0
+               AND CAST(ISNULL(l.qty,0) AS float) > 0
+             ORDER BY l.child_item"""
 
         def _lvl(code):
             cur.execute(_SQL, code, d6, d6)

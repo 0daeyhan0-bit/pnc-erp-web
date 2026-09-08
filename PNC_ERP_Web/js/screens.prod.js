@@ -2466,6 +2466,7 @@ SCREEN.planinput=(host)=>{
         <th style="width:24px"></th>
         <th>WORK-ORDER</th><th>작업처</th><th>양산/셀</th><th>라인</th><th>품번</th><th>품명</th><th>품목구분</th>
         <th class="num">생산수량</th><th class="num" title="원천 미보유(가정 공란)">대체수량</th><th class="num" title="원천 미보유(가정 공란)">출하수량</th><th class="num">시간</th>
+        <th title="추가입력 시 적은 비고 (nx.prod_plan_input.remarks)">비고</th>
         ${dhead}</tr></thead>
       <tbody>${R.length?R.map((r,i)=>{
         const cells=D.map(d=>{const c=r.cells[d.ymd];const q=c?c.qty:0;
@@ -2478,10 +2479,11 @@ SCREEN.planinput=(host)=>{
         <td>${esc(r.item_type)}</td>
         <td class="num"><b>${won(r.total||0)}</b></td><td class="num" style="color:#b8c2cf"></td><td class="num" style="color:#b8c2cf"></td>
         <td class="num">${esc(hmfmt(r.output_hm))}</td>
-        ${cells}</tr>`;}).join(''):`<tr><td colspan="${12+D.length}" class="empty">조회 결과 없음${ed?' (➕추가로 등록)':''}</td></tr>`}</tbody>
+        <td class="cap" title="${esc(r.remarks||'')}" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.remarks||'')}</td>
+        ${cells}</tr>`;}).join(''):`<tr><td colspan="${13+D.length}" class="empty">조회 결과 없음${ed?' (➕추가로 등록)':''}</td></tr>`}</tbody>
       ${R.length?`<tfoot><tr style="position:sticky;bottom:0;background:#f0f4fa;font-weight:700">
         <td></td><td colspan="7" style="text-align:right">일자별 합계 ▶</td>
-        <td class="num">${won(st.mx.total||0)}</td><td></td><td></td><td></td>
+        <td class="num">${won(st.mx.total||0)}</td><td></td><td></td><td></td><td></td>
         ${D.map(d=>`<td class="num" style="${wke(d.wd)}">${G[d.ymd]?won(G[d.ymd]):''}</td>`).join('')}</tr></tfoot>`:''}
       </table></div>`;
     const g=id=>host.querySelector(id);
@@ -4293,7 +4295,10 @@ SCREEN.prodsheet=(host)=>{
       const r=await fetch(urlFn(ag));
       const j=await r.json();
       if(!j||!j.ok)throw new Error((j&&j.detail)||'인쇄물 생성 실패');
-      const res=await PRN_AGENT.send(kind,{pdf:j.pdf,tspl:j.tspl,doc:j.doc});
+      // ★b64 를 반드시 함께 넘긴다(2026-09-08) — 라벨 TSPL 은 용접사/검사자 줄이
+      //   비트맵 바이너리라 base64 로 온다. 이 플래그가 빠지면 에이전트가 평문으로
+      //   해석해 utf-8 로 재인코딩하고 비트맵이 깨진다(한글 미출력의 후속 처리).
+      const res=await PRN_AGENT.send(kind,{pdf:j.pdf,tspl:j.tspl,b64:j.b64,doc:j.doc});
       st.msg=`${j.doc} → ${res.printer} 로 출력했습니다.`;render();
       return true;
     }catch(e){

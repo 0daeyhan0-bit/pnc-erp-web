@@ -342,14 +342,25 @@ def planinput_matrix(base: str = Query(""), prevday: int = Query(0), days: int =
                     "work_order": wo, "line_no": ln, "item_code": it, "nm": gs(r[4]),
                     "item_type": gs(r[5]), "work_code": wc, "work_nm": _ITEM_WORK.get(wc, wc),
                     "prod_tag": tag, "prod_nm": _PROD_TAG.get(tag, tag), "output_hm": hm,
-                    "total": 0, "cells": {}, "ppids": [], "src": gs(r[12])}
+                    "total": 0, "cells": {}, "ppids": [], "src": gs(r[12]), "remarks": ""}
             grp["total"] += qty
             grp["ppids"].append(r[0])
             c = grp["cells"].get(ymd)
             if c is None:
                 c = grp["cells"][ymd] = {"qty": 0, "recs": []}
             c["qty"] += qty
-            c["recs"].append({"ppi_id": r[0], "remarks": gs(r[11])})
+            _rm = gs(r[11])
+            c["recs"].append({"ppi_id": r[0], "remarks": _rm})
+            # ★행 단위 비고(2026-09-08 사용자 요청) — 종전엔 remarks 가 셀 안 recs 에만 있어
+            #   추가입력에서 적어도 매트릭스 어디에도 보이지 않았다("보는 곳이 없다").
+            #   한 행(제번·품번·라인)이 여러 날짜에 걸치면 비고가 여러 개일 수 있으므로
+            #   중복 제거 후 ' / ' 로 잇는다(대개 1개). 빈 비고는 넣지 않는다.
+            if _rm:
+                _cur = grp["remarks"]
+                if not _cur:
+                    grp["remarks"] = _rm
+                elif _rm not in _cur.split(" / "):
+                    grp["remarks"] = _cur + " / " + _rm
             if ymd in grand:
                 grand[ymd] += qty
         rows = sorted(groups.values(), key=lambda g: (g["item_code"], g["work_order"], g["line_no"]))
