@@ -262,6 +262,45 @@ def _vpr_full(eng, item):
     return eng._vprf[k]
 
 
+def _vpr_order(eng, item):
+    """v_pr_bom 직상위 자식 (mat_code, USE_QTY, except_flag, sagub_flag) — 발주소요(sourcing current_order)용. 캐시.
+    ※prod_soyo와 달리 USE_QTY(생산수량 아님)·sagub 수집(sourcing CTE 2371 정합)."""
+    if not hasattr(eng, '_vpro'):
+        eng._vpro = {}
+    k = item.strip().upper()
+    if k not in eng._vpro:
+        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(mat_code))), CAST(USE_QTY AS float), ISNULL(except_flag,'0'),
+                CAST(ISNULL(SAGUB_FLAG,'0') AS int)
+            FROM nx.v_pr_bom WHERE UPPER(LTRIM(RTRIM(item_code)))=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
+            ORDER BY BOM_SEQ""", k)
+        eng._vpro[k] = [(str(r[0]).strip(), float(r[1] or 0), str(r[2]).strip(), int(r[3] or 0)) for r in eng.cur.fetchall()]
+    return eng._vpro[k]
+
+
+def order_soyo(eng, item):
+    """[발주 walker] sourcing current_order(발주 조달부품 소요) 재현 = v_pr_bom 재귀·except≠1·**USE_QTY**·
+    **MAKE_TYPE='1'(제작) 자식만 재귀**(비제작 노드서 정지=발주 대상)·RAC(용접봉) 제외.
+    반환 {mat_code: (qty, sagub)}. ※CTE(sourcing.py:2371) 정합. prod_soyo(전관통 최하위·USE_QTY_PR)와 다른 계산."""
+    agg = {}   # code -> [qty, sagub]
+    def walk(node, cum, seen):
+        for (c, q, ex, sg) in _vpr_order(eng, node):
+            if ex == '1':
+                continue
+            cq = cum * q
+            a = agg.setdefault(c, [0.0, 0])
+            a[0] += cq
+            if sg > a[1]:
+                a[1] = sg
+            try:
+                mk = str(eng._load_item(c).get('make_type', '')).strip()
+            except Exception:
+                mk = ''
+            if mk == '1' and c not in seen:
+                walk(c, cq, seen | {c})
+    walk(item.strip().upper(), 1.0, set())
+    return {c: (round(v[0], 4), v[1]) for c, v in agg.items() if not c.upper().startswith('RAC')}
+
+
 def plan_explode(eng, item):
     """[생산계획 stage1] STEP6 CTE_BOM 재현 → plan_part_temp(per-unit).
     v_pr_bom 재귀, except_flag≠1, level<10, PR_M_MAT 경계(추가는 하되 재귀 정지). vir_item 추적.
