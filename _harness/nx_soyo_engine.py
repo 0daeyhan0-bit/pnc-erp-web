@@ -399,6 +399,35 @@ def setinput_bc_soyo(eng, item, part_default=''):
     return acc
 
 
+def _kit_lines(eng, item):
+    """키팅 키셋용 v_pr_bom 자식 (child, gagong_proc, wh_gagong, vir). 캐시. ※except 필터 없음(kitting CTE 원문)."""
+    if not hasattr(eng, '_kitl'):
+        eng._kitl = {}
+    k = item.strip().upper()
+    if k not in eng._kitl:
+        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(mat_code))), ISNULL(LTRIM(RTRIM(gagong_proc)),''),
+                ISNULL(LTRIM(RTRIM(wh_gagong)),''), ISNULL(vir_item_flag,'0')
+            FROM nx.v_pr_bom WHERE UPPER(LTRIM(RTRIM(item_code)))=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
+            ORDER BY BOM_SEQ""", k)
+        eng._kitl[k] = [(str(r[0]).strip(), str(r[1]).strip(), str(r[2]).strip(), str(r[3]).strip())
+                        for r in eng.cur.fetchall()]
+    return eng._kitl[k]
+
+
+def kitting_gpcs(eng, item, whp):
+    """[키팅 키셋 walker] kitting_grid CTE 재현: 계획품목 item의 VIR('1')-트리에서 WH_GAGONG=whp 인 엣지의
+    GAGONG_PROC 집합. 반환 set(gpc). ※except 필터 없음(레거시 CTE 원문)·구조 키셋(qty 아님). §1-10."""
+    out = set()
+    def walk(node, seen):
+        for (c, gpc, wh, vir) in _kit_lines(eng, node):
+            if wh == whp:
+                out.add(gpc)
+            if vir == '1' and c not in seen:
+                walk(c, seen | {c})
+    walk(item.strip().upper(), set())
+    return out
+
+
 def plan_explode(eng, item):
     """[생산계획 stage1] STEP6 CTE_BOM 재현 → plan_part_temp(per-unit).
     v_pr_bom 재귀, except_flag≠1, level<10, PR_M_MAT 경계(추가는 하되 재귀 정지). vir_item 추적.
