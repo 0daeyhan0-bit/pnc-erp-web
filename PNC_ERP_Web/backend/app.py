@@ -436,6 +436,17 @@ def _warmup_heavy_queries():
             finally:
                 _cn.close()
         except Exception: pass
+        # ★자재예상매입 소요캐시 예열 — `nx.item_mat_soyo`(완제품별 per-unit 자재소요).
+        #   이 캐시는 **BOM 이 바뀌면 서명가드가 통째로 비운다**(정확성 우선·stale 차단).
+        #   비면 다음 조회가 완제품 565종을 엔진에 물어 다시 채운다.
+        #     실측(2026-09-09) : 캐시 비었을 때 197초 · 채워져 있으면 2.5초
+        #   기동 때 미리 채워 재시작 직후 첫 사용자를 보호한다.
+        #   ※낮에 BOM 을 고치면 그 뒤 첫 조회는 여전히 재빌드를 문다(캐시 무효가 정확성 조건).
+        #     다만 _SOYO_LOCK 이 있어 **한 사람만** 물고 나머지는 그 결과를 받는다.
+        try:
+            from routers.matexpect import matexpect as _mx
+            _mx()
+        except Exception: pass
     # ★TestBed(FLOW_TESTBED=1)는 예열을 **동기로** 한다 — 하네스는 커넥션이 하나라
     #   예열 스레드가 본 스레드와 다투면 HY000 이 나고, 그렇다고 끄면 엔진이 차가워
     #   생산재고조회가 타임아웃한다(실측 600s 초과). 요청을 받기 전에 끝낸다.
