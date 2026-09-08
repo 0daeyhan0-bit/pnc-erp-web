@@ -88,6 +88,11 @@
   - **backflush(완성)에서는 원소재 comps 제거** — 부품/제작동관/구매품(bom_line 엔진) + 용접봉/용접링만 유지.
 - 선행 확인 필요: **규격(metal,diam,thick) → raw tube 코드 매핑** 존재 여부(없으면 매핑 구축이 선행 과제).
 
+## 4-E. ✅BOM TABLE 정리 #1 — `bom_flat.raw_lg_kg` 제거 완료 (2026-09-08)
+- 검증: raw_lg_kg 실사용 **0**(코드/SQL/JS 전수 grep — 문서 3곳만 언급). **LG 원소재 소요(nx_lgbom_engine)도 안 읽음** — LG 중량은 `nx.lg_bom_ver`(Assembly Pull qty) 직독(raw_lg_kg 아님). lgsagub도 lg_bom 직조회.
+- 실행: 백업 `nx.bom_flat_raw_lg_kg_bak_260908`(32,906행·item_code·leaf_code·raw_lg_kg) → `ALTER TABLE nx.bom_flat DROP COLUMN raw_lg_kg`. 검증=컬럼 제거·행수 불변(32,906)·컬럼 12.
+- 효과: LG 중량 복사본 drift 위험 제거(§1-9-1). ⟹ **bom_flat = 우리실측 중량(weight_actual) 단일**, LG중량은 lg_bom_ver 직조회로 일원화.
+
 ## 5. 통일 계획 (확정 방향)
 > ★§4-C 반영해 정정: 원소재 중량차감은 backflush가 아니라 **절삭(procbc)** — 아래 단계가 정본 계획.
 
