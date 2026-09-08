@@ -863,15 +863,77 @@ def matrecv_gagong_receive(payload: dict = Body(...)):
             saved += 1
 
         # ④-2 전표 완료표시 (전표 단위 1회)
-        # ※가공세트재고(PU_T_SET_GAGONG_STOCK) 차감은 **여기서 하지 않는다**(2026-08-28 사용자 확정).
-        #   레거시 057_2 에는 MERGE 로 차감이 있으나, 웹은 **생산실적 등록 시점**에 차감한다.
+        # ※가공세트재고 **차감(−)** 은 여기서 하지 않는다(2026-08-28 사용자 확정).
+        #   웹은 생산실적 등록 시점에 차감한다(prodsheet.py `_set_gagong_stock(..., -qty)`, tag='P').
         #   여기서 또 빼면 이중차감이 된다.
+        #
+        # ★★2026-09-08 신설 — 가공세트재고 **증가(+)** 는 여기서 한다.
+        #   [경위] 웹에는 세트재고를 **만드는 코드가 아예 없었다**. 빼는 쪽(생산실적)만 구현돼
+        #     nx.PU_T_SET_GAGONG_STOCK 은 음수 0행·양수 445행뿐이고 그 445행도 전부 레거시가 만든 것이었다.
+        #     실증: AJR76164202 을 웹 580 에서 61개 발행→입고확인 했는데 세트재고가 안 생겨
+        #     「가공창고 이동계획」의 '이동전표발행' 칸이 비었다(라이브에는 w_pu_stock_057_2 가 만든 61 이 있었다).
+        #     레거시가 은퇴하면 **만드는 쪽이 사라져 세트재고가 영영 안 생긴다**(§1-9-1).
+        #   [규칙 — 라이브 실측으로 확정, 9월 40건 전수 일치]
+        #     · 시점 = 입고확인(IN_CONFIRM_FLAG='1') 과 같은 트랜잭션
+        #     · 이력 = nx.PU_T_SET_STOCK_MAINT_GAGONG  MAINT_TAG='2' · **양수**
+        #     · 잔액 = nx.PU_T_SET_GAGONG_STOCK  +
+        #     · 키   = 전표의 **ITEM_CODE(도번)** — MAT_CODE(자도번) 아님
+        #     · 거래처 = SAGUB_CUST_CODE 있으면 그 사급처, 없으면 'Z99990'
+        #       (사급분은 그 사급처 키로 잡히고, 업체 입고 때 같은 키에서 빠진다)
+        #     · 수량 = 전표 SET_QTY(=IN_MAINT_QTY, 실측 동일)
+        #     · 단위 = **(그룹, 도번, 거래처)당 1행** — 전표가 3행이어도 세트이력은 1행.
+        #       자도번별로 넣으면 도번 수량이 중복 계상된다.
+        #   [검산] AJR76164202 라이브: tag='2' +1,827 − tag='P' 1,766 = 61 = 잔액 61.
         for gs in gseqs:
             try:
                 cur.execute("""UPDATE nx.PU_T_STOCK_MAINT_GAGONG_MOVE
                                   SET IN_CONFIRM_FLAG='1', IN_CONFIRM_DATETIME=GETDATE(), IN_CONFIRM_USER_ID=?
                                 WHERE MAINT_GROUP_SEQ=?""", _usr, gs)
             except Exception: pass
+            # ★세트재고 증가 — 그룹 안에서 (도번, 거래처)로 묶어 1행씩.
+            #   SET_QTY 는 자도번 행마다 같은 값이 반복되므로 MAX 로 집계한다(SUM 이면 중복).
+            try:
+                cur.execute("""SELECT RTRIM(ITEM_CODE) it,
+                                      MAX(IIF(ISNULL(RTRIM(SAGUB_CUST_CODE),'')>'',
+                                              RTRIM(SAGUB_CUST_CODE),'Z99990')) cust,
+                                      MAX(ISNULL(SET_QTY,0)) q
+                                 FROM nx.PU_T_STOCK_MAINT_GAGONG_MOVE WITH(NOLOCK)
+                                WHERE MAINT_GROUP_SEQ=?
+                                GROUP BY RTRIM(ITEM_CODE)""", gs)
+                _sets = [(str(x[0]).strip(), str(x[1]).strip(), float(x[2] or 0))
+                         for x in cur.fetchall()]
+            except Exception:
+                _sets = []
+            for _it, _cc, _q in _sets:
+                if not _it or _q <= 0:
+                    continue
+                try:
+                    # ① 이력(tag='2', 양수) — 웹 대역 SEQ>=20000(common.WEB_SEQ_BASE 규약)
+                    cur.execute("""SELECT ISNULL(MAX(MAINT_SEQ),19999)+1
+                                     FROM nx.PU_T_SET_STOCK_MAINT_GAGONG
+                                    WHERE MAINT_YMD=? AND MAINT_SEQ>=20000""", ymd)
+                    _gsq = int(cur.fetchone()[0] or 20000)
+                    cur.execute("""INSERT INTO nx.PU_T_SET_STOCK_MAINT_GAGONG
+                            (MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,ITEM_CODE,MAINT_QTY,REMARKS,
+                             INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,
+                             UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                            VALUES(?,?,'2',?,?,?,?, ?,GETDATE(),'gagongmove', ?,GETDATE(),'gagongmove')""",
+                        ymd, _gsq, _cc, _it, _q, ("가공이동 입고확인 전표=" + str(gs))[:250],
+                        _usr, _usr)
+                    # ② 잔액
+                    cur.execute("""UPDATE nx.PU_T_SET_GAGONG_STOCK
+                                      SET STOCK_QTY=ISNULL(STOCK_QTY,0)+?,
+                                          UPDATE_USER_ID=?, UPDATE_DATETIME=GETDATE(),
+                                          UPDATE_WINDOW='gagongmove'
+                                    WHERE RTRIM(ITEM_CODE)=? AND RTRIM(ISNULL(IN_CUST_CODE,''))=?""",
+                                _q, _usr, _it, _cc)
+                    if cur.rowcount == 0:
+                        cur.execute("""INSERT INTO nx.PU_T_SET_GAGONG_STOCK
+                                          (ITEM_CODE,IN_CUST_CODE,STOCK_QTY,
+                                           UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                                        VALUES(?,?,?,?,GETDATE(),'gagongmove')""",
+                                    _it, _cc, _q, _usr)
+                except Exception: pass
         stock_changed("stock_save")           # ★재고 변경 → 수불장 캐시 버림 (main #97)
         return {"ok": True, "count": saved, "sheets": sorted(gseqs)}
     finally:
@@ -1041,11 +1103,17 @@ def stock_update(payload: dict = Body(...)):
             neg = old_stored < 0 or (old_stored == 0 and sc["sign"] == -1)
             new_stored = -abs(qty) if neg else abs(qty)
         # 음수재고 유발 차단(악화 시에만)
-        cur.execute("SELECT ISNULL(SUM(MAINT_QTY),0) FROM nx.stock_ledger WHERE MAT_CODE=?", mat)
+        # ★★2026-09-08 기준을 **잔액(PU_T_MAT_STOCK_WH) = 실시간 현재고** 로 교정(삭제 가드와 동일).
+        #   ⛔종전엔 nx.stock_ledger SUM 을 썼는데 원장은 웹 실적만 담고 레거시 이력이 없어 음수다
+        #     (실측 MJU66801001: 원장 −2 / 잔액 123). 그래서 재고가 넉넉해도 편집이 막혔다.
+        _gp_chk = (old_gp or "IS0001")
+        cur.execute("""SELECT ISNULL(SUM(STOCK_QTY),0) FROM nx.PU_T_MAT_STOCK_WH WITH(NOLOCK)
+                        WHERE RTRIM(MAT_CODE)=? AND CUST_CODE='Z99990'
+                          AND ISNULL(GAGONG_PROC_CODE,'')=?""", mat, _gp_chk)
         cur_sum = float(cur.fetchone()[0] or 0)
         new_sum = cur_sum - old_stored + new_stored
         if new_sum < 0 and new_sum < cur_sum:
-            errs.append(f"음수재고 유발 ({mat} 결과재고 {new_sum:g} < 0)")
+            errs.append(f"음수재고 유발 ({mat} 결과재고 {new_sum:g} < 0 · 현재고 {cur_sum:g})")
         if errs:
             return {"ok": False, "errors": errs}
         # ★단가 수정(2026-08-28 사용자 요청) — 별도 권한으로 게이트할 예정이나 현재는 개방.
@@ -1110,11 +1178,21 @@ def stock_delete(payload: dict = Body(...)):
         errs = []
         if _closed(cur, ymd, "MAT"):
             errs.append(f"마감월({_ym(ymd)}) 삭제 불가")
-        cur.execute("SELECT ISNULL(SUM(MAINT_QTY),0) FROM nx.stock_ledger WHERE MAT_CODE=?", mat)
+        # ★★2026-09-08 음수재고 가드의 기준을 **잔액(PU_T_MAT_STOCK_WH)** 으로 교정.
+        #   ⛔종전엔 nx.stock_ledger SUM 을 재고로 썼는데, 원장은 **웹 실적만** 담고
+        #     레거시 3년치 이력이 없어 품목에 따라 음수다. 그래서 실제 재고가 넉넉해도 삭제가 막혔다.
+        #   실사고 2026-09-08 MJU66801001: 원장 −2 / 잔액 123 / 레거시잔액 23
+        #     → 100 삭제 시 "재고 −97" 이라며 거부. 실제로는 123−100=23 이라 삭제해도 된다.
+        #   잔액은 화면(자재 입출고현황·키팅·410·130)이 전부 보는 정본이므로 기준을 여기에 맞춘다.
+        #   ※버킷키는 저장 때와 동일(Z99990 + 그 행의 입고창고) — stock_save/_upd_mat_wh 규약.
+        _gp_chk = (old_gp or "IS0001")
+        cur.execute("""SELECT ISNULL(SUM(STOCK_QTY),0) FROM nx.PU_T_MAT_STOCK_WH WITH(NOLOCK)
+                        WHERE RTRIM(MAT_CODE)=? AND CUST_CODE='Z99990'
+                          AND ISNULL(GAGONG_PROC_CODE,'')=?""", mat, _gp_chk)
         cur_sum = float(cur.fetchone()[0] or 0)
         new_sum = cur_sum - old_stored
         if new_sum < 0 and new_sum < cur_sum:
-            errs.append(f"음수재고 유발 ({mat} 삭제 후 재고 {new_sum:g} < 0)")
+            errs.append(f"음수재고 유발 ({mat} 삭제 후 재고 {new_sum:g} < 0 · 현재고 {cur_sum:g})")
         if errs:
             return {"ok": False, "errors": errs}
         cur.execute("DELETE FROM nx.stock_ledger WHERE MAINT_YMD=? AND MAINT_SEQ=?", ymd, seq)

@@ -374,18 +374,23 @@ SCREEN.prodinout=(c)=>{
   //   그 원장에 PRD 이력이 0건이라 늘 빈 화면이었다(웹 실적은 PR_T_PROD_DTL 에 쌓임).
   //   → nx = 일반 그리드(라이브+웹실적) / live = 라이브만. 원장 파생뷰는 source=ledger.
   let sel=null, curL=[], source='nx', incZero=false;   // incZero: 0재고 표시 토글
+  let basis='', asof='';   // ★재고기준(2026-09-08): live=실시간 잔액(오늘) / hist=이력합계(과거일자)
   const load=async()=>{loading=true;msg='';sel=null;
     const st=c.querySelector('#lbody');if(st)st.innerHTML=spinRow(5);
     const qs=`frm=${encodeURIComponent(frm)}&to=${encodeURIComponent(to)}&inc_zero=${incZero?1:0}`;
     if(source==='ledger'){loading=false;return nxDerivedView(c,`${API}/api/live/prodinout?${qs}&source=ledger`,{title:'생산입출고현황(웹원장)',onBack:()=>{source='nx';load();}});}
     try{const r=await fetch(`${API}/api/live/prodinout?${qs}&source=${encodeURIComponent(source)}`);if(!r.ok)throw new Error('HTTP '+r.status);
-      const j=await r.json();curYm=j.ym||to.slice(0,4)||'';rows=j.stock||[];mv=j.moves||{};pn=j.partNames||{};}
-    catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';rows=[];mv={};pn={};}
+      const j=await r.json();curYm=j.ym||to.slice(0,4)||'';rows=j.stock||[];mv=j.moves||{};pn=j.partNames||{};basis=j.basis||'';asof=j.asof||'';}
+    catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';rows=[];mv={};pn={};basis='';asof='';}
     loading=false;
     const fi=c.querySelector('#frm'),ti=c.querySelector('#to');if(fi)fi.value=ymd2d(frm);if(ti)ti.value=ymd2d(to);
     const ps=[...new Set(rows.map(r=>r[0]))].sort((a,b)=>pName(a).localeCompare(pName(b),'ko'));
     const psel=c.querySelector('#part');if(psel){const v=psel.value;psel.innerHTML='<option value="">전체</option>'+ps.map(p=>`<option value="${esc(p)}">${esc(pName(p))}</option>`).join('');psel.value=v;}
-    const sub=c.querySelector('#pio-sub');if(sub)sub.innerHTML=`파트별 생산재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PR_T_STOCK_MAINT_MAT</code> 외 · 🟢 수불기간 ${esc(ymd2d(frm))}~${esc(ymd2d(to))}(이월기준 2502) · ${incZero?'<b style="color:#1c47a0">0재고 포함</b>':'0재고 숨김'}`;
+    // ★재고기준 표기(2026-09-08) — 종료일이 오늘이면 실시간 잔액, 과거면 이력합계
+    const bTx = basis==='live'
+      ? `<b style="color:#1c7c3a">재고기준 실시간 잔액</b>(PR_T_MAT_STOCK_WH)`
+      : (basis==='hist' ? `<b style="color:#a0641c">재고기준 이력합계</b> ${esc(ymd2d(asof||to))}까지(이월 2502)` : '');
+    const sub=c.querySelector('#pio-sub');if(sub)sub.innerHTML=`파트별 생산재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PR_T_STOCK_MAINT_MAT</code> 외 · 수불기간 ${esc(ymd2d(frm))}~${esc(ymd2d(to))} · ${bTx} · ${incZero?'<b style="color:#1c47a0">0재고 포함</b>':'0재고 숨김'}`;
     renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
   c.innerHTML=`
    <div class="page-title">🔁 생산입출고현황</div>
@@ -1402,8 +1407,7 @@ SCREEN.partplan=(c)=>{
         <td></td>${footRow('생산ST',{st:f2(fSTtot),prior:f2(fSTprior)})}${d.map(x=>`<td class="center">${f2(fSTd(x))}</td>`).join('')}${tailBlank()}</tr>
        <tr class="grandtot" style="position:sticky;bottom:0;background:#f4f7fc;color:#666;border-top:1px solid #d3ddea">
         <td></td>${footRow(`계상근무공수 (÷인원 ${nf(iw)})`,{st:iw?f2(fSTtot/iw):'—'})}${d.map((x,xi)=>`<td class="center">${iw?f2(((xi===0?fSTprior:0)+fSTd(x))/iw):'—'}</td>`).join('')}${tailBlank()}</tr>`;})();
-    const srcLbl=st.src==='live'?'🔴 라이브':(st.src==='new'?'🟣 신규DB(웹계획)':'🟢 nx');
-    const cntHtml=`${nf(disp.length)}건 · ${srcLbl} · 일자 ${d.length}개`;
+    const cntHtml=`${nf(disp.length)}건 · 일자 ${d.length}개`;   // ★소스 라벨 제거 — 신규DB 고정(2026-09-08)
     if(bodyOnly){
       const tb=c.querySelector('tbody'), tf=c.querySelector('tfoot'), cnt=c.querySelector('#pp-cnt');
       if(tb){tb.innerHTML=tbodyHtml;}
@@ -1428,7 +1432,10 @@ SCREEN.partplan=(c)=>{
        <label class="tl">생산여부</label>${seg('pp-uf',st.unfin,['전체','미생산'])}
        <label class="tl">구분</label>${seg('pp-vw',st.view,['상세','집계','제번'])}
        <label class="tl">적용일수</label><select class="inp" id="pp-gigan" style="width:62px">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}"${st.gigan===n?' selected':''}>${n}일</option>`).join('')}</select>
-       <label class="tl">소스</label><select class="inp src-new" id="pp-src" data-src="${esc(st.src)}" style="width:auto;min-width:150px" title="신규DB(웹계획)=웹이 자체 편성한 계획(nx.plan_part_dtl) / 우리(nx)=레거시 편성 미러 / 라이브 대사=레거시 그대로"><option value="new"${st.src==='new'?' selected':''}>🟣 신규DB(웹계획)</option><option value="nx"${st.src==='nx'?' selected':''}>🟢 우리(nx)</option><option value="live"${st.src==='live'?' selected':''}>🔴 라이브 대사</option></select>
+       <!-- ★소스 드롭다운 제거(2026-09-08 사용자 확정) — 신규DB(웹계획) 고정.
+            이 화면의 계획이 곧 편성 기준이라, 대사용으로 두었던 '우리(nx)'·'라이브 대사'를
+            실무 화면에 노출할 필요가 없다(460 준비실적처리와 동일 조치, 2026-09-04).
+            st.src 는 'new' 로 고정(초기값). API 는 src 파라미터를 그대로 받으므로 백엔드 변경 없음. -->
        <button class="btn" id="pp-go">🔍 조회</button>
        ${dpOn()?`<span style="display:inline-flex;gap:6px;align-items:center;margin-left:10px;padding:2px 10px;
             border:1px solid ${st.dpConf.type==='R'?'#7cc499':'#9dc0e8'};border-radius:6px;
@@ -1465,11 +1472,9 @@ SCREEN.partplan=(c)=>{
       </table></div>
      <div class="page-sub" style="text-align:left;margin-top:2px" id="pp-cnt">${cntHtml}</div>`;
     const g=id=>c.querySelector(id);
-    // 조회(서버 재조회) = 기준일·자도번작업처·적용일수·소스만. 나머지 필터는 캐시에서 즉시필터라 재조회 불필요.
-    g('#pp-go').onclick=()=>{st.base=g('#pp-base').value;st.wc=g('#pp-wc').value;st.gigan=+g('#pp-gigan').value;st.src=g('#pp-src').value;
-      load();};
-    // 소스는 고르는 즉시 색을 바꾼다(조회 전에도 무엇을 볼지 보이게). 실제 반영은 [조회].
-    g('#pp-src').onchange=e=>{e.target.dataset.src=e.target.value;};
+    // 조회(서버 재조회) = 기준일·자도번작업처·적용일수만. 나머지 필터는 캐시에서 즉시필터라 재조회 불필요.
+    g('#pp-go').onclick=()=>{st.base=g('#pp-base').value;st.wc=g('#pp-wc').value;st.gigan=+g('#pp-gigan').value;
+      load();};   // ★소스는 'new'(신규DB) 고정 — 드롭다운 제거(2026-09-08)
     // ★생산여부·구분·파트·라인·ASSY도번·도번·제번 = 캐시에서 즉시 재렌더(재조회 없음, 레거시 동일)
     // ★전부 redrawBody() = 표만 갱신(툴바 유지) → 2,900행에서도 즉각 반응
     c.querySelectorAll('input[name=pp-uf]').forEach(el=>el.onchange=()=>{const x=c.querySelector('input[name=pp-uf]:checked');if(x){st.unfin=x.value;redrawBody();}});
@@ -1976,15 +1981,19 @@ SCREEN.partplan=(c)=>{
       if(!txt){alert('복사할 영역을 먼저 끌어서 선택하세요.');return;}
       const done=()=>{const el=c.querySelector('#pp-cnt');
         if(el){const o=el.textContent;el.textContent=what+' 복사됨';setTimeout(()=>{el.textContent=o;},1400);}};
-      if(navigator.clipboard&&navigator.clipboard.writeText){
+      // ★비보안(http 운영 184)은 clipboard API 가 막히고 그 거부는 **비동기** —
+      //   제스처(Ctrl+C) 밖에서 fallback 이 돌면 execCommand 도 막혀 조용히 실패한다.
+      //   ⟹ isSecureContext 가 아니면 처음부터 동기 fallback()(2026-09-08).
+      if(window.isSecureContext&&navigator.clipboard&&navigator.clipboard.writeText){
         navigator.clipboard.writeText(txt).then(done,()=>fallback());
       }else fallback();
       function fallback(){   // 비보안 컨텍스트(http)에서는 clipboard API 가 막힌다
         const ta=document.createElement('textarea'); ta.value=txt;
         ta.style.cssText='position:fixed;left:-9999px;top:0';
-        document.body.appendChild(ta); ta.select();
-        try{document.execCommand('copy');done();}catch(_){alert('복사에 실패했습니다.');}
-        ta.remove();}
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        let ok=false; try{ok=document.execCommand('copy');}catch(_){}
+        ta.remove();
+        if(ok)done(); else alert('복사에 실패했습니다.');}
     };
     const copySel=()=>toClip(selText(),'선택영역');
     const copyAll=()=>{
@@ -1996,16 +2005,25 @@ SCREEN.partplan=(c)=>{
         for(let i=0;i<rs.length;i++)out.push([...rs[i].cells].map(td=>(td.innerText||'').trim()).join('\t'));});
       toClip(out.join('\n'),`전체 ${nf(out.length-1)}행`);
     };
-    // Ctrl+C — 이 화면이 열려 있을 때만. 표 안에 선택영역이 있으면 그걸 가로챈다.
+    /* Ctrl+C — 이 화면이 열려 있을 때만. 표 안에 선택영역이 있으면 그걸 가로챈다.
+       ★2026-09-08 document 로 옮김 — 460 키팅(2026-09-04)·420 가공진척과 같은 버그였다.
+         종전엔 c(tabindex=-1)에 keydown 을 걸었는데, 범위선택 mousedown 이
+         ev.preventDefault() 를 부른다 → **포커스가 표로 오지 않는다**. 그래서 칸을
+         칠해놓고 Ctrl+C 를 눌러도 c 는 keydown 을 아예 못 받았다.
+       ★최신 핸들러는 c._ppCopySel 로 부른다(리스너는 화면당 1회, 옛 클로저 방지). */
+    c._ppCopySel=copySel;
     if(!c.dataset.cpkey){
       c.dataset.cpkey='1';
-      c.addEventListener('keydown',ev=>{
-        if((ev.ctrlKey||ev.metaKey)&&(ev.key==='c'||ev.key==='C')){
-          if(!c.querySelector('.pp-sel'))return;      // 선택 없으면 브라우저 기본 동작
-          ev.preventDefault(); copySel();}
-      });
-      c.setAttribute('tabindex','-1');                // keydown 을 받으려면 포커스 가능해야 한다
-      c.style.outline='none';
+      c.setAttribute('tabindex','-1'); c.style.outline='none';
+      const onKey=ev=>{
+        if(!((ev.ctrlKey||ev.metaKey)&&(ev.key==='c'||ev.key==='C')))return;
+        if(!c.isConnected||!c.offsetParent)return;     // 다른 탭이 떠 있으면 무시
+        const t=ev.target;
+        if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'||t.isContentEditable))return;
+        if(!c.querySelector('.pp-sel'))return;         // 선택 없으면 브라우저 기본 동작
+        ev.preventDefault(); if(c._ppCopySel)c._ppCopySel();};
+      // document 하나만 — c 에도 걸면 keydown 이 버블링돼 두 번 복사된다.
+      document.addEventListener('keydown',onKey);
     }
     /* ══ 엑셀 다운로드 — 화면 그대로(색상 포함) ══════════════════════════
        ★DOM 에서 읽는다. 데이터에서 다시 만들면 항목보기(숨김·순서)·집계/상세 뷰·
@@ -2811,7 +2829,11 @@ SCREEN.kitting=(host)=>{
                          :JSON.parse(localStorage.getItem('kt460_hide')||'null');
       return new Set(Array.isArray(s)?s:[]);}catch(e){return new Set();}};
   // ★기본 소스 = 신규DB(웹편성). 레거시 대조는 소스를 nx/라이브로 바꿔서 본다(2026-08-26).
-  const st={dates:[],rows:[],cnt:0,plan_sum:0,ready_sum:0,note:'',base:iso(T),gigan:2,src:'new',wc:'',wh:'',part:'',pgroup:'',line:'',dono:'',jado:'',wo:'',unfin:'미생산',view:'상세',sel:new Set(),fold:new Set(),cellSel:new Set(),itemSel:null,loading:false,msg:''};
+  // ★기준일 = 마지막 계획업로드의 일자축 첫날(planBaseIso) — 2026-09-08 사용자 확정.
+  //   종전 iso(T)(당일)였다. 당일 기준이면 업로드 전날이 잡혀, 미출하분이 재편성되며
+  //   충당된 재고와 어긋난다(410·자재소요·영업계획과 동일 정책. core.js §planBase 주석 참조).
+  //   ※planBase() 미로드 시 당일 폴백 → 아래 초기화 IIFE 에서 await 로 확정한다.
+  const st={dates:[],rows:[],cnt:0,plan_sum:0,ready_sum:0,note:'',base:planBaseIso(),gigan:2,src:'new',wc:'',wh:'',part:'',pgroup:'',line:'',dono:'',jado:'',wo:'',unfin:'미생산',view:'상세',sel:new Set(),fold:new Set(),cellSel:new Set(),itemSel:null,loading:false,msg:''};
   /* load(quiet) — quiet=true 면 **표만 조용히 갱신**한다(2026-09-03).
        왜 — 실적 등록/취소 뒤 매번 render() 전체를 돌려 화면이 통째로 새로 그려졌다.
        스크롤이 맨 위로 튀고 펼쳐둔 블록이 접히고, 8천행에서는 눈에 띄게 멈췄다
@@ -3498,10 +3520,13 @@ SCREEN.kitting=(host)=>{
         if(el){const o=el.textContent;el.textContent=what+' 복사됨';setTimeout(()=>{el.textContent=o;},1400);}};
       const fb=()=>{const ta=document.createElement('textarea'); ta.value=txt;
         ta.style.cssText='position:fixed;left:-9999px;top:0';
-        document.body.appendChild(ta); ta.select();
-        try{document.execCommand('copy');done();}catch(_){alert('복사에 실패했습니다.');}
-        ta.remove();};
-      if(navigator.clipboard&&navigator.clipboard.writeText)
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        let ok=false; try{ok=document.execCommand('copy');}catch(_){}
+        ta.remove();
+        if(ok)done(); else alert('복사에 실패했습니다.');};
+      // ★비보안(http 운영 184)은 clipboard API 가 막히고 그 거부는 비동기 —
+      //   제스처 밖에서 fb 가 돌면 execCommand 도 막힌다. 처음부터 동기 fb(2026-09-08).
+      if(window.isSecureContext&&navigator.clipboard&&navigator.clipboard.writeText)
         navigator.clipboard.writeText(txt).then(done,fb);
       else fb();
     };
@@ -4153,7 +4178,10 @@ SCREEN.kitting=(host)=>{
        왜 — 진입할 때마다 6,000행 조회가 먼저 걸려 느리고, 조건(기준일자·파트·기간)을
        바꾸기도 전에 한 번 돌아 버린다. [조회] 를 눌러야 조회한다.
      ★항목보기 설정(계정별)은 먼저 받아둔다 — 늦게 오면 컬럼이 깜빡인다. */
-  (async()=>{ await ktPrefLoad();
+  //   ★기준일자(계획업로드 최종일자)도 그리기 전에 확정한다 — planBaseIso() 는 동기라
+  //     아직 캐시가 안 찼으면 당일로 폴백한다. 410 과 동일하게 await planBase() 로 잡는다.
+  (async()=>{ try{const b=await planBase();if(b&&b.iso)st.base=b.iso;}catch(_){}
+              await ktPrefLoad();
               st.msg='조건을 고르고 [조회] 를 누르세요.';
               render(); })();
 };
@@ -4173,12 +4201,27 @@ SCREEN.kitting=(host)=>{
      다른 PC 에서 맞다는 보장이 없으므로, 서버에 공유하면 오히려 틀어진다.
      (계정별 화면설정과는 성격이 다르다 — 이건 그 PC 의 장비 특성이다) */
 const _LBL_KEY='prodsheet_label_cal';
-/* ★기본 세로 보정 = -96 dot (12mm 위로) — 현장 실측값(2026-09-07).
-     TSC TE210 + 40×20mm 용지에서 인쇄가 그만큼 아래로 밀려 찍혔다.
-     갭을 2·3·4mm 로 바꿔도, GAPDETECT 로도 잡히지 않아 SHIFT 로 직접 당겼다.
+/* ★기본 세로 보정 = 0 (2026-09-08 교정).
+     종전 -96dot(12mm 위로)은 **용지를 40×20mm 로 잘못 잡은 것을 상쇄하던 값**이었다.
+     실물은 40×25mm 인데 SIZE 를 20mm 로 선언하니 프린터가 시작점을 40dot 어긋나게 잡았고,
+     그것을 SHIFT 로 되밀어 눈으로만 맞춰 놓은 상태였다(원인이 아니라 증상 보정).
+     그 여파로 마지막 줄(용접사/검사자)이 라벨 경계 밖으로 밀려 **인쇄되지 않았다.**
+     ⟹ 용지를 실물(25mm)로 바로잡았으므로 보정 기본값은 0 이다.
      다른 PC·프린터에서 어긋나면 화면에서 8dot(1mm) 단위로 조정하면 되고,
      그 값은 그 PC 에 저장된다. */
-const _LBL_SHIFT_DEFAULT=-96;
+const _LBL_SHIFT_DEFAULT=0;
+/* ★구버전 보정값 청소 — -96 은 20mm 오선언 시절의 상쇄값이라 25mm 에서는 위쪽이 잘린다.
+     이미 그 값을 저장해 둔 PC 가 있으므로(장비설정은 localStorage 에 남는다) 한 번만 걷어낸다.
+     사용자가 25mm 로 바로잡은 뒤 직접 고른 값은 건드리지 않는다(_LBL_FIX 마킹으로 1회 한정). */
+const _LBL_FIX='prodsheet_label_cal_fix_260908';
+try{
+  if(!localStorage.getItem(_LBL_FIX)){
+    const s=localStorage.getItem(_LBL_KEY);
+    if(s){const o=JSON.parse(s)||{};
+      if(parseInt(o.shift,10)===-96){o.shift=0;localStorage.setItem(_LBL_KEY,JSON.stringify(o));}}
+    localStorage.setItem(_LBL_FIX,'1');
+  }
+}catch(e){}
 function _lblCfg(){
   const d={gap:3,shift:_LBL_SHIFT_DEFAULT};
   try{const s=localStorage.getItem(_LBL_KEY); if(!s)return d;
@@ -4223,7 +4266,7 @@ SCREEN.prodsheet=(host)=>{
         <span style="font-size:10px;color:#7b8794">${sz}</span>
         <span style="font-size:11px;font-weight:700;color:${nm?'#1c7c3a':'#c0392b'}">
           ${nm?esc(nm):'미지정'}</span></span>`;
-    return one('제품스티커','40×20',a.label_printer,'#fff7e6','#ffd591','#a06a00')
+    return one('제품스티커','40×25',a.label_printer,'#fff7e6','#ffd591','#a06a00')
          + one('가간판·전표','210×110 / A4',a.kanban_printer,'#e6f7ff','#91d5ff','#0d6b9a')
          + `<span style="font-size:11px;color:#8a94a6">발행하면 <b>인쇄창 없이</b> 위 프린터로 바로 나갑니다
               — 변경은 작업표시줄의 <b>PNC 프린터 에이전트 → 설정</b>.</span>
@@ -4667,11 +4710,12 @@ SCREEN.prodsheet=(host)=>{
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>제품스티커 ${esc(j.item)} (${j.qty}장)</title>
     <style>
       /* ★QR3 라벨 규격 = 40mm × 20mm (라벨프린터 낱장). */
-      @page{size:40mm 20mm;margin:0}
+      @page{size:40mm 25mm;margin:0}
       *{box-sizing:border-box}
       body{margin:0;font-family:'맑은 고딕',Malgun Gothic,sans-serif;color:#000}
-      /* 낱장 라벨 — 좌측 QR + 우측 텍스트. 1장=1페이지 */
-      .lb{display:flex;align-items:center;gap:1mm;width:40mm;height:20mm;padding:1mm;
+      /* 낱장 라벨 — 좌측 QR + 우측 텍스트. 1장=1페이지
+         ★용지 실측 = 40×25mm (2026-09-08 현장 확인). 종전 20mm 로 잡고 있었다. */
+      .lb{display:flex;align-items:center;gap:1mm;width:40mm;height:25mm;padding:1mm;
           page-break-after:always;page-break-inside:avoid;overflow:hidden}
       .lb:last-child{page-break-after:auto}
       /* ★QR 축소 17→13→11mm (2026-09-04 "QR이 크다" → 2026-09-07 "1단계 더 줄여달라").
@@ -4701,9 +4745,9 @@ SCREEN.prodsheet=(host)=>{
     <div class="noprint" style="margin-bottom:6px">
       <button onclick="window.print()" style="padding:6px 16px;font-size:13px">🖨 인쇄</button>
       <button onclick="window.close()" style="padding:6px 16px;font-size:13px">닫기</button>
-      <span style="font-size:12px;color:#555;margin-left:8px">제품스티커 ${j.qty}장 · 라벨번호 ${j.print_seq} · QR3 · 40×20mm</span>
+      <span style="font-size:12px;color:#555;margin-left:8px">제품스티커 ${j.qty}장 · 라벨번호 ${j.print_seq} · QR3 · 40×25mm</span>
       <div style="margin-top:6px;padding:6px 10px;background:#fff7e6;border:1px solid #ffd591;border-radius:4px;font-size:12px">
-        <b>라벨프린터(40×20)를 인쇄창에서 고르세요.</b>
+        <b>라벨프린터(40×25)를 인쇄창에서 고르세요.</b>
         <span style="color:#8c6d1f">— 한 번 고르면 다음부터 자동 선택됩니다.
           이 PC 에 <b>PNC 프린터 에이전트</b>를 설치하면 인쇄창 없이 바로 출력됩니다.</span>
       </div></div>

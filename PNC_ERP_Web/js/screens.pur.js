@@ -89,7 +89,13 @@ SCREEN.matinout=(c)=>{
       html+=`<tr><td class="center">${fmtYmd(r.ymd)}</td><td class="num">${won(prev)}</td><td class="num">${i?won(i):''}</td><td class="num">${o?won(o):''}</td><td class="num">${e?won(e):''}</td><td class="num">${mv?won(mv):''}</td><td class="num qty"><b>${won(bal)}</b></td><td>${esc(r.div)||''}</td><td class="mio-uh" title="${esc(uh)}">${esc(uh)}</td><td class="center" style="white-space:nowrap;font-size:10px;color:#667">${esc(r.wt||'')}</td></tr>`;});
     html+=`<tr class="grandtot"><td class="center">총계</td><td class="num">${won(bf)}</td><td class="num">${won(si)}</td><td class="num">${won(so)}</td><td class="num">${won(se)}</td><td class="num">${won(sm)}</td><td class="num">${won(bal)}</td><td colspan="3"></td></tr>`;
     c.querySelector('#rbody').innerHTML=html;
-    c.querySelector('#rhead').innerHTML=`<div class="s-item">자도번 <b>${esc(mat)}</b></div><div class="s-item">${esc(s.nm||'')}</div><div class="s-item">현재고 <b>${won(bal)}</b></div>`;
+    /* ★2026-09-08 우측 '현재고' = 좌측 '재고'(s.stock)와 같은 값을 쓴다.
+       종전엔 bal(조회기간 이력 누계)을 써서 같은 품목인데 좌우가 갈렸다
+       — 실측 PNC-EL-AB-00-11: 좌측 69,588(잔액) vs 우측 −2,106(기간누계).
+       기간 누계는 '기간 기말'이라 그 품목의 실재고가 아니다(기초가 없으면 음수가 된다).
+       조회 종료일이 오늘이면 잔액, 과거면 그날까지 이력 — 판정은 서버(live_api._matinout)가 이미 했다. */
+    const curStk=(s && s.stock!==undefined && s.stock!==null)?(+s.stock||0):bal;
+    c.querySelector('#rhead').innerHTML=`<div class="s-item">자도번 <b>${esc(mat)}</b></div><div class="s-item">${esc(s.nm||'')}</div><div class="s-item">현재고 <b>${won(curStk)}</b></div>`;
     attachResizers(c);
   };
   const renderLeft=()=>{
