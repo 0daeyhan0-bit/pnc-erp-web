@@ -56,6 +56,22 @@ STEP6(soyo.py:565 / planrev.py:180) plan_part_gagong 를 **미러 base vs prodin
 - 커넥션: _conn/_nx 양쪽 DB=PARTNER_ERP_TEST3·nx.prodinfo_proc 해석 확인(스왑 커넥션-안전).
 - 잔존 미러 문자열 = 주석 + salesplan 런타임 치환 템플릿(nx모드→prodinfo_proc) + src=live 대조경로(의도된 dev 대조·기본경로 아님).
 
+## 5-F. ★생산계획 전수검사 (2026-09-09 · 대표지시 "생산계획 영향은 전수")
+표본(활성 plan_part_temp) 아닌 **전 4,190품목을 합성 plan_part_temp로 STEP6에 태워** 미러 base vs prodinfo_proc base 전수 diff:
+```
+STEP6 전수 행수: 미러 base=9,626 · prodinfo_proc base=9,630
+계획공정 사라짐 = 0  (전 품목·기존 계획 100% 보존)
+새로 생김 = 4행 = 3품목 (전 품목 통틀어 이 3품목 외 변화 전무)
+```
+| 품목 | nx.item | use_flag | 계획 | 판정 |
+|---|---|---|---|---|
+| AJR73364009 Tube Assy,Suction | 실재 | 미사용 | 미계획 | 실질 무영향(copyproc 제번변경 잔재) |
+| AJR73364010 Tube Assy,Suction | 실재 | 미사용 | 미계획 | 실질 무영향 |
+| AJR73965506 Manifold(Outdoor) | 실재 | **사용** | **계획중9행** | 미러 없던 공정(S5/S5-2) 되찾음=**교정**(seed260908 등록) |
+- 3품목 전부 실재(유령 0). 유일 계획중 품목 AJR73965506 = 누락됐던 공정 회복(회귀 아님).
+- **lt_hr 타입 전수 확인**: PR_M_ITEM_PROC_GAGONG·prodinfo_proc **모두 decimal(18,3)** 동일(route_proc_gagong만 18,5) → soyo 미CAST 스왑도 스키마 드리프트 없음.
+- ⟹ **생산계획 전수 안전**: 손실 0·실제품목 3개만 변화(2 무영향·1 교정)·타입 무드리프트.
+
 ## 6. 컷오버 정확성
 컷오버 시 미러 PR_M_ITEM_PROC_GAGONG 동결되어도 **읽는 코드가 없음** → 옛값 stale 사고 원천 차단.
 등록·수정은 prodinfo 화면이 `nx.prodinfo_proc`(R01)·`nx.route_proc_gagong`(R02+)에 직접. 단일 소스.
