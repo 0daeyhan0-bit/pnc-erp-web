@@ -67,6 +67,15 @@
 - **PR_M_WORK(2)·PR_M_WORK_SINGLE(450)** = 클린 불명(소량) → 판정 필요.
 ⟹ 캘린더/라인은 읽기 repoint(클린), PR_M_WORK류는 소량이라 이관/유지 개별 판정.
 
+### A2 남은 항목 성격 (2026-09-09 검증 — 대부분 quick repoint 아님)
+- ✅ **ITEM_BOM(7/7) 완료** — 유일한 clean 확실 repoint(diff0). 
+- **PR_M_ITEM_PROC_GAGONG(16)** = 클린 부재(route_proc_gagong 빈·routing 다른개념) → **품목별공정 클린 population 선행**(큰 작업).
+- **캘린더/라인(planrev 3)** = clean 존재하나 **planrev=생산계획 편성(일순위)·clean≠mirror(18,895 vs 18,264·컬럼명 다름)** → 계획 diff0 검증 선행(생산계획 절대정확). quick 아님.
+- **PR_M_ITEM_SUB** = clean(item_sub 14k) 커버리지 격차(71k) 규명 필요.
+- **PR_M_MODEL_BOM** = clean(model_bom) 빈 → 재빌드.
+- **PR_M_ITEM_BLOB(도면)·PR_M_WORK류** = 이관/유지 판정(A0 구분표와).
+⟹ **ITEM_BOM 외 A2 잔여는 전부 (클린 population / 생산계획 diff0 / 판정) 선행이 필요한 큰 작업.** 순차 진행하되 각 항목이 독립 과제.
+
 **A2 결론**: 진짜 컷오버 blocker(미러 직독) = **위 (a) 5종**(PR_M_ITEM_PROC_GAGONG·ITEM_BOM/CS·ITEM_SUB·MODEL_BOM·ITEM_BLOB). 나머지는 웹 store거나 보류 재확인. 클린 대체가 있는 것(routing·bom_line)은 읽기 repoint, 빈 것(model_bom)/없는 것(blob)은 clean 확보 선행.
 
 ## C. 우선순위 (컷오버 향해)
