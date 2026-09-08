@@ -512,6 +512,25 @@ def ready_commit(payload: dict = Body(...)):
             cur.execute("""INSERT INTO nx.PU_T_READY_STOCK(ITEM_CODE,CUST_CODE,PROC_GUBUN,STOCK_QTY,
                               UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
                             VALUES(?,'Z99990',?,?,?,GETDATE(),?)""", item, gpc, sgn * qty, user, WIN)
+        # ①-2 ★준비재고 이력 (2026-09-08 추가) — 종전엔 잔액만 올리고 이력을 안 남겼다.
+        #   레거시 정본 = nx.PU_T_READY_STOCK_MAINT (949,698행). 태그가 곧 화면이다(실측):
+        #     tag '1'/'2' = 이 화면(w_pr_input_460_new) 준비실적 등록/취소
+        #     tag 'A'     = 소진 — 260 드래그실적(dragprod.py:315)·520 바코드실적(prodsheet.py:1592)
+        #     tag 'B'     = 준비재고 강제수정(w_pu_ready_stock_010)
+        #   ⟹ 소진(A)만 웹이 쓰고 입고(1)·취소(2)를 안 써서 이력이 계속 마이너스로 벌어졌다
+        #     (실측 2026-09-08: 잔액 −152,328 vs 이력누적 −1,612,929 · 일치율 51.6%).
+        #   채번·구문은 dragprod.py:315 와 동일 패턴(같은 테이블·같은 규칙).
+        cur.execute("""INSERT INTO nx.PU_T_READY_STOCK_MAINT
+               (MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,ITEM_CODE,PROC_GUBUN,
+                WORK_ORDER,SPLIT_WORK_ORDER,PLAN_YMD,MAINT_QTY,
+                INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,
+                UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+               SELECT ?,ISNULL(MAX(MAINT_SEQ),0)+1,?,'Z99990',?,?,?,?,?,
+                      ?,?,GETDATE(),?,?,GETDATE(),?
+                 FROM nx.PU_T_READY_STOCK_MAINT WHERE MAINT_YMD=?""",
+                    today6, ('2' if mode == 'cancel' else '1'), item, gpc,
+                    (wo or ''), (wo or ''), d6,
+                    sgn * qty, user, WIN, user, WIN, today6)
         moved = []
         for b in bom:
             mat = b["mat"]; need = float(b["use_qty"]) * qty      # 소요량 × 세트수량

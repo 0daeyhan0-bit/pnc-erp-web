@@ -262,11 +262,27 @@ _AVAIL_TTL = 60.0    # 초
 
 
 def _mat_avail_map(cur, force=False):
-    """자재 현재고 맵 {품번: 수량} — 확정 스냅샷 기초 + 그 이후 전표(오늘까지).
-       ★프로세스 캐시(산출 약 1.2초). 두 겹으로 낡지 않게 지킨다:
+    """자재 현재고 맵 {품번: 수량} — ★정본 = nx.PU_T_MAT_STOCK_WH(실시간 잔액), 대표 확정 2026-09-08.
+
+       ★왜 바꿨나 (실측 경위)
+         종전 = '확정 스냅샷(일마감) 기초 + 그 이후 전표' 재계산.
+         그런데 **기초 스냅샷 자체가 음수**인 품목이 있어, 이후 전표가 0건이면
+         그 음수가 그대로 가용으로 나왔다. 그러면 화면엔 재고가 보이는데 출고가 막힌다.
+           실측 3H00627L : 화면 _WH 127.10 인데 게이트 −72.50(260831 일마감 기초가 −72.50)
+           같은 증상 46종 — 두 축이 갈린 자재는 429종/7,768종(5.5%).
+         기초 스냅샷은 과거 한 시점의 계산결과라 **오차를 영구히 이월**한다.
+         반면 _WH 는 입·출고가 일어날 때마다 갱신되는 **실시간 잔액**이고,
+         자재입출고현황·자재입고관리 등 화면이 오늘 재고로 보여주는 바로 그 값이다.
+       ⟹ **화면이 보여주는 재고와 게이트가 판정하는 재고는 같아야 한다.**
+          그래야 "재고 있는데 출고가 안 된다"가 사라진다.
+
+       ★버킷 = 자재창고(CUST_CODE='Z99990' · GAGONG_PROC_CODE='IS0001').
+         자재입출고현황(live_api)이 오늘 기준으로 읽는 버킷과 동일하게 맞춘다.
+       ★폴백 없음(하드룰 §1-9-1) — _WH 에 없으면 0. 다른 데서 몰래 끌어오지 않는다.
+
+       ★프로세스 캐시. 두 겹으로 낡지 않게 지킨다:
          ① 웹에서 재고를 바꾸는 쓰기 → stock_changed() 가 즉시 버린다.
          ② 웹 밖에서 DB 가 바뀌는 경우(매일 7:30 마이그 r_delta_sync 등) → TTL 60초.
-            ①만 두면 마이그가 직접 쓴 뒤 게이트가 **하루 종일 낡은 값**을 본다.
        ★워커 1개 전제(uvicorn app:app, --workers 없음). 다중 워커로 가면 이 캐시는 못 쓴다
          — 한 워커의 무효화가 다른 워커에 가지 않기 때문. 그때는 공용 캐시로 옮길 것."""
     import datetime as _dt, time as _t
@@ -275,25 +291,21 @@ def _mat_avail_map(cur, force=False):
             and (_t.time() - _AVAIL_MAP["at"]) < _AVAIL_TTL):
         return _AVAIL_MAP["map"]
     try:
-        from routers.close import _mv_base, _mv_moves, _mv_step, _mv_scope, _next_ymd
+        cur.execute("""SELECT UPPER(RTRIM(MAT_CODE)) mat, SUM(STOCK_QTY) q
+                         FROM PARTNER_ERP_TEST3.nx.PU_T_MAT_STOCK_WH WITH(NOLOCK)
+                        WHERE CUST_CODE='Z99990' AND ISNULL(GAGONG_PROC_CODE,'')='IS0001'
+                        GROUP BY UPPER(RTRIM(MAT_CODE))""")
+        m = {str(r[0]).strip(): float(r[1] or 0) for r in cur.fetchall()}
     except Exception:
         return _AVAIL_MAP["map"] or {}
-    state, base_ymd, _src = _mv_base(cur, today)
-    scope = _mv_scope(cur)
-    start = _next_ymd(base_ymd)
-    if start <= today:
-        moves = _mv_moves(cur, start, today)
-        for y in sorted(moves):
-            _mv_step(state, moves[y], scope)
-    m = {k: float(v[0]) for k, v in state.items()}
     import time as _t2
     _AVAIL_MAP["key"], _AVAIL_MAP["map"], _AVAIL_MAP["at"] = today, m, _t2.time()
     return m
 
 
 def _mat_avail(cur, item):
-    """자재 현재고(가용) — 실시간 정본. 없으면 0.
-       ★음수재고 차단(§0-★)의 판정 기준. 정본 = STOCK_GATING_CLOSE_LOCK_RULES §0-★★★."""
+    """자재 현재고(가용) — ★정본 = nx.PU_T_MAT_STOCK_WH 실시간 잔액(자재창고 버킷). 없으면 0.
+       ★음수재고 차단(§0-★)의 판정 기준이자 **화면이 보여주는 재고와 같은 값**(2026-09-08)."""
     item = str(item or "").strip().upper()
     if not item:
         return 0.0

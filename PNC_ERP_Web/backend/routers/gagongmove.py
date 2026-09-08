@@ -83,26 +83,41 @@ def _f(v):
 def gagong_move580(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Query("P2"),
                    pr_part: str = Query("%"), pu_part: str = Query("IS0001"), sagub: str = Query(""),
                    item: str = Query(""), part: str = Query(""), mv: str = Query("전체"),
-                   src: str = Query("new"), limit: int = Query(2500)):
-    """레거시 SP 직접호출. 인자 = (as_from_ymd, as_to_ymd, as_work_code, as_pu_part_code, as_pr_part_code, as_sagub_cust_code).
-       도번(item)·자도번(part)·이동필요(mv) 필터는 SP 인자에 없으므로 결과에서 파이썬 필터.
-       ★src(2026-08-26): nx=레거시 SP(라이브 계획) / new=복제 SP(계획만 웹편성).
-         SP 가 암호화라 인자로 계획원천을 못 바꾼다 → nx 평문사본을 복제해 계획테이블만
-         치환한 SP_..._WEBPLAN 을 호출한다(반환 174컬럼 동일)."""
+                   src: str = Query("new"), engine: str = Query("web"), limit: int = Query(2500)):
+    """조회. 도번(item)·자도번(part)·이동필요(mv) 필터는 결과에서 파이썬 필터.
+
+       ★engine(2026-09-08 신설) — 조회엔진 선택
+         web  = **우리 코드**(routers/move580web.py). 기본값.
+         sp   = 종전 SP 호출(롤백용·대조용). src 로 어느 SP 인지 고른다.
+
+       ★왜 웹버전인가 — SP 안이 레거시 미러 5종(PR_M_ITEM_BOM·PR_M_PROC_GAGONG·
+         PR_M_ITEM_SUB·PR_M_WORK·CM_M_MASTER_DETAIL)을 읽어 컷오버에 얼어붙는다.
+         조회를 우리 코드로 옮겨 그 의존을 끊었다.
+         **diff0 검증** — SP vs 웹 3케이스 전수 대조 불일치 0
+           P2 260908~09 239행 41,586비교 / P1 464행 80,736 / P2 260915~16 291행 50,634
+         게이트 = _migration/move580_diff.py (조건 바꿔 언제든 재검증 가능)
+
+       ★src(2026-08-26): nx=레거시 dbo SP(라이브 계획) / new=nx 복제 SP(계획만 웹편성).
+         engine='web' 이면 무의미하다(웹버전은 계획을 항상 웹편성에서 읽는다)."""
     d6a = _d6(from_ymd) if from_ymd else ""
     d6b = _d6(to_ymd) if to_ymd else ""
     _src = str(src).strip()
+    _eng = str(engine or "web").strip().lower()
     _SPQ = ("[PARTNER_ERP_TEST3].[nx].[" + SP_MOVE580_NEW + "]" if _src == "new"
             else "[dbo].[" + SP_MOVE580 + "]")
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("SET NOCOUNT ON; EXEC " + _SPQ + " ?,?,?,?,?,?",
-                    d6a, d6b, (wc or "").strip(), (pu_part or "").strip(),
-                    (pr_part or "%").strip() or "%", (sagub or "").strip())
-        while cur.description is None:
-            if not cur.nextset(): break
-        cols = [d[0] for d in cur.description]
-        raw = [dict(zip(cols, r)) for r in cur.fetchall()]
+        if _eng == "web":
+            from . import move580web as _W
+            raw = _W.compute(cur, d6a, d6b, (wc or "").strip(), (pu_part or "IS0001").strip())
+        else:
+            cur.execute("SET NOCOUNT ON; EXEC " + _SPQ + " ?,?,?,?,?,?",
+                        d6a, d6b, (wc or "").strip(), (pu_part or "").strip(),
+                        (pr_part or "%").strip() or "%", (sagub or "").strip())
+            while cur.description is None:
+                if not cur.nextset(): break
+            cols = [d[0] for d in cur.description]
+            raw = [dict(zip(cols, r)) for r in cur.fetchall()]
     finally:
         cn.close()
 
