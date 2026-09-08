@@ -302,8 +302,9 @@ def order_soyo(eng, item):
 
 
 def _sqlint(x):
-    """SQL Server CONVERT(int, float) 동치 = 0에서 먼 쪽 반올림(2.5→3). 재고>=0 전제. Python int()(절사)와 다름."""
-    return int(x + 0.5) if x >= 0 else -int(-x + 0.5)
+    """SQL Server CONVERT(int, DECIMAL) 동치 = 0쪽 버림(truncate). USE_QTY·재고가 DECIMAL 컬럼이라
+    decimal→int 는 버림(1.5408→1), float→int 만 반올림. 실측 확인(2026-09-08). float epsilon 가드(1e-9)."""
+    return int(x + 1e-9) if x >= 0 else -int(-x + 1e-9)
 
 
 def _stk_lines(eng, item):
