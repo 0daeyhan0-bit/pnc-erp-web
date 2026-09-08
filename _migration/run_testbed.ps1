@@ -80,6 +80,13 @@ if ($fails) {
   $fails | ForEach-Object { Write-Host "    $($_.Line.Trim())" }
 }
 
+# ── 4-b. ★HTTP 수불장·마감 API ────────────────────────────────
+#   아래 5·6 은 엔진을 in-process 로 직접 부른다 — 계산은 잡지만 라우터·인증·
+#   응답형태·캐시는 안 지난다. 화면이 실제로 부르는 경로로도 한 번 통과시킨다.
+Write-Host ""
+Write-Host "── HTTP 수불장·마감 API (자재·생산·영업 + 반품 end-to-end) ──"
+& python _migration/flow_scenarios.py --port $Port --only "[HTTP]" 2>&1 | Tee-Object -FilePath $out -Append
+
 # ── 5. ★수불장 부호 전수검증 (엔진 레벨) ──────────────────────
 #   flow TestBed 는 '전표가 3곳에 기록되는가'를 본다. 그것만으로는
 #   **수불장 엔진이 그 전표를 어느 방향으로 세는가**를 못 잡는다
