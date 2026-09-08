@@ -6,6 +6,8 @@ from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
 from common import (_prod_stock_map, _latest_stock_map, _conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, _stock_short_msg, stock_changed)
 
+import nx_soyo_engine as _soyo   # ★키팅 투입파트 키셋 = 통일 소요엔진 walker(§1-10). 미러 pr_m_item_bom 재귀CTE 대체(컷오버 안전 §1-9-1)
+
 router = APIRouter()
 
 
@@ -83,19 +85,20 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
         whp = (wh_part.strip() or 'IS0001')
         # ★성능: SP #TEMP_CTE(투입파트 재귀BOM)를 메인쿼리 JOIN에서 분리 → KEYS set 선(先)조회 후 파이썬 필터
         #   (재귀CTE를 메인 GROUP 조인에 인라인하면 재구체화로 ~5초. 분리 시 ~1.5초. 값·색 로직 불변)
+        # ★투입파트 키셋 = 통일 소요엔진 walker(§1-10). 계획품목의 VIR-트리에서 WH_GAGONG=whp 인 엣지의
+        #   (item, gagong_proc) 집합. 종전 pr_m_item_bom 재귀CTE(미러 직독=컷오버시 동결) 대체.
+        #   ★출력 diff0 검증완(2026-09-08 kit_out_verify): 표시행 636쌍 유지 동일(미러만/walker만=0/0).
         keys = set()
         try:
-            cur.execute(f"""
-                ;WITH CTE (ITEM_CODE, MAT_CODE, GAGONG_PROC_CODE, WH_GAGONG_PROC_CODE, VIR_ITEM_FLAG) AS (
-                     SELECT a.ITEM_CODE, B.MAT_CODE, B.GAGONG_PROC_CODE, B.WH_GAGONG_PROC_CODE, B.VIR_ITEM_FLAG
-                       FROM {PLAN_T} a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.pr_m_item_bom B WITH(NOLOCK) ON A.ITEM_CODE=B.ITEM_CODE
-                      WHERE a.part_plan_ymd BETWEEN '' AND ? AND a.GC_GUBUN='P'
-                     UNION ALL
-                     SELECT a.ITEM_CODE, B.MAT_CODE, B.GAGONG_PROC_CODE, B.WH_GAGONG_PROC_CODE, B.VIR_ITEM_FLAG
-                       FROM CTE a JOIN PARTNER_ERP_TEST3.nx.pr_m_item_bom B WITH(NOLOCK) ON A.MAT_CODE=B.ITEM_CODE WHERE A.VIR_ITEM_FLAG='1'
-                )
-                SELECT DISTINCT ITEM_CODE, GAGONG_PROC_CODE FROM CTE WHERE WH_GAGONG_PROC_CODE=? OPTION(MAXRECURSION 0)""", d6b, whp)
-            for rr in cur.fetchall(): keys.add((rr[0], rr[1]))
+            cur.execute(f"""SELECT DISTINCT UPPER(LTRIM(RTRIM(a.ITEM_CODE)))
+                             FROM {PLAN_T} a WITH(NOLOCK)
+                            WHERE a.part_plan_ymd BETWEEN '' AND ? AND a.GC_GUBUN='P'""", d6b)
+            _pitems = [r[0] for r in cur.fetchall()]
+            with _COST_LOCK:
+                _eng = _get_cost_engine()
+                for _it in _pitems:
+                    for _gpc in _soyo.kitting_gpcs(_eng, _it, whp):
+                        keys.add((_it, _gpc))
         except Exception: pass
         w = ["a.part_plan_ymd<=?", "a.GC_GUBUN='P'", "a.GAGONG_PROC_SEQ=1"]; p = [d6b]
         if wc.strip():     w.append("a.WORK_CODE=?"); p.append(wc.strip())
@@ -128,7 +131,8 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
               a.ASSY_ITEM_CODE, a.UPPER_ITEM_CODE, a.ITEM_CODE, a.PART_PLAN_YMD, ISNULL(ib.item_name,''),
               ISNULL(pg.PROD_RATE,100), ISNULL(st.st,0)""", *p)
         cols = [d[0] for d in cur.description]
-        raw = [d for d in (dict(zip(cols, r)) for r in cur.fetchall()) if (d["item"], d["gpc"]) in keys]   # ★투입파트 KEYS 필터
+        raw = [d for d in (dict(zip(cols, r)) for r in cur.fetchall())
+               if ((d["item"] or "").strip().upper(), (d["gpc"] or "").strip()) in keys]   # ★투입파트 KEYS 필터(walker 키셋과 정규화 일치)
         # ── 본행 grain = (gpc,wo,swo,assy,upper,item), 일자셀 = 달력일 피벗 ──
         keyed = {}
         for r in raw:
