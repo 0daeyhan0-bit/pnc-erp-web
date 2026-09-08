@@ -49,8 +49,10 @@
    - **조회 시 주의:** `bom_line` 에는 부모 컬럼이 없다 — `bom_id` 로 `bom_header` 를 조인해야
      부모(`h.item_code`)가 나온다. 조인 없이 `child_item` 만 보면 "부모가 자기 자신"으로 오독한다(실제 오독 이력).
    - **잔존 직독(은퇴 예정, 신규 추가 금지)**: `backflush.py` L169·L206·L251(원소재 중량축·최종제품 판정 —
-     용접봉/용접링은 이미 bom_line 으로 우회 완료) · `item.py` L233 품번변경 연쇄 · `_migration/*`(일회성).
-     전환은 **옆에 짓고 diff0 확인 후 교체**(재고 소비량이 바뀔 수 있음).
+     용접봉/용접링은 이미 bom_line 으로 우회 완료) · `item.py` L233 품번변경 연쇄 · `nx_cost_engine` 용접봉 RAC/overhead 잔재(:926/961/1010) · `_migration/*`(일회성).
+     ★**backflush 원소재 중량축의 올바른 이관처 = `_dong_of`(nx.bom_flat 중량소요·CU/고강도·규격별kg), bom_line 아님**
+     (bom_line엔 원소재/중량 없음). `weight_explode`/`copper_by_spec`는 원가 primitive(변형SUB 2배)라 소요 금지.
+     전환은 **옆에 짓고 TestBed 검증 후 교체**(재고 소비량이 바뀔 수 있음=교정). 정본감사=`WEIGHT_BOM_SOURCE_AUDIT_260908.md`.
    - 백업 = `nx.bk_bom_retire_260903_1656`(40,620행). 원본 `nx.bom` 은 잔존 직독 전환 전까지 유지.
 
 9-3. **★★★마스터 sync 는 "레거시 대사(분석)" 전용이다 — 운영 방식이 아니다** (대표 확정 2026-09-03).

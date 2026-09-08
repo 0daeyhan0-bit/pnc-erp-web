@@ -144,7 +144,7 @@ nx 테이블은 **설계상 두 갈래**(CUTOVER_DELTA §2):
 | 품목 | `PR_M_ITEM` | 13 | `nx.item` | `nx.item`(20곳: bom/item/sourcing/esticost) | 🔴 활성 |
 | 단가 | `PR_M_ITEM_COST` | 7 | `nx.price_item` | `nx.price_item`(6곳: price/pricemgmt) | 🔴 활성 |
 | BOM | `PR_M_ITEM_BOM` 19 · `CS_M_ITEM_BOM` 6 | 25 | `nx.bom_line`+엔진 | (엔진 경유) | 🟡 확인필요 |
-| BOM스냅샷 | `nx.bom`(소문자·동결) | 3(backflush 169/206/251) | `nx.bom_line`/엔진 | — | 🟡 §1-9-2 은퇴대상 |
+| BOM스냅샷 | `nx.bom`(소문자·동결) | 3(backflush 169/206/251)+원가엔진RAC잔재 | ★**`_dong_of`(bom_flat 중량소요)** (bom_line 아님) | — | 🟡 §1-9-2 은퇴대상 |
 
 - 품목 미러 13곳(도구 `cutover_retired_guard.py`): autoorder 2·matexpect 3·planrev 1·setin 6·setinstat 1.
 - 합계 ~194곳. **기계적 치환 아님** — 클린 스키마가 미러와 다름(아래 6-B).
@@ -174,7 +174,7 @@ nx 테이블은 **설계상 두 갈래**(CUTOVER_DELTA §2):
    - **backfill**: 미러에만 있던 실거래처 4곳(2370 승호산업·2371 원광산업[6품목 매입처]·2372 Huayi·2373 청송에어팩) nx.cust 적재(nx.cust 361=미러 동수). 원인=클린 마이그 이후 레거시 추가분.
    - **검증**: 컴파일 OK · 미러 대비 뷰 이름 회귀 **0** · 상관서브쿼리/JOIN/기타컬럼(CUST_TYPE·GC_GUBUN·USE_FLAG) 동작확인. 데이터 소스 = nx.cust 단일. 미러 CM_M_CUST 은퇴(drop) 대상. 미배포(재컷오버 시).
 4. **BOM 25곳** — 대부분 엔진 경유여야 함(§1-10 소요엔진 하드룰). ad-hoc 직독이면 엔진 호출로. 개별 판정.
-5. **nx.bom 3곳**(backflush) — §1-9-2 은퇴계획대로 bom_line 우회(재고 소비량 변동 주의).
+5. **nx.bom 3곳**(backflush)+원가엔진 RAC잔재 — §1-9-2 은퇴대상. ★올바른 이관처 = **`_dong_of`(nx.bom_flat 중량소요)**, bom_line 아님(bom_line엔 원소재/중량 없음). weight_explode/copper_by_spec는 원가 primitive(변형SUB 2배). 정본감사=`WEIGHT_BOM_SOURCE_AUDIT_260908.md`. TestBed 검증 후 교체(재고 변동=교정).
 
 **당장 값이 틀린 건 아니라 시간 여유 있음.** 급한 순서 = 편집이 활성인 단가·품목부터.
 

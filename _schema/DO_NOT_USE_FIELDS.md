@@ -147,9 +147,12 @@
   · `backflush.py` L135 — nx.bom 트리가 bom_line에만 있는 SUB의 봉을 놓침(**실측 704/2697품목·7.79kg 누락**) → 용접봉/용접링은 bom_line 우회 완료
   · `close.py` L1082 · `_migration/resnap_prd_sal.py` L5 — 필터는 `nx.bom` 인데 엔진은 `nx.bom_header` → 교정
   · 2026-09-03 계획 대사 — `nx.bom` 으로 드리프트를 재 **"일치율 47.6%"** 라는 무의미한 수치를 냄(정본 `nx.bom_line` 은 87.9%·계획기간 90.5%). 비교 축이 틀리면 결론 전체가 틀린다.
-- **올바른 대체**: `nx.bom_header`+`nx.bom_line`(또는 뷰 `nx.v_pr_bom`). **소요·원가·중량은 §1-10대로 엔진 호출**(`nx_soyo_engine`·`NxCostEngine`) — ad-hoc 전개 금지.
+- **올바른 대체(용도별 — 중요, 2026-09-08 감사 정정)**:
+  · **구성품 소요·원가·편성** = `nx.bom_header`+`nx.bom_line`(뷰 `nx.v_pr_bom`), §1-10대로 **엔진 호출**(`nx_soyo_engine`·`NxCostEngine`).
+  · **원소재(동) 중량 소요** = ★**`_dong_of`/`_dong_of_batch`(nx.bom_flat·metal CU/고강도·규격별 kg)** — 검증정본(LG AP −0.9%). **bom_line 아님**(bom_line엔 원소재/중량 없음). `weight_explode`/`copper_by_spec`는 **원가 primitive**(변형SUB 이중계상 −19.6%)라 원소재 소요엔 쓰지 말 것.
+  · **LG 인증 중량** = `nx.lg_bom` 직조회(복사 금지). ⟹ 셋은 별개 축·별개 소스.
 - **★조회 주의**: `bom_line` 에는 부모 컬럼이 없다 — `bom_id` 로 `bom_header` 를 조인해야 부모(`h.item_code`)가 나온다. 조인 없이 `child_item` 만 보면 **"부모가 자기 자신"으로 오독**한다(2026-09-03 실제 오독).
-- **잔존 직독(은퇴 예정, 신규 추가 금지)**: `backflush.py` L169·L206·L251(원소재 중량축·최종제품 판정) · `item.py` L233(품번변경 연쇄) · `_migration/*`(일회성 도구). 전환은 **옆에 짓고 diff0 확인 후 교체**(재고 소비량이 바뀔 수 있음).
+- **잔존 직독(은퇴 예정, 신규 추가 금지)**: `backflush.py` L169·L206·L251(원소재 중량축·최종제품 판정) · `item.py` L233(품번변경 연쇄) · `nx_cost_engine.py` 용접봉 RAC/overhead 롤업 잔재(:926/961/1010) · `_migration/*`(일회성 도구). **★backflush 원소재 중량축의 올바른 이관처 = `_dong_of`(bom_flat 중량소요), bom_line 아님**(2026-09-08 감사·`WEIGHT_BOM_SOURCE_AUDIT_260908.md`). 전환은 **옆에 짓고 TestBed 검증 후 교체**(재고 소비량이 바뀔 수 있음 = 교정). 실쿼리 `FROM nx.bom`은 backflush 3곳뿐(cost/원가엔진 다른 언급은 주석).
 - **백업**: `nx.bk_bom_retire_260903_1656`(40,620행). 원본 `nx.bom` 은 잔존 직독 전환 완료 전까지 유지, 이후 drop.
 - **근거**: `CLAUDE.md` §1-9-2. [[bom-table-lineage]] [[bom-delta-sync-web-item]].
 
