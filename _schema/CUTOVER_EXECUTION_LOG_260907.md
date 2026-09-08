@@ -1,5 +1,26 @@
 # 🚀 컷오버 실행 플레이북 & 라이브 로그 — 2026-09-07(월) 야간
 
+> # 🔴🔴🔴 재컷오버 실행자 — **가장 먼저 이것부터**
+>
+> **2026-09-09 낮에 `_conn()` 을 라이브 `PARTNER_ERP` 로 되돌려 배포했다**(운영 장애 수습).
+> **컷오버하려면 이 한 줄을 다시 `PARTNER_ERP_TEST3` 로 바꿔야 한다.**
+>
+> ```
+> 파일 : PNC_ERP_Web/backend/common.py   함수 _conn()
+> 지금 : DATABASE=PARTNER_ERP
+> 컷오버: DATABASE=PARTNER_ERP_TEST3
+> ```
+>
+> **★그런데 그 줄만 바꾸면 9/7 과 똑같은 사고가 다시 난다.** 같이 처리할 것 —
+> `_conn()` 이 TEST3 로 가면 **스키마를 안 쓴 쿼리 31곳/11파일**이 로그인 기본스키마(`dbo`)를 타고
+> **죽은 `PARTNER_ERP_TEST3.dbo`** 로 떨어진다. 오류가 안 나고 **낡은 값이 조용히 나온다**.
+> 둘 중 하나를 반드시 먼저 할 것:
+>   1. 그 31곳에 `nx.` 를 **명시**하거나
+>   2. 로그인 `ilshin` 의 **기본스키마를 `nx` 로** 바꾸거나
+> (명시 참조 `PARTNER_ERP_TEST3.nx.X` 는 이미 전부 nx 라 손댈 것이 없다 — 2026-09-09 확인)
+>
+> 경위·실측·31곳 목록 = **§7**(이 문서 아래) · `_schema/PERF_SLOW_SCREENS_260909.md`
+
 > **목적**: 오늘 야간 컷오버를 **다른 개발자 세션이 이 문서 하나만 보고** 순서대로 실행하고, **각 단계 결과를 여기 append** 한다. 다른 개발자는 이 문서를 pull 해서 진행상황을 본다.
 > **작성 2026-09-07** (전 컷오버 기록 재정독 종합: RUNBOOK·CHECKLIST 1194줄·FLIP_WORKLIST·DELTA_INVENTORY·TRANSACTION_CUTOVER_DESIGN·LEGACY_NX_SEPARATION·BOM_FLAG_SYNC·MIGRATION_ISSUES·CONVERTED_DATA_INVENTORY·TESTDATA_INVENTORY).
 > **방식 = A안 flip**: 코드 `PARTNER_ERP.dbo.` → `PARTNER_ERP_TEST3.nx.`. 레거시 차단=ilshin 권한 회수 하나.
@@ -318,6 +339,30 @@ python _migration\cutover_rollback.py --diff    :: ★먼저: 되돌리면 몇 �
 - 참고: revert가 필요해지면 운영이 가진 2개만 = `git revert --no-edit 5a9941d d015d21`(#188은 TestBed·런타임무관).
 
 ---
+
+### 7-7 ★2026-09-09 배포 (운영 반영분)
+
+**배포 브랜치** `deploy/rollback-and-perf-260909` → main
+
+| 커밋 | 내용 |
+|---|---|
+| `a7ab68e` | **`_conn` 라이브 원복** — 이번 장애 수습 (★컷오버 때 되돌릴 것) |
+| `74d9286` | 세트입고현황 88초 → 26초 |
+| `7041407` | 중량정산 53초 → 2.6초 |
+| `8637047` | 원가 LG비교 41초 → 1.4초 |
+| `4a7b3ac` | 생산재고조회 32초 → 2.8초 |
+| `ec4791e` | 자재예상매입 동시조회 충돌 제거 |
+| `d865c12` | 성능 기록 `PERF_SLOW_SCREENS_260909.md` |
+
+**★#187·#188 은 되돌리지 않았다(범위 축소 · 2026-09-09 판단)**
+- 처음엔 #186·#187·#188 을 전부 되돌렸으나(`fix/rollback-conn-live`), 배포 직전 확인하니
+  **현재 main 은 `PARTNER_ERP.dbo` 참조가 0개**였다 — 다른 세션이 오늘 컷오버 요구① 로 전부 nx 전환.
+- 되돌리면 그 작업을 무효로 만들고 오늘 밤 컷오버와도 어긋난다.
+  명시참조는 nx(=sync 살아있음)를 읽으므로 **이번 장애의 원인도 아니다**.
+- ⟹ 장애 원인인 **`_conn` 한 줄만** 되돌렸다. 컷오버 때 되돌릴 것도 그 한 줄뿐이다.
+
+**성능 5건은 컷오버와 무관**하다 — 컷오버 직전 코드(`8af0e64`)로 재도 세트입고현황 100.9초·
+중량정산 64초로 같았다. 되돌릴 필요 없다.
 
 ## 5. 참고 문서 (정본)
 - 절차: `CUTOVER_RUNBOOK.md` · 항목상태: `CUTOVER_CHECKLIST.md`(1194줄)
