@@ -357,6 +357,52 @@ def stock_flow_rollup(eng, seed):
     return fix
 
 
+def _setck_lines(eng, item, ymd):
+    """준비재고체크(ready_setcheck) 전개용 bom_line 직상위 자식 date-scoped. 캐시((item,ymd)).
+    반환 [(child, use_qty, vir, gpc, kit)]. except_flag≠1 AND use_qty>0, from_ymd<=ymd<=to_ymd.
+    ★bom_line 직독(v_pr_bom 용접브랜치 회피)·USE_QTY(생산PR 아님). CS_M_ITEM_BOM 유효일자 재현."""
+    if not hasattr(eng, '_setckl'):
+        eng._setckl = {}
+    key = (item.strip().upper(), str(ymd))
+    if key not in eng._setckl:
+        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(bl.child_item))), CAST(bl.qty AS float),
+                CASE WHEN ISNULL(bl.vir_item,0)=1 THEN '1' ELSE '0' END,
+                LTRIM(RTRIM(ISNULL(bl.gagong_proc,''))),
+                CASE WHEN ISNULL(bl.kitting,0)=1 THEN '1' ELSE '0' END
+            FROM nx.bom_header h
+            JOIN (SELECT item_code, MAX(ISNULL(version,1)) mv FROM nx.bom_header GROUP BY item_code) mx
+                 ON mx.item_code=h.item_code AND ISNULL(h.version,1)=mx.mv
+            JOIN nx.bom_line bl ON bl.bom_id=h.bom_id
+            WHERE UPPER(LTRIM(RTRIM(h.item_code)))=?
+              AND ISNULL(bl.except_flag,0)<>1 AND CAST(bl.qty AS float)>0
+              AND ISNULL(NULLIF(LTRIM(RTRIM(bl.from_ymd)),''),'000000')<=?
+              AND ISNULL(NULLIF(LTRIM(RTRIM(bl.to_ymd)),''),'991231')>=?
+            ORDER BY bl.child_item""", key[0], key[1], key[1])
+        eng._setckl[key] = [(str(r[0]).strip(), float(r[1] or 0), str(r[2]), str(r[3]).strip(), str(r[4]))
+                            for r in eng.cur.fetchall()]
+    return eng._setckl[key]
+
+
+def setcheck_soyo(eng, item, ymd):
+    """[준비재고체크 walker] ready_setcheck BOM전개(레거시 w_pr_input_466) 재현(§1-10).
+    VIR_ITEM_FLAG='1'=자기 미방출·하위 전개(mult×use, _seen mat dedup)·비VIR=방출(use×mult).
+    except≠1·use>0·유효일자. 반환 occurrences [(mat, use_qty, gpc, kit)] (mat 집계前·경로별).
+    ※CS_M_ITEM_BOM 미러 재귀 대체(컷오버 안전 §1-9-1)·bom_line 직독. dep>8 순환방어(원문 동일)."""
+    occ = []; seen = set(); stack = [(item.strip().upper(), 1.0, 0)]
+    while stack:
+        code, mult, dep = stack.pop(0)
+        if dep > 8:
+            continue
+        for (mat, uq, vir, gpc, kit) in _setck_lines(eng, code, ymd):
+            if vir == '1':
+                if mat not in seen:
+                    seen.add(mat)
+                    stack.append((mat, mult * uq, dep + 1))
+                continue
+            occ.append((mat, uq * mult, gpc, kit))
+    return occ
+
+
 def _setin_lines(eng, item):
     """세트입고 전개용 v_pr_bom 자식 (child, USE_QTY, except, set_except, in_gagong_proc). 캐시."""
     if not hasattr(eng, '_setl'):
