@@ -98,7 +98,8 @@
   - ★**진행중(2026-09-08 대표 로직 수령)**: 원소재 차감 = 가공품 5키[diam·thick·metal_gubun·pipe_kind(isnull'1')·item_pipe_material]로 `STD_WON_MAT_FLAG='1'` 원소재 TOP1 매칭 → 그 원소재 재고 (수량×중량) 차감.
     - ★**procbc(가공바코드실적 018)에 이미 이 로직 존재**(`_scan` L67-71 STD 5키 매칭 c["won"]·nx.item 클린 / `gagong_bc_register` L303 차감). **수정 = 중량 소스뿐**: `c["weight"]=nx.item.ITEM_WEIGHT` → **엔진 `dong_unit_weight`(bom_flat.weight_actual 정본·item_weight 폴백)**. 이유=item_weight 17.7% 0·15.3% placeholder(1.0), bom_flat은 제작동관 4060종 완제품무관 일관·561종 신규 차감활성.
     - 엔진 추가: `dong_unit_weight`(제작동관 unit 동중량)·`std_rawmat_of`(STD 5키 매칭). 검증: STD 32종·5키중복0·매칭커버 90.4%·매칭원소재 재고보유 1837. 미매칭 203(9.6%)·재고0 79 = STD 원소재 마스터 보강 대상.
-    - ☐남은 검증(배포 전 필수) = 절삭 실적등록 TestBed(rollback모드): 원소재 −재고·음수게이팅·취소복원 실측. dev·미배포(feat).
+    - ✅**Flow TestBed 검증완(2026-09-08)**: 무작위 150표본(다양 제품군·metal CU/고강도) sandbox 롤백 — 원소재 차감=−(bom_flat중량×수량) **131/131 정확**·취소복원 net0 **131/131**·음수게이팅(부족차단·충분통과) **131/131**·오염0. 매칭커버 87.3%(미매칭 19=STD 원소재 없음). 하네스 = `flow_cut_rawmat.py`(procbc._apply·_stock_of 직접구동).
+    - ☐남음 = STD 원소재 마스터 보강(미매칭 ~9.6%·재고0 규격) → 그 가공품 원소재 미차감. + dev 화면 눈확인 → 배포.
   - (구 보류사항) 자재차감 로직은 대표가 전달함(위 반영). 그 로직 수령 후 Phase 2 착수(변형 선택규칙 임의결정 금지). 미결 사실: 절삭 실적(PU_T_CUT_DTL)이 raw tube 코드 미포착(제작동관+CUT_WEIGHT만)·규격당 길이/경도 변형 다수(24규격)·스크랩은 등록 시 별도차감(스크랩관리).
 - **Phase 3**: **backflush 원소재 comps 제거**(nx.bom `role='원소재'` — 재고0 phantom). backflush는 부품/제작동관/구매품(bom_line 엔진)+용접봉/링만. TestBed 회귀검증.
 - **Phase 4**: 원가엔진 nx.bom RAC/overhead 잔재 클린화(레거시 diff0 게이트 유지) → **nx.bom 제거** · bom_flat.raw_lg_kg 제거(LG중량=lg_bom 직조회) · bom_flat **재빌드 절차 확립**(현 2026-08-24 정지).
