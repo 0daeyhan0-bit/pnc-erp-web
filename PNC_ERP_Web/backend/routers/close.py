@@ -544,7 +544,26 @@ def _snap_mat_totalavg(cur, ptype, period):   # ★총평균 디스패처 — �
 
 def _mv_moves(cur, d_from, d_to):
     """[d_from,d_to] 일자별 자재 이동 → {ymd: {mat: {net,inq,outq,trans,pq,pamt}}}.
-       pq/pamt = **평균단가를 갱신하는 입고**(레거시 입고 tag + 수입). 그 외는 평균 불변."""
+       pq/pamt = **평균단가를 갱신하는 입고 = 금액이 실린 매입뿐**. 그 외는 평균 불변.
+
+       ★2026-09-08 수정(대표 지적 "왜 0이 되는거지? 로직이 매우 잘못 되었는데?").
+         종전엔 입고 tag 전부를 pq/pamt 에 넣었다. 실측(2601~2608, 평가대상 품목)한 태그별 금액:
+           9 개별입고  20,688건  46,292,041,405   (금액0  0.4%)
+           S 세트입고  49,684건   8,987,343,622   (금액0  0.1%)
+           5 매출출고  14,885건 -16,967,086,657   (금액0  2.1%)
+           2 장부수정   1,662건    -226,718,415   (금액0 87.5%)
+           B 생산키팅 출고 257,424건 / C 가공입고 20,877건 / 4 생산사용 3,044건
+           P 생산완료 후 자재창고 입고 5,673건 / J 설치실적 1,351건 / 1 25건
+             → 위 6개는 **전건 금액 0**
+         즉 금액이 실린 태그는 9·S·5·2 뿐이고, 나머지는 전표에 **금액 칸이 비어 있다**.
+         그런데 _mv_step 은 avg=(q0·a0+pamt)/(q0+pq) 이므로, 금액 미기재 입고를 pq 에 넣으면
+         **0원 매입으로 해석되어 평균이 깎인다**. 금액 0 은 "0원"이 아니라 미기재다.
+       ⟹ 금액이 실린 행만 평균을 갱신한다(pq = MAINT_AMT<>0 인 행의 수량).
+          금액 미기재 입고는 현재 평균단가로 평가되어 수량·금액이 함께 들어온다.
+       ※ 미결(추측 금지 — 아직 측정 안 됨): tag P(생산완료 SUB 반입)와 C(가공입고)는
+          가공비가 붙은 물건이라 '평균 불변'이 정확한 평가인지 별도 확인이 필요하다.
+          B(출고)와 C(입고)가 같은 물건의 왕복인지도 품목 단위로 확인되지 않았다
+          — 총량은 B 17,903,019 out vs C 1,468,753 in 으로 짝이 맞지 않는다."""
     out = {}
 
     def slot(y, m):
@@ -554,16 +573,20 @@ def _mv_moves(cur, d_from, d_to):
 
     ph_in = ','.join('?' * len(TA_IN_TAGS))
     cur.execute(f"""SELECT a.MAINT_YMD, a.MAT_CODE,
-                           SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
+                           SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float)),
+                           SUM(CASE WHEN ISNULL(a.MAINT_AMT,0)<>0
+                                    THEN CAST(a.MAINT_QTY AS float) ELSE 0 END)
                       FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                       JOIN PARTNER_ERP_TEST3.nx.item m ON a.MAT_CODE = m.ITEM_CODE
                      WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_QTY <> 0
                        AND a.MAINT_TAG IN ({ph_in})
                        AND NOT (ISNULL(a.INSP_FLAG,'N') IN ('S','F') AND ISNULL(a.INSP_PROC_FLAG,'0') <> '1')
                      GROUP BY a.MAINT_YMD, a.MAT_CODE""", d_from, d_to, *TA_IN_TAGS)
-    for y, m, q, amt in cur.fetchall():
-        d = slot(y, m); q = float(q or 0)
-        d["inq"] += q; d["pq"] += q; d["pamt"] += float(amt or 0)
+    for y, m, q, amt, pq in cur.fetchall():
+        d = slot(y, m)
+        d["inq"] += float(q or 0)
+        d["pq"] += float(pq or 0)        # ★금액이 실린 매입 수량만 평균 갱신
+        d["pamt"] += float(amt or 0)
 
     # 수입(도입): DIVISION<>'Q' = 입고(금액 TAXPAYERS, 이미 원화·평균갱신) / 'Q' = 수출출고
     cur.execute("""SELECT a.MAINT_YMD, a.MAT_CODE, a.DIVISION,
@@ -576,7 +599,10 @@ def _mv_moves(cur, d_from, d_to):
         if str(div or "").strip() == 'Q':
             d["outq"] += q
         else:
-            d["inq"] += q; d["pq"] += q; d["pamt"] += float(tax or 0)
+            tax = float(tax or 0)
+            d["inq"] += q; d["pamt"] += tax
+            if tax:                       # ★금액 미기재 수입은 평균 갱신 대상이 아니다
+                d["pq"] += q
 
     ph_out = ','.join('?' * len(TA_OUT_TAGS))
     cur.execute(f"""SELECT a.MAINT_YMD, a.MAT_CODE, SUM(-CAST(a.MAINT_QTY AS float))
@@ -641,7 +667,13 @@ def _mv_buyprice(cur, target):
          전개구간에 매입이 없으면 기초 단가가 그대로 유지되는데, 레거시 기초에 금액이 0 으로
          들어온 품목은 영원히 0 이 된다(실측 2026-08-27: 자재 단가0 170건 중 73건이 이 경우).
          재고자산을 0 으로 누락시키는 것보다 **실제 지불가로 계상**하는 것이 정확하다.
-       ※이동평균법 자체를 바꾸는 것이 아니라 **결함 기초를 보정**하는 것이다."""
+       ※이동평균법 자체를 바꾸는 것이 아니라 **결함 기초를 보정**하는 것이다.
+       ★2026-09-08 분모 수정 — 종전엔 TA_IN_TAGS 전체 수량을 분모로 썼다. 그 안에 금액이
+         미기재인 가공입고(C)·생산완료 반입(P) 수량이 섞여 있어 단가가 깎였다.
+         실측 5210A22840A: 매입 tag9 20,046개/3,488,004원 = **174.00원**인데 분모에 tag C
+         18,838개가 더해져 89.93원으로 반토막 났다. ⟹ 분모도 금액이 실린 행의 수량만 쓴다.
+         1,294품목의 단가가 달라진다(수정값이 174·2,265·3,050·2,500 처럼 정수로 떨어지는 것이 근거).
+         같은 식을 쓰는 생산 단가 해석부(_prd_price ②')도 같이 고쳤다."""
     # ★캐시 키 = as-of 일자 전체(2026-08-30) — 값이 as-of 누계인데 월 키를 쓰면
     #   월초에 먼저 부른 값이 그 달 전체에 박힌다(_PRD_PX_CACHE 와 같은 결함).
     ck = str(target)
@@ -649,7 +681,9 @@ def _mv_buyprice(cur, target):
         return _MAT_BUY_CACHE[ck]
     ph_in = ','.join('?' * len(TA_IN_TAGS))
     cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(a.MAT_CODE))),
-                          SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
+                          SUM(CASE WHEN ISNULL(a.MAINT_AMT,0)<>0
+                                   THEN CAST(a.MAINT_QTY AS float) ELSE 0 END),
+                          SUM(CAST(a.MAINT_AMT AS float))
                      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                     WHERE a.MAINT_YMD <= ? AND a.MAINT_QTY <> 0
                       AND a.MAINT_TAG IN ({ph_in})
@@ -1136,7 +1170,9 @@ def _prd_price(cur, target):
     #    (신성소재 2204·성보스프링 2274 매입). 마스터에는 없어서 놓치던 것.
     ph_in = ','.join('?' * len(TA_IN_TAGS))
     cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(a.MAT_CODE))),
-                          SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
+                          SUM(CASE WHEN ISNULL(a.MAINT_AMT,0)<>0
+                                   THEN CAST(a.MAINT_QTY AS float) ELSE 0 END),
+                          SUM(CAST(a.MAINT_AMT AS float))
                      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                     WHERE a.MAINT_YMD <= ? AND a.MAINT_QTY <> 0
                       AND a.MAINT_TAG IN ({ph_in})
