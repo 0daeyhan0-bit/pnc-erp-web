@@ -105,10 +105,26 @@ class _ROConn:
     def __getattr__(self, n): return getattr(self._cn, n)
 
 def _conn():
-    # ★컷오버(2026-09-07): 레거시 PARTNER_ERP 은퇴 → nx(PARTNER_ERP_TEST3) 접속. RO 가드 유지.
-    #   레거시 대조가 필요한 소수 쿼리(총평균 등)는 3부분명 PARTNER_ERP_ORG.dbo.X 로 개별 지정.
+    # ★★★컷오버 때 되돌릴 것 = 이 한 줄 (DATABASE=PARTNER_ERP → PARTNER_ERP_TEST3)
+    #
+    #   2026-09-07 컷오버로 TEST3 접속으로 바꿨다가(#186 d015d21),
+    #   같은 날 밤 롤백에서 **DB만 원복하고 코드는 그대로 둬** 운영 장애가 났다.
+    #     증상 : 영업예상매출현황이 9/8~9/30 전 기간 0원·0도번(오류표시 없이 HTTP200 rows:[])
+    #     원인 : 로그인 ilshin 의 **기본스키마가 dbo** 라서, 스키마를 안 쓴 쿼리
+    #            (`FROM sa_t_plan_item_dtl` 등 31곳/11파일)가
+    #            `PARTNER_ERP_TEST3.dbo` = **아무도 안 채우는 죽은 미러**(7/16~8/19 정지)로 갔다.
+    #            미지정 참조 테이블 21종 중 19종이 낡은 값이었다.
+    #            (nx 스키마는 sync 가 살아 있어 무사했다 — dbo 만 죽은 것)
+    #     실측 : sa_t_plan_item_dtl max 260819(라이브 261008) → 9월 계획 0행
+    #            pu_t_stock_maint −75,429 · pr_t_plan_part_mat −46,450 · pr_t_plan_item_dtl −32,343
+    #   ⟹ 2026-09-09 라이브로 되돌렸다. 기록 = `_schema/CUTOVER_EXECUTION_LOG_260907.md §7`
+    #
+    #   ★재컷오버 때 할 일 = **이 줄을 다시 PARTNER_ERP_TEST3 로 바꾼다.**
+    #     그때는 스키마 미지정 31곳도 함께 처리해야 같은 사고가 안 난다 —
+    #     `nx.` 를 명시하거나 로그인 기본스키마를 nx 로 두거나 둘 중 하나.
+    #     (명시 참조 `PARTNER_ERP_TEST3.nx.X` 는 이미 전부 nx 라 손댈 것이 없다)
     cs = (f'DRIVER={{SQL Server}};SERVER={db_client.DB_SERVER},{db_client.DB_PORT};'
-          f'DATABASE=PARTNER_ERP_TEST3;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD};ApplicationIntent=ReadOnly')
+          f'DATABASE=PARTNER_ERP;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD};ApplicationIntent=ReadOnly')
     return _ROConn(pyodbc.connect(cs, autocommit=True))
 
 def _num(x):
