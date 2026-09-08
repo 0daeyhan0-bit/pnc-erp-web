@@ -1256,8 +1256,14 @@ def _prd_price_bom(cur, target, need):
     return out
 
 
-def _prd_base(cur, target):
-    """기초 = 직전 확정 PRD 스냅샷. 없으면 레거시 2502 생산 월마감 시드."""
+def _prd_base(cur, target, monthly=False):
+    """기초 = 직전 확정 PRD 스냅샷. 없으면 레거시 2502 생산 월마감 시드.
+       ★monthly=True(월마감): 일마감(잠정)을 기초로 쓰지 않고 **전월 월마감**만 기초로 → 그 달 전체 재생.
+         자재(_mv_base monthly)와 같은 규칙으로 맞춘 것이다(2026-09-08).
+         종전엔 target 직전 확정을 그대로 골라 8/31 월마감이 **8/30 일마감**을 기초로 하루치만
+         전개했다 — 자재에서 −548,851 드리프트를 만든 바로 그 구조다(CLOSE_REDESIGN §13-2).
+         ※영업(_snap_sal)은 _sal_ledger 를 "그 달 1일~말일"로 부르므로 구조상 이미 전월말 기초다.
+       """
     # ★TOP 1 을 뽑고 나서 target 조건을 검사하면, 그 아래 쓸 수 있는 마감이 있어도
     #   레거시 시드로 떨어진다(MAT 에서 실측된 것과 같은 결함 — §19). 후보를 훑어 첫 유효분을 쓴다.
     cur.execute("""SELECT ptype, period FROM nx.period_close
@@ -1266,6 +1272,8 @@ def _prd_base(cur, target):
                     ORDER BY CASE WHEN ptype='D' THEN period ELSE period+'99' END DESC""", target)
     for pt, per in cur.fetchall():
         end = per if pt == 'D' else _month_end(per)
+        if monthly and pt == 'D':          # ★월마감은 잠정 일마감을 기초로 쓰지 않는다(전체재생)
+            continue
         if end < target and not (pt == 'D' and _fp_stale(cur, 'PRD', pt, per)):   # ★stale 잠정 스냅샷 건너뜀
             st = {}
             for it, lo, q, amt, av in _snapshot_rows(cur, 'PRD', pt, per, with_loc=True):
@@ -1292,7 +1300,7 @@ def _snap_prd(cur, ptype, period):
     """★생산 마감 = 이동평균법(매입가 기반, §12-8). 축=(품목×재고위치). 반환 (행수, 기준설명)."""
     import datetime as _dt
     target = period if ptype == "D" else _month_end(period)
-    state, base_ymd, src = _prd_base(cur, target)
+    state, base_ymd, src = _prd_base(cur, target, monthly=(ptype == "M"))   # ★월마감=전월말 전체재생
     try:
         b = _dt.date(2000 + int(base_ymd[:2]), int(base_ymd[2:4]), int(base_ymd[4:6])) + _dt.timedelta(days=1)
         start = f"{b.year % 100:02d}{b.month:02d}{b.day:02d}"
