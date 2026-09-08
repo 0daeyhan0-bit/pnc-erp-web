@@ -894,32 +894,8 @@ def dong_unit_weight(eng, item):
     return eng._duw[k]
 
 
-def rawmat_for_cut(eng, item):
-    """[가공 원소재 차감 대상 — A방식(대표 확정 2026-09-08)] 반환 (raw_code|None, source).
-    ①LG BOM(nx.bom) role='원소재' + supply_type='Assembly Pull'(=우리 절삭) 우선 → 그 raw 차감(우리 재고).
-    ②Supplier(외주 공급)만 있으면 (None,'SUPPLIER') = 우리 절삭 아님·차감 안 함.
-    ③LG BOM 원소재 edge 없으면 STD 5키(std_rawmat_of) 보조.
-    검증 2026-09-08: 미매칭 203 중 201 LG BOM 해소·AP 116/Supplier 85·물성 OL raw 정확. 캐시."""
-    if not hasattr(eng, '_rfc'):
-        eng._rfc = {}
-    k = item.strip().upper()
-    if k not in eng._rfc:
-        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(child_code))), LTRIM(RTRIM(ISNULL(lg_supply_type,''))), CAST(qty AS float)
-            FROM nx.bom WHERE UPPER(LTRIM(RTRIM(parent_code)))=? AND role=N'원소재'
-            ORDER BY CASE WHEN lg_supply_type LIKE '%Pull%' THEN 0 ELSE 1 END, qty DESC""", k)
-        rows = eng.cur.fetchall()
-        res = None
-        ap = [r for r in rows if 'Pull' in (str(r[1]) or '')]
-        sup = [r for r in rows if 'Supplier' in (str(r[1]) or '')]
-        if ap:
-            res = (str(ap[0][0]).strip(), 'LG_AP')
-        elif sup:
-            res = (None, 'SUPPLIER')          # 외주 공급 = 우리 절삭 아님 → 차감 없음
-        else:
-            won = std_rawmat_of(eng, k)       # LG BOM 원소재 edge 없음 → STD 5키 보조
-            res = (won, 'STD') if won else (None, 'NONE')
-        eng._rfc[k] = res
-    return eng._rfc[k]
+# ★rawmat_for_cut(A방식·LG_AP 우선) 제거(2026-09-08): 검증서 부적합(차감코드 1,483건 변경·LG_AP=MJU 재고없음 위험)
+#   + nx.bom(은퇴 대상) 직독이라 삭제. 가공 원소재 차감 대상은 원소재 backflush 재설계(본/롤 vs 자동)와 함께 확정.
 
 
 def std_rawmat_of(eng, item):
