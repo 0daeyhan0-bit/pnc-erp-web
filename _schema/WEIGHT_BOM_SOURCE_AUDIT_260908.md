@@ -89,9 +89,11 @@
 - 선행 확인 필요: **규격(metal,diam,thick) → raw tube 코드 매핑** 존재 여부(없으면 매핑 구축이 선행 과제).
 
 ## 5. 통일 계획 (확정 방향)
-1. **`_dong_of`/`_dong_of_batch`(bom_flat 중량소요)를 공용 엔진(nx_soyo_engine)으로 승격** — lgsagub·matexpect·backflush 공유.
-2. **backflush 원소재축 = nx.bom → 공용 `_dong_of`(bom_flat)** 이관(옆에짓고 TestBed 재고정확성·음수·게이팅 검증 후). 재고 소비량 변동=교정(개선).
-3. **원가엔진 내부 nx.bom RAC/overhead 잔재 클린화**(레거시 diff0 게이트 유지).
-4. **nx.bom 제거**(운영 의존 0 후) · **bom_flat.raw_lg_kg 제거**(LG중량은 lg_bom 직조회, lgsagub가 이미 그럼).
-5. **§4 문서·주석 정정**을 이 작업과 함께.
-6. bom_flat **재빌드 절차 확립**(현재 2026-08-24 정지) — lg_bom 갱신 시 재생성.
+> ★§4-C 반영해 정정: 원소재 중량차감은 backflush가 아니라 **절삭(procbc)** — 아래 단계가 정본 계획.
+
+- **Phase 0 (선행 검증·완료 2026-09-08)**: 실물 동재고=raw tube(7072AR9374x)·규격별 kg·사급/입고축. 규격(metal,diam,thick)→raw tube 코드 **1:1 매핑 확인**(14 CU tube·중복0). 절삭재료비 마스터 규격기반(CS_M_METERIAL_COST/item_copper_spec).
+- **Phase 1**: 동 중량 소요 공용엔진 — `_dong_of`/`_dong_of_batch`(bom_flat·규격별 kg)를 **nx_soyo_engine 으로 승격**(lgsagub·matexpect·절삭 공유). raw tube 매핑 헬퍼(규격→7072AR9374x) 추가.
+- **Phase 2**: **절삭(procbc 가공바코드실적)에 동 원자재 중량차감 추가** — 완제품 절삭 실적 시 규격별 동 kg 산출 → raw tube 재고 차감. **옆에짓고 TestBed(음수·게이팅·불변식)** 검증 후 결선.
+- **Phase 3**: **backflush 원소재 comps 제거**(nx.bom `role='원소재'` — 재고0 phantom). backflush는 부품/제작동관/구매품(bom_line 엔진)+용접봉/링만. TestBed 회귀검증.
+- **Phase 4**: 원가엔진 nx.bom RAC/overhead 잔재 클린화(레거시 diff0 게이트 유지) → **nx.bom 제거** · bom_flat.raw_lg_kg 제거(LG중량=lg_bom 직조회) · bom_flat **재빌드 절차 확립**(현 2026-08-24 정지).
+- 전 단계 **검증 필수**(대표): 생산계획·재고 불변식·음수0·게이팅. §4 문서·주석 정정은 완료(2026-09-08).
