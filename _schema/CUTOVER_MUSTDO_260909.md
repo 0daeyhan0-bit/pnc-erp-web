@@ -38,6 +38,34 @@
 
 ---
 
+## A2 판별 결과 (2026-09-09·검증완) — 미러 직독 (a)동결stale vs (b)웹store
+
+판별 기준 = 웹이 쓰나(INSERT/UPDATE/DELETE=nx store·동결무해) / 읽기만(레거시 sync가 채움=동결stale).
+★뉘앙스: SQL Server case-insensitive → `PR_M_WORK`·`part_calendar`·`line_*` 소문자 "클린"은 **같은 미러 테이블**(별도 클린 아님).
+
+### (b) 웹 CRUD store = 동결 무해 (컷오버 blocker 아님)
+| 미러 | 웹 쓰기 | 판정 |
+|---|---|---|
+| PR_M_PROC_GAGONG (+_WORKER) | partmaster CRUD | 웹 store(공정마스터 클린부재이나 웹이 nx서 관리) |
+| CM_M_CUST_MAGAM | cust/purmagam/salemagam | 웹 store(거래처마감) |
+| PR_M_MODEL_BOM_EXCEPT | 웹 쓰기 2 | 웹 store |
+| CS_M_PROC | assywork INSERT | 웹 store(조립공정) |
+
+### (a) 레거시-fed 읽기전용 = 동결 stale = ★진짜 blocker
+| 미러(읽기전용) | 행수 | 클린 대체 | 클린 행수 | 조치 |
+|---|---|---|---|---|
+| PR_M_ITEM_PROC_GAGONG | 9,899 | nx.routing | 173,099 | 읽기 repoint(grain 매핑 검증) |
+| PR_M_ITEM_BOM · CS_M_ITEM_BOM | 42,550·42,495 | nx.bom_line/v_pr_bom | 37,714 | 읽기 repoint(소요엔진/bom_line) |
+| PR_M_ITEM_SUB | 71,043 | nx.item_sub | 14,466 | ★커버리지 격차 확인 후 repoint |
+| PR_M_MODEL_BOM | 63,035 | nx.model_bom | **0(빈)** | ★clean 재빌드 필요 or 미러 유지판정 |
+| PR_M_ITEM_BLOB | 121,832 | (없음) | — | 도면 blob·클린 신설 or 이관대상 판정 |
+
+### (판별 보류·case-insensitive 재확인) 
+PR_M_WORK(2)·PR_M_WORK_SINGLE(450)·PR_M_PART_CALENDAR(372)·PR_M_LINE_NO(42)·PR_M_LINE_CALENDAR(18,264)
+= nx 테이블 자체(별도 클린 아님). 레거시-fed인지 웹유지인지 개별 확인(prodinfo가 line_*/calendar 쓰는지) → 웹유지면 (b).
+
+**A2 결론**: 진짜 컷오버 blocker(미러 직독) = **위 (a) 5종**(PR_M_ITEM_PROC_GAGONG·ITEM_BOM/CS·ITEM_SUB·MODEL_BOM·ITEM_BLOB). 나머지는 웹 store거나 보류 재확인. 클린 대체가 있는 것(routing·bom_line)은 읽기 repoint, 빈 것(model_bom)/없는 것(blob)은 clean 확보 선행.
+
 ## C. 우선순위 (컷오버 향해)
 1. **A2 미러 직독 15 라우터 (a)/(b) 판별** — 진짜 stale될 것 추림(이게 남은 최대 blocker).
 2. **A0 이관 구분표 완성**(선행 문서).
