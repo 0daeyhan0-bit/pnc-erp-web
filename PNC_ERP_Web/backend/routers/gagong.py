@@ -536,35 +536,16 @@ def gagong_plan4w(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
         ) x""", d6f, d6f, d6f, wcp)
         tprows = cur.fetchall()
         dobset = sorted({str(r[0]).strip() for r in tprows if r[0]})
-        # P2 필터 = CTE_BOM(재귀 BOM전개, VALUES seed) 4조건: work_code=wcp·in_cust_code=''·경로첫등장(charindex)·mat_flag='1'(pr_m_mat 아님, ★라이브서 조회=nx엔 미러안됨). 도번set + 자도번LIST(mat).
-        from collections import defaultdict as _dd
-        p2set = set(); _jm = _dd(list)
-        for i in range(0, len(dobset), 300):
-            ch = dobset[i:i+300]; vals = ",".join("(?)" for _ in ch)
-            cur.execute(f"""
-              WITH SEED(item_code) AS (SELECT item_code FROM (VALUES {vals}) v(item_code)),
-              CTE_BOM AS (
-                SELECT CONVERT(int,1) level_no, CONVERT(varchar(50),s.item_code) item_code, CONVERT(varchar(50),s.item_code) mat_code,
-                   CONVERT(varchar(20),c.work_code) work_code, CONVERT(varchar(20),c.in_cust) in_cust_code,
-                   CONVERT(varchar(20),CASE WHEN c.work_code>'' THEN c.work_code ELSE c.in_cust END) mwc,
-                   CONVERT(varchar(500),'||'+CASE WHEN c.work_code>'' THEN c.work_code ELSE c.in_cust END+'|') cum,
-                   CONVERT(decimal(18,5),1) cum_use
-                FROM SEED s JOIN PARTNER_ERP_TEST3.nx.item c ON c.item_code=s.item_code
-                UNION ALL
-                SELECT cb.level_no+1, cb.item_code, CONVERT(varchar(50),b.mat_code),
-                   CONVERT(varchar(20),m.work_code), CONVERT(varchar(20),m.in_cust),
-                   CONVERT(varchar(20),CASE WHEN m.work_code>'' THEN m.work_code ELSE m.in_cust END),
-                   CONVERT(varchar(500),cb.cum+'|'+CASE WHEN m.work_code>'' THEN m.work_code ELSE m.in_cust END+'|'),
-                   CONVERT(decimal(18,5),cb.cum_use*b.use_qty)
-                FROM CTE_BOM cb JOIN {S}.pr_m_item_bom b ON cb.mat_code=b.item_code JOIN PARTNER_ERP_TEST3.nx.item m ON b.mat_code=m.item_code
-                WHERE ISNULL(b.EXCEPT_FLAG,'0')='0' AND cb.level_no<10)
-              SELECT item_code, mat_code, SUM(CONVERT(float,cum_use)) q FROM CTE_BOM cte
-              WHERE work_code=? AND in_cust_code='' AND charindex('||'+mwc+'||',cum)=0
-                AND NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.pr_m_mat mm WHERE mm.mat_code=cte.mat_code)
-              GROUP BY item_code, mat_code OPTION(MAXRECURSION 0)""", *ch, wcp)
-            for it, mc, q in cur.fetchall():
-                it = str(it).strip(); p2set.add(it); _jm[it].append("%s{%d}" % (str(mc).strip(), int(q or 0)))
-        jadomap = {k: ",".join(v) for k, v in _jm.items()}
+        # ★P2 필터 = 통일 소요엔진 walker gagong_p2_parts(§1-10). 종전 CTE_BOM 재귀(pr_m_item_bom 미러 직독=컷오버시 동결) 대체.
+        #   조건 4개(work_code=wcp·in_cust=''·mwc 경로첫등장 charindex·mat∉pr_m_mat) walker 내부 동일 재현.
+        #   ★diff0 검증완(2026-09-08 g545_verify: 계획품목 표본350 vs 미러 CTE 423/423·p2set 대칭차0). bom_line 직독(용접브랜치 회피).
+        p2set = set(); jadomap = {}
+        with _COST_LOCK:
+            _engp = _get_cost_engine()
+            _p2 = _soyo.gagong_p2_parts(_engp, dobset, wcp)   # {root_item: {mat: int(Σcum_use)}}
+        for it, md in _p2.items():
+            p2set.add(it)
+            jadomap[it] = ",".join("%s{%d}" % (mc, int(q or 0)) for mc, q in md.items())
         # 도번(c_item_code) 그룹: 값=ceil(plan×use×rate/100) 행별합, 일자=PLAN_YMD 버킷(col0=<=기준일 누적)
         keyed = {}
         for cic, _wo, _swo, _ln, _py, _use, _pq, _rate in tprows:
