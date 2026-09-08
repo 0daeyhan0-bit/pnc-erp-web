@@ -801,7 +801,7 @@ SCREEN.matledger=(c)=>{
         <div class="s-item">입고금액 <b>${wonI(T(rows,'ia'))}</b></div>
         <div class="s-item">출고금액 <b>${wonI(T(rows,'oa'))}</b></div>
         <div class="s-item">재고수량 <b>${won(T(rows,'_fq'))}</b></div>
-        <div class="s-item ${T(rows,'sa')<0?'neg':''}">재고금액 <b>${wonI(T(rows,'sa'))} 원</b></div>`;};
+        <div class="s-item ${T(rows,'_fa')<0?'neg':''}">재고금액 <b>${wonI(T(rows,'_fa'))} 원</b>${dom==='MAT'&&T(rows,'ca')?` <span style="color:var(--muted);font-weight:600">(창고 ${wonI(T(rows,'sa'))} + 이월 ${wonI(T(rows,'ca'))})</span>`:''}</div>`;};
     const gbf=r=>{const gb=c.querySelector('#gubun').value;return gb==='all'||(gb==='plus'?r._fq>0:r._fq<0);};
     const gtRow=rows=>rows.length?`<tr class="grandtot">
       <td colspan="${dom==='PRD'?3:2}" class="right">총계 (${won(rows.length)}건)</td>
