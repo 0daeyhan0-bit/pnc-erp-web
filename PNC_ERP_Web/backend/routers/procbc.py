@@ -107,9 +107,9 @@ def _bc_bom_legacy(cur, parent, mult=1.0, depth=0, acc=None):
         return acc
     cur.execute("""SELECT b.MAT_CODE, ISNULL(b.USE_QTY,0), ISNULL(b.IN_GAGONG_PROC_CODE,''),
                           ISNULL(b.VIR_ITEM_FLAG,'0')
-                     FROM nx.PR_M_ITEM_BOM b
+                     FROM nx.v_pr_bom b
                     WHERE b.ITEM_CODE=? AND ISNULL(b.EXCEPT_FLAG,'0')<>'1'
-                      AND ISNULL(b.SET_EXCEPT_FLAG,'0')<>'1'""", parent)
+                      AND ISNULL(b.SET_EXCEPT_FLAG,'0')<>'1'""", parent)  # ★미러→클린(v_pr_bom). 단 이 함수는 엔진(setinput_bc_soyo) 미가용시만 쓰는 fallback
     for mat, use, gpc, vir in cur.fetchall():
         use = float(use or 0)
         if use <= 0:
