@@ -81,17 +81,24 @@ def _route_no_of(cur, route_id):
     r = cur.fetchone()
     return int(r[0]) if r else 1
 
-def _pi_proc_rows(cur, item, use_nx, route_id=0):
+def _pi_proc_rows(cur, item, use_nx=True, route_id=0):
     """생산공정순서 행 조회. 마스터 조인으로 표시명·회수율 포함.
-       route_id가 R02+(route_no>1)면 nx.route_proc_gagong(route 스코프), 아니면 use_nx=True→nx.prodinfo_proc / False→레거시."""
+       route_id가 R02+(route_no>1)면 nx.route_proc_gagong(route 스코프), 아니면 nx.prodinfo_proc.
+
+       ★2026-09-08 미러 폴백 제거(CLAUDE.md §1-9-1 클린 단일화).
+         종전엔 품번 단위 폴백이었다 — 웹에서 저장한 적 있는 품번만 nx.prodinfo_proc 를 읽고
+         나머지(4,187품번)는 미러 PR_M_ITEM_PROC_GAGONG 로 떨어졌다.
+         컷오버로 레거시가 은퇴하면 그 폴백 대상이 **얼어붙은 옛 값**이 되므로,
+         미러 9,901행을 클린에 적재(_migration/prodinfo_proc_seed.py)하고 폴백을 없앴다.
+         적재 후 대조: 미러 품번 중 클린 누락 0 · 가공공정/작업처/ST/LT/전표 불일치 0.00%.
+       ※use_nx 인자는 호출부 호환을 위해 남겼으나 더는 분기하지 않는다(항상 클린)."""
     use_route = _route_no_of(cur, route_id) > 1
     if use_route:
         _ensure_route_proc(cur)
-        src = "nx.route_proc_gagong a"; C = (lambda c: c.lower())
+        src = "nx.route_proc_gagong a"
     else:
-        src = ("nx.prodinfo_proc a" if use_nx
-               else "PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG a")
-        C = (lambda c: c.lower()) if use_nx else (lambda c: c)  # nx는 소문자 컬럼
+        src = "nx.prodinfo_proc a"
+    C = (lambda c: c.lower())   # 클린은 소문자 컬럼(route_proc_gagong·prodinfo_proc 동일)
     cur.execute(f"""
         SELECT a.{C('PROC_SEQ')}, ISNULL(a.{C('WORK_CODE')},'') , ISNULL(a.{C('GAGONG_PROC_CODE')},''),
                ISNULL(a.{C('S_WORK_CODE')},0), ISNULL(a.{C('MACH_CODE')},''), ISNULL(a.{C('WORK_QTY')},0),
@@ -176,22 +183,19 @@ def prodinfo_get(item: str = Query(...), assyall: int = Query(0), route_id: int 
                 d[k] = (None if v is None else round(float(v), 3))
             single.append(d)
 
-        # ── 패널③ 생산공정순서(nx우선 by item, R02+면 route 스코프) ──
+        # ── 패널③ 생산공정순서(정본 nx.prodinfo_proc, R02+면 route 스코프) ──
+        # ★2026-09-08 미러 폴백 제거 — 품번별로 클린/미러를 갈라 읽던 분기를 없앴다(§1-9-1).
         if _route_no_of(cur, route_id) > 1:
             _ensure_route_proc(cur)
             cur.execute("SELECT COUNT(*) FROM nx.route_proc_gagong WHERE route_id=? AND item_code=?", int(route_id), item)
             if cur.fetchone()[0] > 0:
-                proc = _pi_proc_rows(cur, item, True, route_id=int(route_id)); proc_src = "route"
+                proc = _pi_proc_rows(cur, item, route_id=int(route_id)); proc_src = "route"
             else:
                 # R02 미등록 → R01/품번키(생산 ST축)에서 시드 템플릿 제공(저장 전엔 route_proc_gagong 미기록)
-                cur.execute("SELECT COUNT(*) FROM nx.prodinfo_proc WHERE item_code=?", item)
-                seed_nx = cur.fetchone()[0] > 0
-                proc = _pi_proc_rows(cur, item, seed_nx); proc_src = "route_seed"
+                proc = _pi_proc_rows(cur, item); proc_src = "route_seed"
         else:
-            cur.execute("SELECT COUNT(*) FROM nx.prodinfo_proc WHERE item_code=?", item)
-            use_nx = cur.fetchone()[0] > 0
-            proc = _pi_proc_rows(cur, item, use_nx)
-            proc_src = "nx" if use_nx else "legacy"
+            proc = _pi_proc_rows(cur, item)
+            proc_src = "nx"
 
         # ── 하단 탭: LOB(item_st, nx우선) ──
         cur.execute("""SELECT prod_gubun, ISNULL(member_qty,0), ISNULL(capa_qty,0), 'nx'
