@@ -88,7 +88,7 @@ def _item_nature(cur, code, sgroup):
     cur.execute("""SELECT
         (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.proc_weld WHERE parent_item=? AND ISNULL(use_qty,0)>0),
         (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.v_cs_bom WHERE ITEM_CODE=?),
-        (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=?),
+        (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.prodinfo_proc WHERE ITEM_CODE=?),  -- ★R01 클린(미러 직독 은퇴 260909)
         (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.v_cs_bom WHERE MAT_CODE=?)""", code, code, code, code)
     w, bp, g, bc = cur.fetchone()
     if w or bp: return "5.용접·조립품", 1

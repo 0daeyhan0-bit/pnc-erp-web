@@ -566,7 +566,7 @@ def _step6_sql(cur):
     INTO nx.plan_part_gagong FROM nx.plan_part_temp a
     LEFT JOIN nx.plan_route_active pra ON pra.assy_item_code=a.assy_item_code
     JOIN (
-        SELECT item_code, CAST(0 AS INT) route_id, proc_seq, s_work_code, gagong_proc_seq, lt_hr FROM {P}PR_M_ITEM_PROC_GAGONG
+        SELECT item_code, CAST(0 AS INT) route_id, proc_seq, s_work_code, gagong_proc_seq, lt_hr FROM {P}prodinfo_proc
         UNION ALL
         SELECT item_code, route_id, proc_seq, s_work_code, gagong_proc_seq, lt_hr FROM nx.route_proc_gagong
     ) b ON a.mat_code=b.item_code

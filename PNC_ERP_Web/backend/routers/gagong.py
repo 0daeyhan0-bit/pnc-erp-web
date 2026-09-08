@@ -268,7 +268,7 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
             ck = mats[i:i + 900]; ph = ",".join("?" * len(ck))
             cur.execute(f"SELECT ITEM_CODE, ISNULL(item_name,'') FROM {S}.item WHERE ITEM_CODE IN ({ph})", *ck)
             for a, b in cur.fetchall(): nm[a] = b
-            cur.execute(f"SELECT ITEM_CODE, SUM(CAST(ISNULL(TOT_ST,0) AS float)) FROM {S}.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE IN ({ph}) GROUP BY ITEM_CODE", *ck)
+            cur.execute(f"SELECT ITEM_CODE, SUM(CAST(ISNULL(TOT_ST,0) AS float)) FROM {S}.prodinfo_proc WHERE ITEM_CODE IN ({ph}) GROUP BY ITEM_CODE", *ck)
             for a, b in cur.fetchall(): ist[a] = float(b or 0)
         gpcs = list({g["gpc"] for g in rows if g["gpc"]})
         if gpcs:
@@ -738,7 +738,7 @@ def _sheet_procs(cur, jado):
     """공정순서: 공정명=PR_M_WORK_SINGLE.WORK_DESC(S_WORK_CODE), SPEC=STD_SIZE"""
     cur.execute("""SELECT TOP 10 ISNULL(w.WORK_DESC, CONVERT(varchar(20), d.S_WORK_CODE)),
                           ISNULL(d.STD_SIZE,'')
-                     FROM nx.PR_M_ITEM_PROC_GAGONG d
+                     FROM nx.prodinfo_proc d
                      LEFT JOIN nx.PR_M_WORK_SINGLE w ON w.S_WORK_CODE=d.S_WORK_CODE
                     WHERE d.ITEM_CODE=? ORDER BY d.PROC_SEQ""", jado)
     return [{"nm": (x[0] or '').strip(), "spec": (x[1] or '').strip()} for x in cur.fetchall()]
@@ -747,7 +747,7 @@ def _sheet_wh(cur, jado):
     """창고 = 첫 공정의 가공공정명(예 11라인(가공)/01라인(용접)), 라인 = GAGONG_GROUP_CODE"""
     cur.execute("""SELECT TOP 1 ISNULL(g.GAGONG_PROC_DESC, d.GAGONG_PROC_CODE),
                           ISNULL(CONVERT(varchar(20), w.GAGONG_GROUP_CODE),'')
-                     FROM nx.PR_M_ITEM_PROC_GAGONG d
+                     FROM nx.prodinfo_proc d
                      LEFT JOIN nx.PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE=d.GAGONG_PROC_CODE
                      LEFT JOIN nx.PR_M_WORK_SINGLE w ON w.S_WORK_CODE=d.S_WORK_CODE
                     WHERE d.ITEM_CODE=? ORDER BY d.PROC_SEQ""", jado)

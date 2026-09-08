@@ -410,7 +410,7 @@ def _insert_sheet_dtl(cur, sheet_no, item, user):
                           ISNULL(GAGONG_PROC_SEQ,0), ISNULL(READY_ST,0), ISNULL(MACH_CT,0),
                           ISNULL(INWON,0), ISNULL(HUMAN_ST,0), ISNULL(TOT_ST,0),
                           ISNULL(JP_PROC_METHOD,''), ISNULL(LT_HR,0)
-                     FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
+                     FROM nx.prodinfo_proc WITH(NOLOCK)
                     WHERE ITEM_CODE=? ORDER BY PROC_SEQ""", item)
     procs = cur.fetchall()
     for p in procs:

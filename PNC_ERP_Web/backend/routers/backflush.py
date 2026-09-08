@@ -119,13 +119,14 @@ def _prod_shortages(nx, comps, weld, qty):
 
 # ================= ★Phase2: 생산실적 백플러시 엔진 (실사용BOM×생산량 소비, 회수율 제외) =================
 def _is_inner_prod(cro, item):
-    """사내생산(INNER_PROD=1) 판정: MAKE_TYPE='1' 또는 가공공정(PR_M_ITEM_PROC_GAGONG) 보유. 라이브 RO."""
+    """사내생산(INNER_PROD=1) 판정: MAKE_TYPE='1' 또는 가공공정(R01 클린 nx.prodinfo_proc) 보유. 라이브 RO.
+       ★2026-09-09 미러 PR_M_ITEM_PROC_GAGONG 직독→클린 prodinfo_proc(컷오버 동결 stale 차단·ITEM_PROC_GAGONG_CLEAN_260909)."""
     c = cro.cursor()
     try:
         c.execute("SELECT ISNULL(make_type,'') FROM nx.item WHERE item_code=?", item)
         r = c.fetchone()
         if r and str(r[0]).strip() == '1': return True
-        c.execute("SELECT COUNT(*) FROM nx.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=?", item)
+        c.execute("SELECT COUNT(*) FROM nx.prodinfo_proc WHERE ITEM_CODE=?", item)
         return (c.fetchone()[0] or 0) > 0
     except Exception:
         return False
@@ -211,7 +212,7 @@ def _final_proc_code(cro, item):
     """완성공정(최종) gagong_proc_code = MAX(PROC_SEQ). method 무관·PROC_SEQ 최댓값. 라이브 RO."""
     c = cro.cursor()
     try:
-        c.execute("SELECT TOP 1 ISNULL(GAGONG_PROC_CODE,'') FROM nx.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=? ORDER BY PROC_SEQ DESC", item)
+        c.execute("SELECT TOP 1 ISNULL(GAGONG_PROC_CODE,'') FROM nx.prodinfo_proc WHERE ITEM_CODE=? ORDER BY PROC_SEQ DESC", item)
         r = c.fetchone()
         return str(r[0]).strip() if r and r[0] else ""
     except Exception:

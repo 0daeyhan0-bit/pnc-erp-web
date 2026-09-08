@@ -798,7 +798,7 @@ def _prod_dest(cur, item, upper_item=None):
         _ic = str(_r[0] or '').strip() if _r else ''
         if _ic:
             return ("MAT", None)                 # 상위가 업체
-        cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM nx.PR_M_ITEM_PROC_GAGONG
+        cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM nx.prodinfo_proc
                         WHERE ITEM_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')<>''
                         ORDER BY PROC_SEQ DESC""", _up)
         _r2 = cur.fetchone()
@@ -819,7 +819,7 @@ def _prod_dest(cur, item, upper_item=None):
                                    for r in cur.fetchall()]:
                 if incust:
                     return ("MAT", None)
-                cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM nx.PR_M_ITEM_PROC_GAGONG
+                cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM nx.prodinfo_proc
                                 WHERE ITEM_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')<>''
                                 ORDER BY PROC_SEQ DESC""", p)
                 _r3 = cur.fetchone()
@@ -1011,13 +1011,13 @@ def _apply_set_stock(cur, item, qty, box, user, win, ymd, hms):
 @router.get("/api/procbc/masters")
 def procbc_masters(part: str = Query("")):
     """상단 드롭다운 소스 — 파트 목록 / (파트 선택시) 공정코드·설비·작업자.
-       파트↔공정(S_WORK_CODE)↔설비 = nx.PR_M_ITEM_PROC_GAGONG 실측 조합
+       파트↔공정(S_WORK_CODE)↔설비 = nx.prodinfo_proc 실측 조합
        작업자 = nx.PR_M_PROC_GAGONG_WORKER (WORK_FLAG='1')"""
     nx = _nx(); cur = nx.cursor()
     cn = _conn(); c2 = cn.cursor()
     try:
         # 파트 목록(생산파트만 — 가공파트 P00xx는 별도 화면 소관)
-        cur.execute("""SELECT DISTINCT GAGONG_PROC_CODE FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
+        cur.execute("""SELECT DISTINCT GAGONG_PROC_CODE FROM nx.prodinfo_proc WITH(NOLOCK)
                         WHERE ISNULL(GAGONG_PROC_CODE,'')<>'' AND GAGONG_PROC_CODE NOT LIKE 'P00%'""")
         codes = [str(r[0]).strip() for r in cur.fetchall() if r[0]]
         nm = {}
@@ -1031,7 +1031,7 @@ def procbc_masters(part: str = Query("")):
         if p:
             # 공정코드(S_WORK_CODE) + 설비 — 그 파트에서 실제 쓰이는 조합
             cur.execute("""SELECT S_WORK_CODE, ISNULL(MACH_CODE,''), COUNT(*) c
-                             FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
+                             FROM nx.prodinfo_proc WITH(NOLOCK)
                             WHERE GAGONG_PROC_CODE=? AND ISNULL(S_WORK_CODE,'')<>''
                             GROUP BY S_WORK_CODE, ISNULL(MACH_CODE,'')
                             ORDER BY COUNT(*) DESC""", p)
@@ -1115,7 +1115,7 @@ def procbc_lookup(barcode: str = Query(...), proc_code: str = Query("")):
         # 그 공정의 전표처리구분(품목 공정마스터) + PROC_SEQ(구간기록용)
         gmeth = ""; pseq = None
         if p:
-            cur.execute("""SELECT TOP 1 ISNULL(JP_PROC_METHOD,''), PROC_SEQ FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
+            cur.execute("""SELECT TOP 1 ISNULL(JP_PROC_METHOD,''), PROC_SEQ FROM nx.prodinfo_proc WITH(NOLOCK)
                             WHERE ITEM_CODE=? AND GAGONG_PROC_CODE=?""", item, p)
             g = cur.fetchone()
             if g:
@@ -1135,7 +1135,7 @@ def procbc_lookup(barcode: str = Query(...), proc_code: str = Query("")):
                 _procs = [(str(x[0] or '').strip(), str(x[1] or '').strip()) for x in cur.fetchall()]
             if not _procs:
                 cur.execute("""SELECT ISNULL(m.GAGONG_PROC_CODE,''), ISNULL(g.GAGONG_PROC_DESC,'')
-                                 FROM nx.PR_M_ITEM_PROC_GAGONG m WITH(NOLOCK)
+                                 FROM nx.prodinfo_proc m WITH(NOLOCK)
                                  LEFT JOIN nx.PR_M_PROC_GAGONG g WITH(NOLOCK)
                                         ON g.GAGONG_PROC_CODE=m.GAGONG_PROC_CODE
                                 WHERE m.ITEM_CODE=? ORDER BY m.PROC_SEQ""", item)
@@ -1159,7 +1159,7 @@ def procbc_lookup(barcode: str = Query(...), proc_code: str = Query("")):
             if gmeth and meth and gmeth != meth:
                 _own = ""      # 이 바코드가 원래 속한 공정(같은 품목에서 실적수단이 일치하는 공정)
                 cur.execute("""SELECT TOP 1 ISNULL(m.GAGONG_PROC_CODE,''), ISNULL(g.GAGONG_PROC_DESC,'')
-                                 FROM nx.PR_M_ITEM_PROC_GAGONG m WITH(NOLOCK)
+                                 FROM nx.prodinfo_proc m WITH(NOLOCK)
                                  LEFT JOIN nx.PR_M_PROC_GAGONG g WITH(NOLOCK)
                                         ON g.GAGONG_PROC_CODE=m.GAGONG_PROC_CODE
                                 WHERE m.ITEM_CODE=? AND ISNULL(m.JP_PROC_METHOD,'')=?
@@ -1272,7 +1272,7 @@ def procbc_save(payload: dict = Body(...)):
                                 WHERE SHEET_NO=? ORDER BY PROC_SEQ""", sheet_ref)
                 _codes = [str(x[0] or '').strip() for x in cur.fetchall() if str(x[0] or '').strip()]
             if not _codes:
-                cur.execute("""SELECT ISNULL(GAGONG_PROC_CODE,'') FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
+                cur.execute("""SELECT ISNULL(GAGONG_PROC_CODE,'') FROM nx.prodinfo_proc WITH(NOLOCK)
                                 WHERE ITEM_CODE=? ORDER BY PROC_SEQ""", item)
                 _codes = [str(x[0] or '').strip() for x in cur.fetchall() if str(x[0] or '').strip()]
             if _codes and proc not in _codes:
@@ -1284,12 +1284,12 @@ def procbc_save(payload: dict = Body(...)):
             #   바코드 종류는 bc 형태로 판정(GP…=가간판 G / 8자리 숫자=전표 J / 그 외=라벨 L).
             _bcm = "G" if (bc.upper().startswith("GP") and bc[2:].isdigit()) else \
                    ("J" if (bc.lstrip("0") or "0").isdigit() else "L")
-            cur.execute("""SELECT TOP 1 ISNULL(JP_PROC_METHOD,'') FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
+            cur.execute("""SELECT TOP 1 ISNULL(JP_PROC_METHOD,'') FROM nx.prodinfo_proc WITH(NOLOCK)
                             WHERE ITEM_CODE=? AND GAGONG_PROC_CODE=?""", item, proc)
             _g = cur.fetchone()
             _gm = str(_g[0]).strip() if (_g and _g[0]) else ""
             if _gm and _gm != _bcm:
-                cur.execute("""SELECT TOP 1 ISNULL(GAGONG_PROC_CODE,'') FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
+                cur.execute("""SELECT TOP 1 ISNULL(GAGONG_PROC_CODE,'') FROM nx.prodinfo_proc WITH(NOLOCK)
                                 WHERE ITEM_CODE=? AND ISNULL(JP_PROC_METHOD,'')=? ORDER BY PROC_SEQ""", item, _bcm)
                 _o = cur.fetchone(); _own = str(_o[0]).strip() if _o else ""
                 nx.rollback()
@@ -1388,7 +1388,7 @@ def procbc_save(payload: dict = Body(...)):
             if max_seq:
                 seq_src = "전표"
         if not max_seq:      # 전표가 없는 스캔경로
-            cur.execute("""SELECT ISNULL(MAX(PROC_SEQ),0) FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
+            cur.execute("""SELECT ISNULL(MAX(PROC_SEQ),0) FROM nx.prodinfo_proc WITH(NOLOCK)
                             WHERE ITEM_CODE=?""", item)
             max_seq = int((cur.fetchone() or [0])[0] or 0)
             if max_seq:
