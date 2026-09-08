@@ -301,6 +301,68 @@ def order_soyo(eng, item):
     return {c: (round(v[0], 4), v[1]) for c, v in agg.items() if not c.upper().startswith('RAC')}
 
 
+def _setin_lines(eng, item):
+    """세트입고 전개용 v_pr_bom 자식 (child, USE_QTY, except, set_except, in_gagong_proc). 캐시."""
+    if not hasattr(eng, '_setl'):
+        eng._setl = {}
+    k = item.strip().upper()
+    if k not in eng._setl:
+        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(mat_code))), CAST(ISNULL(USE_QTY,0) AS float), ISNULL(except_flag,'0'),
+                ISNULL(set_except_flag,'0'), ISNULL(LTRIM(RTRIM(in_gagong_proc_code)),'')
+            FROM nx.v_pr_bom WHERE UPPER(LTRIM(RTRIM(item_code)))=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
+            ORDER BY BOM_SEQ""", k)
+        eng._setl[k] = [(str(r[0]).strip(), float(r[1] or 0), str(r[2]).strip(), str(r[3]).strip(), str(r[4]).strip())
+                        for r in eng.cur.fetchall()]
+    return eng._setl[k]
+
+
+def _node_cust(eng, node):
+    """노드 거래처 = work_code>'' ? work_code : in_cust (nx.item)."""
+    info = eng._load_item(node) or {}
+    wc = str(info.get('work_code', '') or '').strip()
+    return wc if wc else str(info.get('in_cust', '') or '').strip()
+
+
+def _insp_flag_sub(eng, node):
+    if not hasattr(eng, '_inspf'):
+        eng._inspf = {}
+    k = node.strip().upper()
+    if k not in eng._inspf:
+        eng.cur.execute("SELECT TOP 1 ISNULL(insp_flag,'') FROM nx.pr_m_item_sub WHERE UPPER(LTRIM(RTRIM(item_code)))=?", k)
+        r = eng.cur.fetchone()
+        eng._inspf[k] = (str(r[0]).strip() if r else '')
+    return eng._inspf[k]
+
+
+def setin_soyo(eng, item, cust):
+    """[세트입고 walker] setin._DW6_SQL(dw_6: 세트도번→그 거래처가 대는 자도번) 재현.
+    규칙: v_pr_bom 재귀·except≠1·원자재(pr_m_mat) 자식 제외·거래처(work_code|in_cust) 경로 추적.
+    수집 = 노드 거래처==target AND 그 거래처가 조상경로에 없음(순환방지) AND 도달엣지 set_except≠1.
+    수량 = INT 누적(각 레벨 int(cum*use_qty)), grain=(mat, in_gpc)·SUM(use)·MAX(insp).
+    반환 [{mat_code, cust, use_qty, insp_flag, in_gpc}]  (item_cost는 호출부가 price_item에서). ※§1-10."""
+    inmat = _prmmat_set(eng)
+    out = {}   # (mat, in_gpc) -> [sum_use_int, insp]
+
+    def walk(node, cum, anc_custs, edge_se, edge_gpc, seen):
+        nc = _node_cust(eng, node)
+        if nc == cust and cust not in anc_custs and edge_se != '1':
+            k = (node, edge_gpc)
+            a = out.setdefault(k, [0, ''])
+            a[0] += int(cum)
+            insp = _insp_flag_sub(eng, node)
+            if insp and insp > a[1]:
+                a[1] = insp
+        new_anc = anc_custs | ({nc} if nc else set())
+        for (c, q, ex, se, gpc) in _setin_lines(eng, node):
+            if ex == '1' or c in inmat or c in seen:
+                continue
+            walk(c, int(cum * q), new_anc, se, gpc, seen | {node})
+
+    walk(item.strip().upper(), 1, set(), '0', '', set())
+    return [{'mat_code': m, 'cust': cust, 'use_qty': float(v[0]),
+             'insp_flag': (v[1] or 'N'), 'in_gpc': g} for (m, g), v in out.items()]
+
+
 def plan_explode(eng, item):
     """[생산계획 stage1] STEP6 CTE_BOM 재현 → plan_part_temp(per-unit).
     v_pr_bom 재귀, except_flag≠1, level<10, PR_M_MAT 경계(추가는 하되 재귀 정지). vir_item 추적.

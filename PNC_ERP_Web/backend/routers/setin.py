@@ -351,7 +351,7 @@ def setin_stat(fr: str = Query(""), to: str = Query(""), cust: str = Query(""),
 _DW6_SQL = """
 WITH CTE_BOM(mat_code, in_cust_code, mat_use_qty, cum_in_cust_code,
              set_except_flag, insp_flag, in_gagong_proc_code) AS (
-  SELECT i.item_code,
+  SELECT CAST(i.item_code AS varchar(50)),
          CASE WHEN i.work_code > '' THEN i.work_code ELSE i.in_cust END,
          1,
          CONVERT(varchar(500),'||' + CASE WHEN i.work_code > '' THEN i.work_code
@@ -362,7 +362,7 @@ WITH CTE_BOM(mat_code, in_cust_code, mat_use_qty, cum_in_cust_code,
     FROM nx.item i
    WHERE i.item_code = ?
   UNION ALL
-  SELECT b1.mat_code,
+  SELECT CAST(b1.mat_code AS varchar(50)),
          CASE WHEN m.work_code > '' THEN m.work_code ELSE m.in_cust END,
          CONVERT(int, CASE WHEN cb.mat_use_qty = 0 THEN 0
                       ELSE CONVERT(NUMERIC(18,5), cb.mat_use_qty * b1.use_qty) END),
