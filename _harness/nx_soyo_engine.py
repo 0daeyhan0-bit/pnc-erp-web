@@ -379,8 +379,10 @@ def _bc_lines(eng, item):
 
 
 def setinput_bc_soyo(eng, item, part_default=''):
-    """[세트입고 자재차감 walker] procbc._bc_bom(dw_pr_input_028_5) 재현 = VIR('1') 재귀(자신 미수집·자식 use배),
+    """[가공바코드실적 자재차감 walker] procbc._bc_bom(w_pr_input_018) 재현 = VIR('1') 재귀(자신 미수집·자식 use배),
     except≠1 AND set_except≠1, 비VIR 수집(use*mult, in_gagong|part_default), depth≤5. 반환 [(mat, qty, gpc)].
+    ★용접봉(RAC) 제외 — 가공은 용접을 안 함(대표 확정 2026-09-08). 용접봉은 용접공정 실적에서 차감(§1-10 공정모델).
+      레거시 _bc_bom은 BOM 트리서 용접봉을 딸려 차감했으나(가공 no-weld에 부정확 + bom_line 변형SUB 2배) → 제외가 정답.
     ※procbc는 dedup 안 함(레거시 원문)·sagub 무관·in_gagong grain. §1-10."""
     acc = []
     def walk(node, mult, depth):
@@ -391,7 +393,7 @@ def setinput_bc_soyo(eng, item, part_default=''):
                 continue
             if vir == '1':
                 walk(c, mult * q, depth + 1)
-            else:
+            elif not _is_weldrod(eng, c):        # ★용접봉 제외(가공 no-weld)
                 acc.append((c, q * mult, gpc or part_default))
     walk(item.strip().upper(), 1.0, 0)
     return acc
