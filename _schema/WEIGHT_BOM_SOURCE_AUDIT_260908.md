@@ -78,6 +78,16 @@
 
 ---
 
+## 4-C. ★원소재 동 중량 재고차감 = "절삭 단계" (대표 확정 2026-09-08)
+검증으로 밝혀진 사실:
+- 실제 동 재고 = **원자재 Tube,Raw(`7072AR9374x`)** 에 **규격별(diam×thick) kg** 로 잡힘(157~2,512kg). 움직임 = **사급출고 tag5(−80,130) / 입고 tag9(+112,401)**. **backflush 태그(P4/P7)는 raw 동에 없음.**
+- 현 backflush 원소재 comps(nx.bom `role='원소재'` MJU663…)는 **재고 0** = 실물 동재고와 무관(부정확).
+- ⟹ **대표 확정: 원소재(동) 중량차감은 backflush(완성)가 아니라 절삭(가공) 단계에서 한다.**
+  - **절삭 = `procbc.py`(가공바코드실적 018, `PU_T_CUT_DTL` 기록)** — 여기서 동 원자재 중량차감 추가.
+  - 중량 소요 = **`_dong_of`(bom_flat·CU/고강도·규격별 kg)** → 규격(metal,diam,thick) 매칭 raw tube(`7072AR9374x`) 재고를 kg 차감.
+  - **backflush(완성)에서는 원소재 comps 제거** — 부품/제작동관/구매품(bom_line 엔진) + 용접봉/용접링만 유지.
+- 선행 확인 필요: **규격(metal,diam,thick) → raw tube 코드 매핑** 존재 여부(없으면 매핑 구축이 선행 과제).
+
 ## 5. 통일 계획 (확정 방향)
 1. **`_dong_of`/`_dong_of_batch`(bom_flat 중량소요)를 공용 엔진(nx_soyo_engine)으로 승격** — lgsagub·matexpect·backflush 공유.
 2. **backflush 원소재축 = nx.bom → 공용 `_dong_of`(bom_flat)** 이관(옆에짓고 TestBed 재고정확성·음수·게이팅 검증 후). 재고 소비량 변동=교정(개선).
