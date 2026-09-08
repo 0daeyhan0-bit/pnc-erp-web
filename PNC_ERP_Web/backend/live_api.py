@@ -479,9 +479,23 @@ def dailypurissue(date: str = Query(""), frm: str = Query(""), nocache: str = Qu
             WHERE domain=? AND ptype='M' AND period=(SELECT MAX(period) FROM nx.stock_snapshot WHERE domain=? AND ptype='M' AND period<?)""", dom, dom, ym)
         b = float(_lcur.fetchone()[0] or 0)
         # 기말 = 조회일 이하 최신 일마감(D, period<=d6). 없으면 기초(변동0).
-        _lcur.execute("""SELECT ISNULL(SUM(stock_amt),0) FROM nx.stock_snapshot
-            WHERE domain=? AND ptype='D' AND period=(SELECT MAX(period) FROM nx.stock_snapshot WHERE domain=? AND ptype='D' AND period<=?)""", dom, dom, d6)
-        e = float(_lcur.fetchone()[0] or 0)
+        # ★stale 스킵 — 여기는 성능 때문에 스냅샷을 **직독**한다(수불장 ledger 는 월 전체 재생이라 30초).
+        #   그래서 기초 해석기(_mv_base/_prd_base/_sal_base)를 안 거치는 **유일한 우회 경로**다.
+        #   잠정 일마감이 낡았는데 그대로 SUM 하면 **조용히 틀린 금액**이 화면에 뜬다.
+        #   ⟹ 마감 엔진과 **같은 공용 판정**(close._fp_stale)을 써서 낡은 일마감은 건너뛰고
+        #      그 다음 최신 일마감으로 내려간다. 다 낡았으면 기초(월마감)를 쓴다.
+        #   (판정을 여기서 따로 짜면 또 갈린다 — §0-★★ "같은 규칙은 한 곳에서")
+        from routers.close import _fp_stale
+        _lcur.execute("""SELECT TOP 5 period FROM nx.period_close
+            WHERE domain=? AND ptype='D' AND close_flag=1 AND period<=? ORDER BY period DESC""", dom, d6)
+        e = 0.0
+        for (_p,) in _lcur.fetchall():
+            if _fp_stale(_lcur, dom, 'D', _p):
+                continue
+            _lcur.execute("""SELECT ISNULL(SUM(stock_amt),0) FROM nx.stock_snapshot
+                WHERE domain=? AND ptype='D' AND period=?""", dom, _p)
+            e = float(_lcur.fetchone()[0] or 0)
+            break
         return round(b), round(e if e else b)
     try: base_m, cur_m = _snapsum('MAT')
     except Exception: pass
@@ -817,10 +831,10 @@ def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q="", src="nx")
  UNION ALL SELECT UPPER(a.item_code), a.move_ymd, 0,0,0, CASE WHEN a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}' THEN a.move_qty ELSE 0 END,'창고재고입고',ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=CASE WHEN a.to_cust_code='{sc}' THEN a.fr_cust_code ELSE a.to_cust_code END),''),'','',CONVERT(varchar(19),a.insert_datetime,120) FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MOVE a WHERE a.move_ymd>='{y01}' AND a.move_ymd<='{y99}' AND a.move_qty<>0 AND a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}'{MFitem}
  UNION ALL SELECT UPPER(a.item_code), a.move_ymd, 0,0,0, CASE WHEN a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}' THEN a.move_qty*-1 ELSE 0 END,'창고재고출고',ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=CASE WHEN a.to_cust_code='{sc}' THEN a.fr_cust_code ELSE a.to_cust_code END),''),'','',CONVERT(varchar(19),a.insert_datetime,120) FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MOVE a WHERE a.move_ymd>='{y01}' AND a.move_ymd<='{y99}' AND a.move_qty<>0 AND a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}'{MFitem}
  UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty*-1,0,0,
-   CASE a.maint_tag WHEN '1' THEN '불량' WHEN '4' THEN '생산사용'+IIF(a.maint_qty>0,'취소','') WHEN '5' THEN '협력업체판매' WHEN '6' THEN '일반간판출하' WHEN '8' THEN '라인무상공급' WHEN 'A' THEN '개발불출' WHEN 'B' THEN IIF(a.out_wh_gubun='1','생산창고출고','영업창고출고') WHEN 'J' THEN '출하'+IIF(a.maint_qty>0,'취소','') ELSE '' END,
+   CASE a.maint_tag WHEN '1' THEN '불량' WHEN '4' THEN '생산사용'+IIF(a.maint_qty>0,'취소','') WHEN '5' THEN '협력업체판매' WHEN '6' THEN '일반간판출하' WHEN '8' THEN '라인무상공급' WHEN 'A' THEN '개발불출' WHEN 'B' THEN IIF(a.out_wh_gubun='1','생산창고출고','영업창고출고') WHEN 'J' THEN '출하'+IIF(a.maint_qty>0,'취소','') WHEN 'U' THEN '자재반품' ELSE '' END,
    ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=a.cust_code AND a.cust_code<>'{sc}'),''), a.work_order,
    ISNULL(a.item_code,''), CONVERT(varchar(19),a.insert_datetime,120)
-  FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag IN ('1','4','5','6','8','A','B','J') AND a.maint_qty<>0 AND {W}{MFmat}
+  FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag IN ('1','4','5','6','8','A','B','J','U') AND a.maint_qty<>0 AND {W}{MFmat}
  UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty,0,0,'도입-판매',{CUST},a.work_order,ISNULL(a.item_code,''),CONVERT(varchar(19),a.insert_datetime,120) FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint_c a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_qty<>0 AND a.wh_cust_code='{sc}' AND a.part_code='{pw}' AND a.division='Q'{MFmat}
 """
     BF = f"""
@@ -831,7 +845,7 @@ def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q="", src="nx")
  UNION ALL SELECT UPPER(a.mat_code), a.cut_qty FROM (SELECT * FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS)) a WHERE a.cut_ymd>'{pv99}' AND a.cut_ymd<'{y01}' AND {W}{MFmat}
  UNION ALL SELECT UPPER(a.mat_code), a.maint_qty FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag='2' AND {W}{MFmat}
  UNION ALL SELECT UPPER(a.item_code), (CASE WHEN a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}' THEN a.move_qty*-1 ELSE 0 END)+(CASE WHEN a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}' THEN a.move_qty ELSE 0 END) FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MOVE a WHERE a.move_ymd>'{pv99}' AND a.move_ymd<'{y01}' AND ('{sc}' IN (a.fr_cust_code,a.to_cust_code)) AND ('{pw}' IN (a.fr_gagong_proc_code,a.to_gagong_proc_code)){MFitem}
- UNION ALL SELECT UPPER(a.mat_code), a.maint_qty FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag IN ('1','4','5','6','8','A','B','J') AND {W}{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), a.maint_qty FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag IN ('1','4','5','6','8','A','B','J','U') AND {W}{MFmat}
 """
     _c1, moves = _rows(f"SELECT mat, ymd, inq i, outq o, etc e, mv, div, cust, ISNULL(wo,'') wo, ISNULL(itm,'') itm, ISNULL(wt,'') wt FROM ({LINES}) x")
     _c2, bfrows = _rows(f"SELECT mat, SUM(sq) bf FROM ({BF}) b GROUP BY mat")

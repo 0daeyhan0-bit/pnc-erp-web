@@ -208,24 +208,28 @@ def _lock_msg(cur, ymd, domain="MAT"):
        (비발생형 — 호출측이 return/raise 결정)
 
        판정 순서 (정본 = nx.period_close, 마감관리 화면이 기록):
-         ① 일마감  nx.period_close(domain, 'D', YYMMDD)   ← 그 날이 잠겼는가
-         ② 월마감  nx.period_close(domain, 'M', YYMM)     ← 일마감 ⊂ 월마감
-         ③ 하위호환 nx.stock_close(ym)                     ← 구 전역 월잠금(기존 동작 보존)
+         ① 월마감  nx.period_close(domain, 'M', YYMM)     ← ★유일한 확정·잠금
+         ② 하위호환 nx.stock_close(ym)                     ← 구 전역 월잠금(기존 동작 보존)
+
+       ★2026-09-08 재설계 — **일마감은 잠그지 않는다**(CLOSE_REDESIGN §3·§5).
+         전월(M) 마감은 익월 10일에 확정하는데, 그때까지 단가협상·이월정리·반품이 계속 M월로
+         들어온다. 일마감이 날짜를 잠그면 그 조정을 넣을 **열린 날이 없어진다**(실제 업무와 충돌).
+         ⟹ 일마감 = 잠정 스냅샷(참고·언제든 refresh) · 월마감 = 유일한 확정·잠금.
+         nx.period_close 의 ptype='D' close_flag=1 은 이제 **"그날 스냅샷이 있다"** 는 뜻이지
+         잠금이 아니다(수불장·마감 엔진 _mv_base 가 기초로 쓴다 — 그 용도는 그대로).
+         ★이미 월마감된 과거 달은 여전히 잠긴다(규칙B 불변).
        domain = MAT 자재 / PRD 생산 / SAL 영업. 미지정이면 MAT.
-       정본 = _schema/STOCK_GATING_CLOSE_LOCK_RULES.md 규칙B · nextgen-erp-close-settlement(일마감⊂월마감)."""
+       정본 = _schema/CLOSE_REDESIGN.md · _schema/STOCK_GATING_CLOSE_LOCK_RULES.md 규칙B."""
     ymd = str(ymd or "").strip()
     if len(ymd) < 6:
         return None
     d = str(domain or "MAT").strip().upper() or "MAT"
     ym = _ym(ymd)
     try:
-        cur.execute("""SELECT ptype FROM nx.period_close
-                       WHERE domain=? AND close_flag=1 AND ((ptype='D' AND period=?) OR (ptype='M' AND period=?))
-                       ORDER BY ptype""", d, ymd[:6], ym)
-        r = cur.fetchone()
-        if r:
-            return (f"{ymd[:6]} 일마감된 일자입니다 — 생성/수정/삭제 불가" if r[0] == "D"
-                    else f"{ym} 마감된 월입니다 — 생성/수정/삭제 불가")
+        cur.execute("""SELECT period FROM nx.period_close
+                       WHERE domain=? AND close_flag=1 AND ptype='M' AND period=?""", d, ym)
+        if cur.fetchone():
+            return f"{ym} 마감된 월입니다 — 생성/수정/삭제 불가"
     except Exception:
         pass          # period_close 미생성 환경(구 배포본) → 하위호환 경로로
     # ③ 하위호환 = 구 전역 월잠금. ★_closed() 를 부르면 안 된다 —
