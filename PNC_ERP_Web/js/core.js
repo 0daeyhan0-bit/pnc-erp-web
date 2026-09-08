@@ -1417,8 +1417,10 @@ function openMatEditPopup(opt){
   let idx=Math.max(0,opt.index|0), busy=false, master=null;
   const pad=n=>String(n).padStart(2,'0');
   const y2d=y=>{y=''+(y||'');return y.length>=6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';};
+  // ★'U' = 자재반품(미러 1글자 태그). 화면·원장은 'RT', 미러(PU_T_STOCK_MAINT)는 'U'.
+  //   둘 다 매핑해 둬야 어느 소스로 조회해도 '반품'으로 보인다(2026-09-08).
   const TAGN={'9':'개별입고','S':'세트입고','C':'가공입고','G':'축관입고','H':'5팀입고',
-              'RT':'반품','2':'장부수정','4':'생산사용','5':'협력사 매출출고'};
+              'RT':'반품','U':'반품','2':'장부수정','4':'생산사용','5':'협력사 매출출고'};
   let f={};                                            // 편집중 값
   const cur=()=>list[idx]||{};
   const load=()=>{const r=cur();

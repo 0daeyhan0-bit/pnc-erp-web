@@ -79,3 +79,28 @@ if ($fails) {
   Write-Host "  ★조치 필요 $($fails.Count)건:"
   $fails | ForEach-Object { Write-Host "    $($_.Line.Trim())" }
 }
+
+# ── 4-b. ★HTTP 수불장·마감 API ────────────────────────────────
+#   아래 5·6 은 엔진을 in-process 로 직접 부른다 — 계산은 잡지만 라우터·인증·
+#   응답형태·캐시는 안 지난다. 화면이 실제로 부르는 경로로도 한 번 통과시킨다.
+Write-Host ""
+Write-Host "── HTTP 수불장·마감 API (자재·생산·영업 + 반품 end-to-end) ──"
+& python _migration/flow_scenarios.py --port $Port --only "[HTTP]" 2>&1 | Tee-Object -FilePath $out -Append
+
+# ── 5. ★수불장 부호 전수검증 (엔진 레벨) ──────────────────────
+#   flow TestBed 는 '전표가 3곳에 기록되는가'를 본다. 그것만으로는
+#   **수불장 엔진이 그 전표를 어느 방향으로 세는가**를 못 잡는다
+#   (2026-09-08 자재반품이 재고를 +로 늘리던 결함이 그래서 안 잡혔다).
+#   ⟹ 3부서 × 입고/출고/반품/조정 을 주입→측정→롤백으로 전수 검증한다.
+Write-Host ""
+Write-Host "── 수불장 부호 전수검증 (자재·생산·영업 × 입고/출고/반품) ──"
+& python _schema/ledger_signs_verify.py 2>&1 | Tee-Object -FilePath $out -Append
+if ($LASTEXITCODE -ne 0) { Write-Host "  ★수불장 부호검증 FAIL — 위 목록 확인" }
+
+# ── 6. ★잠정 스냅샷 stale 방지 (기초가 낡으면 안 쓰는가) ──────
+#   일마감이 '잠정'이 된 뒤의 유일한 위험 = 스냅샷 일자 이전에 전표가 나중에 들어오는 것.
+#   지문이 안 맞으면 그 스냅샷을 기초로 **쓰지 않아야** 한다(표시만으론 부족).
+Write-Host ""
+Write-Host "── 잠정 스냅샷 stale 방지 (자재·생산·영업) ──"
+& python _schema/snapshot_stale_verify.py 2>&1 | Tee-Object -FilePath $out -Append
+if ($LASTEXITCODE -ne 0) { Write-Host "  ★stale 방지 FAIL — 위 목록 확인" }

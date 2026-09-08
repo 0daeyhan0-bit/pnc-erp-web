@@ -54,9 +54,22 @@ FIXTURES = [
                 ORDER BY 2 DESC""",
      lambda ctx, r: ctx.update(mat=str(r[0]), avail=float(r[1]))),
 
+    # ★2026-09-08 재설계(CLOSE_REDESIGN §3): 잠그는 것은 **월마감뿐**이다.
+    #   종전 픽스처는 ORDER BY period DESC 라 최신 '일마감'(260904)을 집었는데, 이제 그 날은
+    #   잠기지 않으므로 잠금 케이스가 통째로 헛돈다. ⟹ 확정(월)만 고른다.
     ("closed", """SELECT TOP 1 ptype, period FROM nx.period_close
-                   WHERE domain='MAT' AND close_flag=1 ORDER BY period DESC""",
+                   WHERE domain='MAT' AND close_flag=1 AND ptype='M' ORDER BY period DESC""",
      lambda ctx, r: ctx.update(closed_ptype=str(r[0]), closed_period=str(r[1]))),
+
+    # ★잠정 일마감 일자 = 일마감은 됐으나 그 달이 아직 월마감 안 된 날.
+    #   여기 쓰기가 **통과해야** 정상이다(조정을 넣을 열린 날 — CLOSE_REDESIGN §2·§5).
+    ("provday", """SELECT TOP 1 a.period FROM nx.period_close a
+                    WHERE a.domain='MAT' AND a.ptype='D' AND a.close_flag=1
+                      AND NOT EXISTS (SELECT 1 FROM nx.period_close m
+                                       WHERE m.domain='MAT' AND m.ptype='M' AND m.close_flag=1
+                                         AND m.period = LEFT(a.period,4))
+                    ORDER BY a.period DESC""",
+     lambda ctx, r: ctx.update(provday=str(r[0]))),
 
     ("kit", """SELECT TOP 1 UPPER(LTRIM(RTRIM(ITEM_CODE))), GAGONG_PROC_CODE, WORK_ORDER
                  FROM nx.stock_ledger WHERE STOCK_POINT='RDY' AND GAGONG_PROC_CODE IS NOT NULL
@@ -196,10 +209,28 @@ CASES = [
          keyword="이미 마감", skip_if=lambda ctx: not ctx.get("closed_period"),
          body=lambda ctx: {"domain": "MAT", "ptype": ctx["closed_ptype"],
                            "period": ctx["closed_period"], "user": "admin"}),
-    dict(kind="R", name="마감 해제 권한 게이트 (조회전용 사용자)", method="POST", path="/api/close/cancel",
-         keyword="권한이 없습니다", skip_if=lambda ctx: not ctx.get("closed_period"),
+    # ★월마감 해제 = 수퍼관리자(시스템관리자)만 → 문구가 "권한이 없습니다"가 아니다.
+    #   5c07288(_assert_reopen) 이후 이 케이스가 문구 불일치로 헛통과하고 있었다.
+    dict(kind="R", name="월마감 해제 권한 게이트 (조회전용 사용자)", method="POST", path="/api/close/cancel",
+         keyword="수퍼관리자", skip_if=lambda ctx: not ctx.get("closed_period"),
          body=lambda ctx: {"domain": "MAT", "ptype": ctx["closed_ptype"],
                            "period": ctx["closed_period"], "user": "kdev"}),
+
+    # ★역(逆)케이스 — 잠정 일마감 일자는 **막히면 안 된다**.
+    #   막는 것만 검사하면 "다 막아버리는" 회귀를 못 잡는다. 실제 원장 기록까지 본다.
+    dict(kind="F", name="자재입고 — 잠정 일마감 일자는 열려 있다", method="POST", path="/api/stock/save",
+         probe="원장MAT", delta=+7, mirror=True,
+         skip_if=lambda ctx: not ctx.get("provday"),
+         scope_ymd=lambda ctx: ctx["provday"],   # ★프로브 관측일자를 그 날로(기본=오늘이라 안 보인다)
+         body=lambda ctx: _save("receipt", 7, ymd=ctx["provday"])(ctx)),
+
+    # ★영업 — 제품재고조정(웹). 이 전표가 영업 수불장·마감에 잡히는지가 핵심이라
+    #   전용 프로브(제품조정)로 기록 자체를 확인한다. 부호·수불장 반영은
+    #   _schema/ledger_signs_verify.py 가 엔진 레벨로 전수 검증한다(3부서 × 입출고/반품).
+    dict(kind="F", name="제품재고조정 (prodstockadj/save)", method="POST", path="/api/prodstockadj/save",
+         probe="제품조정", delta=+13, skip_if=lambda ctx: not ctx.get("asy_item"),
+         body=lambda ctx: {"maint_ymd": YMD, "item_code": ctx["asy_item"], "maint_tag": "2",
+                           "maint_qty": 13, "maint_cost": 0, "user": "flowverify"}),
 
     # ══ [R] 규칙 : 생산실적 재고 게이트 (예외 없음) ═══════════════════
     dict(kind="R", name="백플러시 — 자재부족 차단", method="POST", path="/api/backflush/post",
@@ -899,6 +930,116 @@ def _same_as(key, *fields):
     return chk
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  ★HTTP 수불장·마감 API — 엔진이 아니라 **실제 엔드포인트**로 확인 (2026-09-08)
+#  왜 따로 두나: _schema/ledger_signs_verify.py · snapshot_stale_verify.py 는 엔진을
+#  **in-process 로 직접** 부른다. 계산은 정확히 잡지만 라우터 결선·인증·응답형태·캐시는
+#  안 지난다. 여기서 HTTP 로 한 번 더 통과시켜 그 층까지 덮는다.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _ck_status(res, ctx):
+    """close/status 가 잠정/확정을 구분해 노출하는가(§5·§7)."""
+    rows = res.get("rows") or []
+    if not rows:
+        return False, "rows 없음"
+    if "firm" not in rows[0] or "stale" not in rows[0]:
+        return False, f"firm/stale 필드 없음 — {list(rows[0].keys())[:8]}"
+    bad = [r for r in rows if (r["ptype"] == "M") != bool(r["firm"])]
+    st = sum(1 for r in rows if r.get("stale"))
+    return (not bad), (f"일={len([r for r in rows if not r['firm']])} 잠정 · "
+                       f"월={len([r for r in rows if r['firm']])} 확정 · 갱신필요 {st}"
+                      if not bad else f"firm 값이 ptype 과 안 맞음: {[(r['domain'],r['ptype'],r['firm']) for r in bad]}")
+
+
+def _ck_ledger(res, ctx):
+    """수불장이 200 으로 오고 불변식이 깨지지 않았는가."""
+    n = res.get("count")
+    br = res.get("invariant_breaks")
+    nb = len(br) if isinstance(br, list) else int(br or 0)
+    tot = (res.get("totals") or {}).get("sq")
+    if not n:
+        return False, f"행 0건 — 기초 {res.get('basis')}"
+    return (nb == 0), (f"{n:,}행 · 기말수량 {tot:,.0f} · 불변식위반 {nb} · {res.get('basis')}")
+
+
+def _keep_sq(key):
+    def chk(res, ctx):
+        v = (res.get("totals") or {}).get("sq")
+        ctx[key] = v
+        return (v is not None), f"기말수량 {v:,.0f} (기준 확보)"
+    return chk
+
+
+def _sq_moved(key, expect):
+    """기준값 대비 기말수량이 정확히 expect 만큼 움직였는가. ★반품이 늘어나던 결함을 HTTP 로 못박는다."""
+    def chk(res, ctx):
+        v = (res.get("totals") or {}).get("sq")
+        b = ctx.get(key)
+        if v is None or b is None:
+            return False, f"비교 불가 (기준 {b} · 이번 {v})"
+        d = v - b
+        ok = abs(d - expect) < 0.001
+        return ok, (f"기말수량 {b:,.0f} → {v:,.0f} (Δ{d:+,.0f}, 기대 {expect:+g})"
+                    + ("" if ok else "  ★방향/크기가 다르다"))
+    return chk
+
+
+def _ck_carry(res, ctx):
+    """이월(협력사 보관) 별도 표현이 살아 있는가.
+       대표 정의: 불출했지만 협력사와 협의해 이월하면 **당월 매출이 아니라 협력사에 있는 우리 재고**.
+       ⟹ 기말(창고)과 **섞이면 안 되고**, 창고 이동이 0 이어도 **숨기면 안 된다**."""
+    car = res.get("carry")
+    if not isinstance(car, dict):
+        return False, "carry 요약이 없다 — 이월 별도 표현이 빠졌다"
+    rows = res.get("rows") or []
+    ssum = round(sum(float(r.get("cq") or 0) for r in rows), 2)
+    ok = abs(ssum - float(car.get("qty") or 0)) < 0.01
+    # 창고 이동·잔량이 전부 0 인데 이월만 있는 행 = 전량 협력사 보관. 이게 안 보이면 회귀다.
+    onlyc = [r for r in rows if float(r.get("cq") or 0)
+             and not any(abs(float(r.get(k) or 0)) > 1e-9 for k in ("bq", "iq", "oq", "tq", "sq"))]
+    # ★기말재고 = 창고 + 이월 이어야 한다(대표 확정) — 합계에 반영 안 되면 회귀.
+    t = res.get('totals') or {}
+    def _f(k): return float(t.get(k) or 0)
+    f_ok = (abs(_f('fq') - (_f('sq') + _f('cq'))) < 0.01
+            and abs(_f('fa') - (_f('sa') + _f('ca'))) < 0.01)
+    bad = [r for r in rows
+           if abs(float(r.get('fq') or 0) - (float(r.get('sq') or 0) + float(r.get('cq') or 0))) > 0.01]
+    note = (f"이월 {car.get('items')}품목 · 수량 {_f('cq'):,.0f} · 금액 {_f('ca'):,.0f}원(원가) · "
+            f"전량이월 행 {len(onlyc)} · 행합{'일치' if ok else '★불일치'} · "
+            f"기말재고 {_f('fq'):,.0f} = 창고 {_f('sq'):,.0f} + 이월 {_f('cq'):,.0f} "
+            f"{'반영' if (f_ok and not bad) else '★미반영(행불일치 ' + str(len(bad)) + ')'}")
+    return (ok and f_ok and not bad), note
+
+
+LEDGER_HTTP_CASES = [
+    # ★이월 = 매출 아님·협력사 보관 우리 재고. 기말(창고)과 별도 컬럼으로 나와야 한다.
+    #   2608 을 고정 시료로 쓴다(이월이 실제로 있는 달). 수치가 바뀌어도 구조·정합은 유지돼야 한다.
+    dict(kind="S", name="[HTTP] 이월재고(협력사 보관) 별도 표현", method="GET", expect=200, check=_ck_carry,
+         path="/api/close/ledger?domain=MAT&d_from=260801&d_to=260831&nocache=1"),
+    dict(kind="S", name="[HTTP] 마감현황 — 일=잠정/월=확정 구분", method="GET",
+         path="/api/close/status", expect=200, check=_ck_status),
+    dict(kind="S", name="[HTTP] 자재 수불장", method="GET", expect=200, check=_ck_ledger,
+         path=lambda ctx: f"/api/close/ledger?domain=MAT&d_to={YMD}&nocache=1"),
+    dict(kind="S", name="[HTTP] 생산 수불장", method="GET", expect=200, check=_ck_ledger,
+         path=lambda ctx: f"/api/close/ledger?domain=PRD&d_to={YMD}&nocache=1"),
+    dict(kind="S", name="[HTTP] 영업 수불장", method="GET", expect=200, check=_ck_ledger,
+         path=lambda ctx: f"/api/close/ledger?domain=SAL&d_to={YMD}&nocache=1"),
+
+    # ★반품 end-to-end (HTTP) — ①기말 확보 → ②반품 등록 → ③수불장이 정확히 그만큼 줄었나.
+    #   2026-09-08 결함: 반품이 tag T 로 들어가 부호가 반전돼 재고가 **늘었다**.
+    #   엔진 검증(ledger_signs_verify)에 더해 화면이 실제로 부르는 경로로도 못박는다.
+    dict(kind="S", name="[HTTP] 반품① 자재 수불장 기말 확보", method="GET", expect=200,
+         check=_keep_sq("rt_sq"),
+         path=lambda ctx: f"/api/close/ledger?domain=MAT&d_to={YMD}&nocache=1"),
+    dict(kind="F", name="[HTTP] 반품② 자재반품 9 등록", method="POST", path="/api/stock/save",
+         probe="원장MAT", delta=-9, mirror=True,
+         body=_save("return", 9)),
+    dict(kind="S", name="[HTTP] 반품③ ★수불장이 9 만큼 줄었나", method="GET", expect=200,
+         check=_sq_moved("rt_sq", -9),
+         path=lambda ctx: f"/api/close/ledger?domain=MAT&d_to={YMD}&nocache=1"),
+]
+
+
 IDEM_CASES = [
     # ── ① 캐시 오염 재발 방지 — 짧은 기간을 먼저 조회해도 전체 결과가 안 바뀌어야 한다 ──
     #    수정 전에는 '월초 as-of 단가'가 월 키 캐시에 박혀 이후 조회가 전부 그 단가로 평가됐다.
@@ -959,6 +1100,7 @@ def _cmp_screen(res, ctx, key, fld, only_ledger=False):
 
 
 CASES += IDEM_CASES
+CASES += LEDGER_HTTP_CASES   # ★HTTP 수불장·마감 API (엔진 하네스가 못 덮는 라우터·인증·응답형태 층)
 
 
 # ══════════════════════════════════════════════════════════════════════
