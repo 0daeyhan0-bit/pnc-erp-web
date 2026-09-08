@@ -1483,7 +1483,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                     " ELSE (SELECT work_desc FROM {SCH}.PR_M_WORK"
                     " WHERE work_code=c.WORK_CODE AND c.WORK_CODE<>'P1') END),"
                     " (SELECT TOP 1 B1.GAGONG_PROC_DESC"
-                    " FROM {SCH}.PR_M_ITEM_PROC_GAGONG A1"
+                    " FROM {SCH}.prodinfo_proc A1"  # ★R01 클린(미러 직독 은퇴 260909·SCH 항상 nx)
                     " JOIN {SCH}.PR_M_PROC_GAGONG B1 ON A1.GAGONG_PROC_CODE=B1.GAGONG_PROC_CODE"
                     " WHERE A1.ITEM_CODE=" + itemcol + " ORDER BY A1.PROC_SEQ ASC))")
         # 계획수량식(레거시 ceiling)

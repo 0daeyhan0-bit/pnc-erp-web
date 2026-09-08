@@ -47,6 +47,15 @@ STEP6(soyo.py:565 / planrev.py:180) plan_part_gagong 를 **미러 base vs prodin
 - STEP6 = 위 §3 (사라짐0·새행=AJR73965506 교정) 재확인.
 - 컴파일·openapi 엔드포인트수 유지.
 
+## 5-R. 검증 결과 (2026-09-09 · 완료)
+- **seed**: `_migration/seed_prodinfo_proc_r01.py --commit` → AJR30133611 1행 보충. prodinfo_proc 9,903행/4,190품목 · **미러대비 잔여미포함 0(⊇미러)**.
+- **STEP6 계획(샌드박스 재실행 diff)**: 사라지는 계획공정 **0** · 새로 생김 **2**=AJR73965506(S5·S5-2 웹등록 교정). 그 외 byte 동일.
+- **집계 read diff(품목별 SUM TOT_ST 미러 vs 클린)**: 차이 = **웹추가 3품목만**(AJR73364009=183.46·AJR73364010=57.37·AJR73965506=402.08, 모두 미러=None). 예상외 변화 0.
+- **기능 스모크**: backflush(COUNT·완성공정)·gagong(SUM)·prodsheet(MAX PROC_SEQ)·item(EXISTS) 전부 prodinfo_proc에서 정상.
+- **repoint 전수(operational read 0)**: backflush(128·214)·gagong(271·741·750)·item(91)·kitting(126·673)·prodsheet(11)·ready(413)·**STEP6 soyo:569·planrev:184**·sales(1486)·salesplan(_REPOINT). 폴백제거: prodinfo(93)·sourcing(2818)·bom(_copy_prodinfo else). **전 백엔드+_harness FROM/JOIN 미러 read=0·쓰기=0**. 컴파일 통과.
+- 커넥션: _conn/_nx 양쪽 DB=PARTNER_ERP_TEST3·nx.prodinfo_proc 해석 확인(스왑 커넥션-안전).
+- 잔존 미러 문자열 = 주석 + salesplan 런타임 치환 템플릿(nx모드→prodinfo_proc) + src=live 대조경로(의도된 dev 대조·기본경로 아님).
+
 ## 6. 컷오버 정확성
 컷오버 시 미러 PR_M_ITEM_PROC_GAGONG 동결되어도 **읽는 코드가 없음** → 옛값 stale 사고 원천 차단.
 등록·수정은 prodinfo 화면이 `nx.prodinfo_proc`(R01)·`nx.route_proc_gagong`(R02+)에 직접. 단일 소스.

@@ -89,9 +89,8 @@ def _pi_proc_rows(cur, item, use_nx, route_id=0):
         _ensure_route_proc(cur)
         src = "nx.route_proc_gagong a"; C = (lambda c: c.lower())
     else:
-        src = ("nx.prodinfo_proc a" if use_nx
-               else "PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG a")
-        C = (lambda c: c.lower()) if use_nx else (lambda c: c)  # nx는 소문자 컬럼
+        src = "nx.prodinfo_proc a"   # ★R01 클린 단일(미러 PR_M_ITEM_PROC_GAGONG 폴백 은퇴 260909·§1-9-1·클린⊇미러)
+        C = (lambda c: c.lower())
     cur.execute(f"""
         SELECT a.{C('PROC_SEQ')}, ISNULL(a.{C('WORK_CODE')},'') , ISNULL(a.{C('GAGONG_PROC_CODE')},''),
                ISNULL(a.{C('S_WORK_CODE')},0), ISNULL(a.{C('MACH_CODE')},''), ISNULL(a.{C('WORK_QTY')},0),

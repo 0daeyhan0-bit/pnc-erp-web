@@ -2805,7 +2805,7 @@ def _r01_new_incomplete(cur, item):
 
 def _prodinfo_missing(cur, items, route_id=0):
     """생산정보(생산공정순서·ST) 없는 품목 반환 — 제작/자체품 승인 게이트용.
-       소스 3단: route_proc_gagong(route스코프) → nx.prodinfo_proc(품목) → PR_M_ITEM_PROC_GAGONG(레거시 마스터)."""
+       소스 2단: route_proc_gagong(route스코프·R02+) → nx.prodinfo_proc(R01 클린). 미러 3단 은퇴 260909(§1-9-1)."""
     items = [str(i).strip() for i in dict.fromkeys(items) if str(i).strip()]
     if not items: return []
     has_rp = int(cur.execute("SELECT CASE WHEN OBJECT_ID('nx.route_proc_gagong') IS NULL THEN 0 ELSE 1 END").fetchone()[0] or 0)
@@ -2815,7 +2815,7 @@ def _prodinfo_missing(cur, items, route_id=0):
         ok = False
         if route_id and has_rp and int(cur.execute("SELECT COUNT(*) FROM nx.route_proc_gagong WHERE route_id=? AND item_code=?", route_id, it).fetchone()[0] or 0): ok = True
         if not ok and has_pp and int(cur.execute("SELECT COUNT(*) FROM nx.prodinfo_proc WHERE item_code=?", it).fetchone()[0] or 0): ok = True
-        if not ok and int(cur.execute("SELECT COUNT(*) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG WHERE item_code=?", it).fetchone()[0] or 0): ok = True
+        # ★2026-09-09 미러 PR_M_ITEM_PROC_GAGONG 3단 폴백 은퇴(§1-9-1·prodinfo_proc⊇미러·ITEM_PROC_GAGONG_CLEAN_260909)
         if not ok: miss.append(it)
     return miss
 
