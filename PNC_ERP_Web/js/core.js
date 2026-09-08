@@ -558,6 +558,9 @@ function openTab(id,nm){
     const t=document.createElement('div');t.className='tab';t.dataset.id=id;
     t.innerHTML=`<span>${nm}</span>`+(id!=='dash'?`<span class="x">✖</span>`:'');
     t.onclick=(ev)=>{if(ev.target.classList.contains('x')){closeTab(id);ev.stopPropagation();}else activate(id);};
+    t.oncontextmenu=(ev)=>{ev.preventDefault();tabCtxMenu(ev,id);};
+    // ★가운데 버튼(휠 클릭) = 닫기 — 브라우저 탭과 동일 동작.
+    t.onauxclick=(ev)=>{if(ev.button===1&&id!=='dash'){ev.preventDefault();closeTab(id);}};
     $tabbar.appendChild(t);tabs[id].el=t;
     // ★height:100% 를 쓰는 화면(대부분의 조회화면)이 정상 작동하려면 이 컨테이너부터
     //   확정된 높이를 가져야 한다. display:block 인 채로는 자식의 height:100% 가
@@ -578,6 +581,44 @@ function activate(id){
 function closeTab(id){
   tabs[id].el.remove();tabs[id].pg.remove();delete tabs[id];
   const rest=Object.keys(tabs);activate(rest[rest.length-1]||'dash');
+}
+/* ★탭 일괄닫기(2026-09-08 사용자 요청) — 탭이 10개 넘게 쌓이면 ✖ 를 하나씩 누르기가 번거롭다.
+     대시보드('dash')는 홈이라 항상 남긴다(탭 생성 시에도 ✖ 가 없다).
+     ※닫는 순서 주의 — Object.keys 를 그대로 돌면서 closeTab 하면 그때마다 activate 가 불려
+       화면이 여러 번 깜빡이고 마지막 활성탭이 엉뚱해진다. 그래서 대상만 먼저 목록으로 뽑아
+       DOM 만 제거하고, activate 는 **맨 끝에 한 번**만 부른다. */
+function closeTabsBulk(keepId){
+  const kill=Object.keys(tabs).filter(k=>k!=='dash'&&k!==keepId);
+  if(!kill.length)return 0;
+  kill.forEach(k=>{tabs[k].el.remove();tabs[k].pg.remove();delete tabs[k];});
+  activate(tabs[keepId]?keepId:'dash');
+  return kill.length;
+}
+function tabCtxMenu(ev,id){
+  const old=document.getElementById('tab-ctxmenu');if(old)old.remove();
+  const others=Object.keys(tabs).filter(k=>k!=='dash'&&k!==id).length;
+  const closable=Object.keys(tabs).filter(k=>k!=='dash').length;
+  const mn=document.createElement('div');mn.id='tab-ctxmenu';
+  mn.style.cssText=`position:fixed;left:${ev.clientX}px;top:${ev.clientY}px;z-index:99999;background:#fff;`
+    +`border:1px solid #b8c4d4;border-radius:6px;box-shadow:0 3px 10px rgba(0,0,0,.25);font-size:12px;min-width:170px;overflow:hidden`;
+  const row=(a,label,on,extra)=>`<div class="tcm" data-a="${a}" style="padding:7px 12px;`
+    +`cursor:${on?'pointer':'not-allowed'};color:${on?'#334':'#c0c8d2'};${extra||''}">${label}</div>`;
+  mn.innerHTML=`<div style="padding:5px 12px;background:#f2f6fb;color:#456;border-bottom:1px solid #e3e9f0">${esc(tabs[id].nm)}</div>`
+    +row('close','닫기',id!=='dash')
+    +row('others',`다른 탭 모두 닫기${others?' ('+others+')':''}`,others>0,'border-top:1px solid #eee')
+    +row('all',`모든 탭 닫기${closable?' ('+closable+')':''}`,closable>0);
+  document.body.appendChild(mn);
+  // ★메뉴 밖 클릭으로 닫기 — mousedown 이 click 보다 먼저 오므로 실행도 mousedown 으로 받는다.
+  //   (click 으로 하면 바깥 mousedown 핸들러가 먼저 메뉴를 지워 항목이 안 눌린다 — 410 에서 겪은 함정)
+  mn.querySelectorAll('.tcm').forEach(el=>el.onmousedown=(e)=>{
+    e.preventDefault();e.stopPropagation();
+    const a=el.dataset.a;mn.remove();
+    if(a==='close'){if(id!=='dash')closeTab(id);return;}
+    if(a==='others'){closeTabsBulk(id);return;}
+    if(a==='all'){closeTabsBulk(null);}
+  });
+  setTimeout(()=>document.addEventListener('mousedown',()=>{
+    const x=document.getElementById('tab-ctxmenu');if(x)x.remove();},{once:true}),0);
 }
 
 /* ===== ★전역 검색칸 autocomplete (UI규칙17) — 모든 화면 공통 자동적용 =====
@@ -3144,7 +3185,16 @@ function wrCrud(host, cfg){
     for(const f of cfg.form){if(_req(f)&&!String(st.form[f.k]??'').trim()){alert(f.label+' 은(는) 필수입니다');return;}}
     try{const r=await fetch(`${API}${cfg.saveEp}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg.toBody(st.form))});
       const j=await r.json();
-      if(j.ok){st.msg=(j.mode==='insert'?'✅ 등록완료':'✅ 수정완료')+' (id '+j.id+')';st.form=null;await load();}
+      if(j.ok){
+        st.msg=(j.mode==='insert'?'✅ 등록완료':'✅ 수정완료')+' (id '+j.id+')';
+        // ★저장 직후 훅(2026-09-08) — 신규 등록건은 저장 전엔 id 가 없어 첨부를 못 올린다.
+        //   그래서 폼에서 "골라만 둔" 파일을 여기서(=id 가 생긴 직후) 올린다.
+        //   훅이 실패해도 저장 자체는 이미 끝났으므로 메시지만 덧붙이고 흐름은 그대로 둔다.
+        if(cfg.afterSave){
+          try{ const extra=await cfg.afterSave(j, st.form); if(extra) st.msg+=' · '+extra; }
+          catch(e){ st.msg+=' · ⚠첨부 실패: '+((e&&e.message)||e); }
+        }
+        st.form=null;await load();}
       else alert('저장 실패: '+JSON.stringify(j.errors||j));}
     catch(e){alert('저장 오류: '+e);}};
   const del=async(ids)=>{if(!ids.length){alert('삭제할 행을 체크하세요');return;}

@@ -315,15 +315,36 @@ SCREEN.qcerror=(c)=>{
       toBody:f=>{const b={...f,user:'웹사용자'};Object.keys(b).forEach(k=>{if(k.endsWith('__nm'))delete b[k];});return b;},
       // ★첨부파일 3종(레거시 w_qa_input_025: 첨부파일#1·대책서#1·대책서#2)
       //   파일 실체는 기존 문서저장소(nx.doc + NAS) 재사용, qc_error 는 doc_id 만 보관.
-      //   ※신규건은 id 가 없어 첨부 불가 → 저장 후 다시 열어 첨부하라고 안내한다.
+      //   ※신규건은 저장해야 id 가 생기므로, 폼에서 고른 파일은 QC_PENDING 에 담아뒀다가
+      //     저장 성공 직후 afterSave 에서 올린다(2026-09-08 — "저장할 때 바로 첨부" 요청).
       modalExtra:f=>qcFileBoxHtml(f),
       modalExtraBind:(root,f,reload)=>qcFileBoxBind(root,f,reload),
+      afterSave:(j)=>qcFlushPending(j.id,(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹사용자')),
     }
   });
 };
 
 /* ===== 품질불량 첨부파일 3칸 (모달 확장영역) ===== */
 const QC_SLOTS=[{k:'attach',t:'첨부파일#1'},{k:'plan1',t:'대책서#1'},{k:'plan2',t:'대책서#2'}];
+/* ★신규 등록건의 "저장 시 함께 첨부" 보관함(slot→File).
+     불량건 id 는 저장해야 생기므로, 신규 폼에서 고른 파일은 여기 담아뒀다가
+     저장 성공 직후(qcFlushPending)에 업로드한다. 모달을 새로 열 때마다 비운다. */
+const QC_PENDING=new Map();
+async function qcFlushPending(id,user){
+  if(!QC_PENDING.size)return '';
+  const API=API_BASE; const done=[]; const fail=[];
+  for(const [slot,fl] of [...QC_PENDING.entries()]){
+    try{
+      const fd=new FormData();
+      fd.append('file',fl); fd.append('id',id); fd.append('slot',slot);
+      fd.append('user',user||'웹사용자');
+      const d=await (await fetch(`${API}/api/qc/error/file_upload`,{method:'POST',body:fd})).json();
+      if(d&&d.ok)done.push(fl.name); else fail.push(fl.name+'('+((d&&(d.detail||d.errors))||'실패')+')');
+    }catch(e){fail.push(fl.name+'('+((e&&e.message)||e)+')');}
+  }
+  QC_PENDING.clear();
+  return (done.length?`📎 ${done.length}건 첨부`:'')+(fail.length?` ⚠실패 ${fail.join(', ')}`:'');
+}
 function qcFileBoxHtml(f){
   const rows=QC_SLOTS.map(s=>`
     <tr data-slot="${s.k}">
@@ -339,7 +360,7 @@ function qcFileBoxHtml(f){
   return `<div style="margin-top:10px;border-top:1px solid #e2e8f2;padding-top:8px">
      <div style="font-weight:600;font-size:12px;color:#33507d;margin-bottom:4px">📎 첨부파일
        <span style="font-weight:400;color:#7a8aa0;font-size:11px">— 칸당 파일 1개(다시 올리면 교체) · 파일명 클릭=내려받기</span></div>
-     ${f&&f.id?'':'<div style="color:#c0392b;font-size:11px;margin-bottom:4px">※ 신규 등록건은 먼저 [저장] 한 뒤 다시 열어서 첨부하세요.</div>'}
+     ${f&&f.id?'':'<div style="color:#1c7c3a;font-size:11px;margin-bottom:4px">※ 신규 등록건도 파일을 미리 고르면 <b>[저장]할 때 함께 첨부</b>됩니다.</div>'}
      <table style="border-collapse:collapse;width:100%">${rows}</table>
      <div id="qcf-msg" style="font-size:11px;margin-top:4px"></div></div>`;
 }
@@ -348,7 +369,23 @@ function qcFileBoxBind(root,f,reload){
   const q=s=>root.querySelector(s), qa=s=>[...root.querySelectorAll(s)];
   const msg=(t,ok)=>{const e=q('#qcf-msg');if(e)e.innerHTML=`<span style="color:${ok?'#1c7c3a':'#c0392b'}">${esc(t)}</span>`;};
   const id=f&&f.id;
-  if(!id){qa('.qcf-file').forEach(el=>el.disabled=true);return;}
+  // ★신규(id 없음) — 저장 전이라 업로드 API 를 못 부른다(서버가 불량건 id 를 요구).
+  //   막아두는 대신 **고른 파일을 보관**했다가, 저장 직후 cfg.afterSave 에서 올린다.
+  //   (2026-09-08 사용자 요청 — 종전엔 input 을 disabled 로 막아 "첨부가 안 된다"는 신고가 나왔다)
+  if(!id){
+    QC_PENDING.clear();
+    qa('.qcf-file').forEach(el=>el.onchange=()=>{
+      const fl=el.files&&el.files[0], slot=el.dataset.slot;
+      const cur=q(`.qcf-cur[data-slot="${slot}"]`);
+      if(!fl){QC_PENDING.delete(slot);if(cur)cur.textContent='—';return;}
+      QC_PENDING.set(slot,fl);
+      if(cur)cur.innerHTML=`<span style="color:#1c7c3a">${esc(fl.name)}</span>`
+        +`<span style="color:#7a8aa0"> — 저장 시 첨부</span>`;
+      msg('저장을 누르면 함께 첨부됩니다.',true);
+    });
+    return;
+  }
+  QC_PENDING.clear();   // 기존건 편집 = 즉시 업로드 경로라 보관분 불필요
   const kb=n=>n>=1048576?(n/1048576).toFixed(1)+'MB':Math.max(1,Math.round(n/1024))+'KB';
   const paint=async()=>{
     try{

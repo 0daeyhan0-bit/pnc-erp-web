@@ -781,6 +781,9 @@ SCREEN.prodinfo=(c)=>{
   const loadOpts=async()=>{if(st.opts)return;try{const r=await fetch(`${API}/api/prodinfo/opts`);st.opts=await r.json();}catch(e){st.opts={works:[],parts:[],singles:[],machs:[],jp_methods:{}};}};
   const loadItem=async(it)=>{st.item=it;st.data=null;st.loading=true;draw();
     await loadOpts();
+    // 포장종류 자동완성 후보(1회만) — 코드마스터가 없어 기존 사용값을 제안한다.
+    if(!st.packKinds){try{const rk=await fetch(`${API}/api/prodinfo/pack/kinds`);
+      const jk=await rk.json();st.packKinds=jk.kinds||[];}catch(e){st.packKinds=[];}}
     try{const r=await fetch(`${API}/api/prodinfo/get?item=${encodeURIComponent(it)}&assyall=${st.assyall?1:0}`);
       if(!r.ok){st.msg='로드 실패';st.loading=false;draw();return;}
       st.data=await r.json();st.msg='';}
@@ -907,7 +910,11 @@ SCREEN.prodinfo=(c)=>{
   };
 
   // ---------- 하단 탭 ----------
-  const TABS=[['lob','LOB분석'],['yangsan','양산준비'],['jig','지그정보'],['yield','수율(공정수)'],['proc','생산공정순서']];
+  const TABS=[['lob','LOB분석'],['yangsan','양산준비'],['jig','지그정보'],['yield','수율(공정수)'],
+              ['proc','생산공정순서'],
+              // ★포장·작업자정보(레거시 「품번별추가정보」 w_pr_master_080) — 2026-09-08 신설.
+              //   라벨(제품스티커)·가간판에 인쇄되는 포장종류·포장수량·용접자·검사자.
+              ['pack','포장·작업자정보']];
   const renderTabs=()=>{
     const host=c.querySelector('#pi-tabs');if(!host)return;
     host.innerHTML=`<div style="display:flex;gap:3px;border-bottom:2px solid #dce3ee">${TABS.map(t=>`<button class="btn ${st.tab===t[0]?'':'ghost'}" data-t="${t[0]}" style="border-radius:8px 8px 0 0;${st.tab===t[0]?'background:#1c47a0;color:#fff':''}">${t[1]}</button>`).join('')}</div><div id="pi-tabbody" style="padding-top:8px"></div>`;
@@ -918,6 +925,50 @@ SCREEN.prodinfo=(c)=>{
     else if(st.tab==='yangsan')renderYangsan(body);
     else if(st.tab==='jig')renderJig(body);
     else if(st.tab==='yield')renderYield(body);
+    else if(st.tab==='pack')renderPack(body);
+  };
+
+  /* ---------- 탭: 포장·작업자 (레거시 「품번별추가정보」 w_pr_master_080) ----------
+     포장종류·포장수량·용접자·검사자. 저장 = 클린 nx.item_sub.
+     ★라벨(제품스티커)·가간판이 이 값을 찍는다 — 여기서 고치면 **다음 발행분부터** 반영된다.
+       (이미 발행된 라벨은 발행 시점 이름이 스티커에 박제돼 있어 재출력해도 그대로다.
+        그건 "그때 그 라벨을 다시 뽑는 것"이라 정상이며, 바꾸려면 재발행 팝업에서 직접 입력한다.) */
+  const renderPack=(body)=>{
+    const canEd=ed(), p=(st.data&&st.data.pack)||{};
+    const f=(lbl,id,val,extra='')=>`
+      <tr><th class="lbl" style="width:110px;background:#f2f6fb;text-align:right;padding-right:10px">${lbl}</th>
+          <td style="padding:5px 8px"><input class="inp" id="${id}" value="${esc(val==null?'':val)}"
+              ${canEd?'':'readonly'} ${extra}></td></tr>`;
+    body.innerHTML=`
+     <div class="page-sub" style="margin:0 0 8px">
+       제품스티커(라벨)·가간판에 인쇄되는 정보입니다. 저장하면 <b>다음 발행분부터</b> 반영됩니다.
+       ${canEd?'':'<span style="color:#c0392b">— 조회권한(읽기전용)</span>'}
+     </div>
+     <table class="tbl" style="width:auto;min-width:360px;font-size:12px">
+       <tbody>
+         ${f('포장종류','pi-pk-kind',p.pack_kind||'','list="pi-pk-dl" style="width:190px" placeholder="예: 걸이대차"')}
+         ${f('포장수량','pi-pk-qty',p.pack_qty||0,'type="number" min="0" style="width:110px"')}
+         ${f('용접자','pi-pk-w',p.prod_worker||'','style="width:140px"')}
+         ${f('검사자','pi-pk-i',p.insp_worker||'','style="width:140px"')}
+       </tbody>
+     </table>
+     <datalist id="pi-pk-dl">${(st.packKinds||[]).map(k=>`<option value="${esc(k)}">`).join('')}</datalist>
+     ${canEd?`<div style="margin-top:10px"><button class="btn" id="pi-pk-save"
+         style="background:#1c47a0;color:#fff;padding:5px 18px">저장</button></div>`:''}`;
+    const q=id=>body.querySelector(id);
+    const b=q('#pi-pk-save');
+    if(b)b.onclick=async()=>{
+      const t0=b.textContent; b.disabled=true; b.textContent='저장 중…';
+      try{
+        const j=await post('/api/prodinfo/pack/save',{item:st.item,
+          pack_kind:q('#pi-pk-kind').value.trim(),
+          pack_qty:parseInt(q('#pi-pk-qty').value||'0',10)||0,
+          prod_worker:q('#pi-pk-w').value.trim(),
+          insp_worker:q('#pi-pk-i').value.trim()});
+        if(j.ok){flash('포장·작업자 저장 — 다음 라벨·가간판 발행부터 반영됩니다.');loadItem(st.item);}
+        else{alert('저장 실패: '+(j.detail||''));b.disabled=false;b.textContent=t0;}
+      }catch(e){alert('저장 오류: '+e);b.disabled=false;b.textContent=t0;}
+    };
   };
 
   // ---------- 탭: 생산공정순서 (★핵심 편집) ----------
