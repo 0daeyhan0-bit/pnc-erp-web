@@ -1330,6 +1330,21 @@ WHERE m.item_code IN (SELECT DISTINCT item_code FROM PARTNER_ERP_TEST3.nx.SA_T_L
 
 # ================= 생산재고조회 (생산, dw_pr_stock_040/480) — 가공(P0001)/용접(그외) 라인재고 =================
 # 원장 9-union(2502기초+당월이동), 라인별 집계. export_web_data.py prodStock 이식, 레거시 pr_m_item 조인.
+# ★재진입 가드 — 무한재귀 차단 (2026-09-08)
+#   고리: _sal_base 가 확정 스냅샷을 못 찾으면 salesstock() 으로 시드를 만든다.
+#         그런데 salesstock 이 "화면과 값을 맞추려고" _apply_ledger_price 를 부르고,
+#         그게 다시 _sal_ledger → _sal_base → salesstock … 으로 돌아온다.
+#   ⟹ 스냅샷이 **없는 구간**을 계산할 때마다 재귀. 실측: 영업 2601~2606 마감 전부 해당
+#      (영업 확정 스냅샷이 2606 부터라 그 앞은 전부 폴백으로 간다).
+#   기간 한정 버그가 아니다 — **폴백 경로 자체가 깨져 있고**, 평소엔 최근 기간에
+#   스냅샷이 있어 안 밟을 뿐이다. 컷오버 후 재구축·마감 해제 때도 그대로 재발한다.
+#   ★조용한 실패였다: RecursionError 를 잡아 한 줄 찍고 return 0 → **단가 미보정 값이
+#     그대로 저장**된다. 로그를 안 보면 모른다.
+#   가드는 (domain) 단위. 시드 계산 중에는 단가 재보정을 건너뛴다 — 시드는 수량·기초단가만
+#   쓰이고, 최종 단가는 바깥 _sal_ledger 가 이동평균으로 다시 굴린다.
+_LEDGER_PX_BUSY = set()
+
+
 def _apply_ledger_price(rows, fr6, to6, domain="PRD", keyloc=True):
     """★단가·금액을 **생산 수불장과 동일**하게 맞춘다. 맞춘 행 수를 돌려준다.
 
@@ -1342,11 +1357,15 @@ def _apply_ledger_price(rows, fr6, to6, domain="PRD", keyloc=True):
        ★대표 확정 2026-08-29: 재고조회를 수불장에 맞춘다.
          이로써 레거시 w_pr_stock_480(마스터 단가)과는 달라진다 — 그 대가를 알고 택했다.
     """
+    d = str(domain or "PRD").upper()
+    if d in _LEDGER_PX_BUSY:        # ★재진입 = 시드 계산 중 → 단가 보정 건너뜀(재귀 차단)
+        return 0
     try:
         from routers.close import ledger_cached          # ★엔드포인트와 캐시 공유
     except Exception:
         return 0
     cn = _nxc(); cur = cn.cursor()
+    _LEDGER_PX_BUSY.add(d)
     try:
         _r = ledger_cached(cur, domain, fr6, to6)        # ★(rows, breaks, basis) 3-튜플
         lrows = _r[0] if isinstance(_r, tuple) else _r
@@ -1356,6 +1375,7 @@ def _apply_ledger_price(rows, fr6, to6, domain="PRD", keyloc=True):
         print(f"[_apply_ledger_price] {type(_e).__name__}: {str(_e)[:150]}")
         return 0
     finally:
+        _LEDGER_PX_BUSY.discard(d)
         cn.close()
     # ★생산은 (품번,재고위치) 2축, 영업은 품번 1축이다(수불장 축을 그대로 따른다)
     def _k(r, loc_field="loc"):
