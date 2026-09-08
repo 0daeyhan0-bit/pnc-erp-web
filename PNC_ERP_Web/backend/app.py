@@ -418,6 +418,24 @@ def _warmup_heavy_queries():
             try: _wc.compute(_cym())          # 엔진 전개 캐시 채우기(읽기전용)
             except Exception: pass
         except Exception: pass
+        # ★생산/영업 수불장 예열 — 생산재고조회가 이 캐시를 그대로 쓴다(close.ledger_cached).
+        #   계측(2026-09-09 · ym=2609) : _prodstock 1회차 32.0초
+        #     = 메인SQL 2.0 + **수불장단가 29.9** + BOM보강 0.0
+        #     2회차 1.9초 — 즉 29.9초는 (도메인,기간) 캐시를 처음 채우는 값이다.
+        #   당월분을 미리 채워 두면 생산재고조회·수불장 둘 다 첫 조회가 즉시 열린다.
+        #   (기간을 바꿔 조회하면 그 기간은 다시 한 번 채운다 — 구조상 어쩔 수 없다.)
+        try:
+            from routers.close import ledger_cached as _lc
+            from common import _nx as _nxw, _cur_ym as _cym2
+            _y = _cym2()
+            _cn = _nxw(); _cu = _cn.cursor()
+            try:
+                for _dm in ("PRD", "SAL"):
+                    try: _lc(_cu, _dm, _y + "01", _y + "99")
+                    except Exception: pass
+            finally:
+                _cn.close()
+        except Exception: pass
     # ★TestBed(FLOW_TESTBED=1)는 예열을 **동기로** 한다 — 하네스는 커넥션이 하나라
     #   예열 스레드가 본 스레드와 다투면 HY000 이 나고, 그렇다고 끄면 엔진이 차가워
     #   생산재고조회가 타임아웃한다(실측 600s 초과). 요청을 받기 전에 끝낸다.
