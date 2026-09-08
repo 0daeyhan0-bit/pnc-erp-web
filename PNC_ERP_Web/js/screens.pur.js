@@ -790,6 +790,7 @@ SCREEN.matledger=(c)=>{
       <th class="num">입고수량</th><th class="num">입고단가</th><th class="num">입고금액</th>
       <th class="num">출고수량</th><th class="num">출고단가</th><th class="num">출고금액</th>
       <th class="num">기타수량</th><th class="num">기타단가</th><th class="num">기타금액</th>
+      ${dom==='MAT'?'<th class="num" title="불출했으나 협력사와 협의해 이월 — 당월 매출 아님">이월수량</th><th class="num" title="협력사 보관 중인 우리 재고(원가평가)">이월금액</th>':''}
       <th class="num">평가조정</th>
       <th>담당자</th><th class="cap">매입처명</th><th class="center">최종입고일</th></tr>`;
     const T=(rs,k)=>rs.reduce((a,b)=>a+(+b[k]||0),0);
@@ -808,6 +809,7 @@ SCREEN.matledger=(c)=>{
       <td class="num">${won(T(rows,'iq'))}</td><td></td><td class="num">${wonI(T(rows,'ia'))}</td>
       <td class="num">${won(T(rows,'oq'))}</td><td></td><td class="num">${wonI(T(rows,'oa'))}</td>
       <td class="num">${won(T(rows,'tq'))}</td><td></td><td class="num">${wonI(T(rows,'ta'))}</td>
+      ${dom==='MAT'?`<td class="num" style="background:#fff5e6"><b>${won(T(rows,'cq'))}</b></td><td class="num" style="background:#fff5e6"><b>${wonI(T(rows,'ca'))}</b></td>`:''}
       <td class="num">${wonI(T(rows,'va'))}</td>
       <td></td><td></td><td></td></tr>`:'';
     const render=rows=>{cur=rows;c.querySelector('#body').innerHTML=rows.length?rows.map(r=>`<tr>
@@ -818,9 +820,10 @@ SCREEN.matledger=(c)=>{
       <td class="num">${won(r.iq)}</td><td class="num">${won(r._iu)}</td><td class="num">${wonI(r.ia)}</td>
       <td class="num">${won(r.oq)}</td><td class="num">${won(r._ou)}</td><td class="num">${wonI(r.oa)}</td>
       <td class="num">${won(r.tq)}</td><td class="num">${won(r._tu)}</td><td class="num">${wonI(r.ta)}</td>
+      ${dom==='MAT'?`<td class="num" style="background:#fff5e6">${(+r.cq||0)?won(r.cq):''}</td><td class="num" style="background:#fff5e6">${(+r.ca||0)?wonI(r.ca):''}</td>`:''}
       <td class="num" ${Math.abs(+r.va||0)>1?'style="color:#c0392b;font-weight:700"':''} title="단가0 보정·마이너스재고 단가리셋 분">${(+r.va||0)?wonI(r.va):''}</td>
       <td>${esc(r._chg)||'-'}</td><td class="cap" title="${esc(r.cust)||''}">${esc(r.cust)||'-'}</td><td class="center">${esc(r._lin)||'-'}</td></tr>`).join('')+gtRow(rows)
-      :`<tr><td colspan="${dom==='PRD'?25:24}" class="empty">${pool.length===0?'해당 기간 자료 없음':'검색 결과 없음(필터 조건 확인)'}</td></tr>`;
+      :`<tr><td colspan="${dom==='PRD'?25:26}" class="empty">${pool.length===0?'해당 기간 자료 없음':'검색 결과 없음(필터 조건 확인)'}</td></tr>`;
       sumbar(rows);c.querySelector('#cnt').textContent=`${rows.length}건 / 대상 ${pool.length}건`;};
     const cutoffYmd=()=>{const v=c.querySelector('#dto').value; if(!v)return null;
       const d=new Date(v); if(isNaN(d))return null; d.setMonth(d.getMonth()-3);
@@ -842,10 +845,10 @@ SCREEN.matledger=(c)=>{
     c.querySelector('#longstk').onchange=apply;
     c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#sg').value='';c.querySelector('#cust').value='';c.querySelector('#gubun').value='all';c.querySelector('#longstk').checked=false;apply();};
     c.querySelector('#xls').onclick=()=>downloadCSV(`${({MAT:'자재',PRD:'생산',SAL:'영업'})[dom]}수불장_${date2ymd(dFrom)}_${date2ymd(dTo)}.csv`,
-      ['품목코드','품명','재고수량','재고단가','재고금액','소분류','매입유형','단위','기초재고','기초단가','기초금액','입고수량','입고단가','입고금액','출고수량','출고단가','출고금액','기타수량','기타단가','기타금액','평가조정','담당자','매입처명','최종입고일'],
-      cur.map(r=>[r.cd,r.nm,r.sq,r._su,Math.round(r.sa),r._sgn,r._ctn,r.unit,r.bq,r._bu,Math.round(r.ba),r.iq,r._iu,Math.round(r.ia),r.oq,r._ou,Math.round(r.oa),r.tq,r._tu,Math.round(r.ta),Math.round(r.va||0),r._chg,r.cust,r._lin]));
+      ['품목코드','품명','재고수량','재고단가','재고금액','소분류','매입유형','단위','기초재고','기초단가','기초금액','입고수량','입고단가','입고금액','출고수량','출고단가','출고금액','기타수량','기타단가','기타금액',...(dom==='MAT'?['이월수량','이월금액']:[]),'평가조정','담당자','매입처명','최종입고일'],
+      cur.map(r=>[r.cd,r.nm,r.sq,r._su,Math.round(r.sa),r._sgn,r._ctn,r.unit,r.bq,r._bu,Math.round(r.ba),r.iq,r._iu,Math.round(r.ia),r.oq,r._ou,Math.round(r.oa),r.tq,r._tu,Math.round(r.ta),...(dom==='MAT'?[r.cq||0,Math.round(r.ca||0)]:[]),Math.round(r.va||0),r._chg,r.cust,r._lin]));
     if(loading){c.querySelector('#body').innerHTML=spinRow(dom==='PRD'?25:24);c.querySelector('#cnt').textContent='';}
-    else if(msg){c.querySelector('#body').innerHTML=`<tr><td colspan="${dom==='PRD'?25:24}" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`;c.querySelector('#cnt').textContent='';}
+    else if(msg){c.querySelector('#body').innerHTML=`<tr><td colspan="${dom==='PRD'?25:26}" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`;c.querySelector('#cnt').textContent='';}
     else{render(pool);
       enableSort(c,['cd','nm','sq','_su','sa','_sgn','_ctn','unit','bq','_bu','ba','iq','_iu','ia','oq','_ou','oa','tq','_tu','ta','va','_chg','cust','lastin'],()=>cur,render);}
   };

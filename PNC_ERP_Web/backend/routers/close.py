@@ -1903,6 +1903,42 @@ def _sal_ledger(cur, fr6, to6):
     return rows, breaks, f"기초 {base_ymd} {src}"
 
 
+# ===== 이월재고(협력사 보관) — 수불장 별도 표현 =====
+# ★대표 정의(2026-09-08): **"불출했지만(매출) 협력사와 협의해 이월하면, 당월 매출로 인식하지
+#   않고 협력사에 있는 우리 재고로 인식한다."**
+#   ⟹ 이월분은 창고에서는 나갔지만(tag5 출고 = 수불장 기말에서 이미 빠짐) **자산은 우리 것**이다.
+#   그래서 기말에 섞지 않고 **별도 컬럼**으로 드러낸다(기말=창고 / 이월=협력사 보관).
+#   불변식(기초+입−출±조정=기말)은 창고 기준 그대로 유지 — 이월은 그 바깥의 부가 정보다.
+#
+# 대상 = PU_T_STOCK_MAINT tag5(협력사 매출출고) 중 마감 이월창(common._carry_win_ovr('SALE')).
+#   판정식은 매출마감 화면과 **완전히 같은 것**을 쓴다(§0-★★ 같은 규칙은 한 곳에서).
+#   override(nx.magam_carry_ovr) 로 사람이 당월↔이월을 옮긴 것도 그대로 반영된다.
+# 평가 = **원가**(수불장 이동평균단가 × 이월수량). 매출액(MAINT_AMT=판가)이 아니다 —
+#   재고로 인식한다고 했으므로 재고자산 평가원칙(원가)을 따른다. CLOSE_REDESIGN §4-② 도 "(원가)".
+# 실측(2026-09-08): 2608 이월 291건·협력사 15곳·181품목·수량 587,610 (tag5 수량의 68%).
+def _carry_out_qty(cur, ym):
+    """[이월] 품목별 이월수량 {MAT_CODE: qty}. ym = 조회 종료일이 속한 달(YYMM)."""
+    try:
+        from routers.salemagam import _SALE_MAGAM
+        from common import _carry_win_ovr
+    except Exception:
+        return {}
+    y = str(ym or "")[:4]
+    if len(y) != 4:
+        return {}
+    carry = _carry_win_ovr('SALE').format(ym=y)
+    try:
+        cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
+          SELECT UPPER(LTRIM(RTRIM(A.MAT_CODE))), SUM(-CAST(A.MAINT_QTY AS float))
+            FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A
+            JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+           WHERE A.MAINT_TAG='5' AND A.MAINT_YMD>='{y}00' AND A.MAINT_YMD<='{y}99' AND {carry}
+           GROUP BY UPPER(LTRIM(RTRIM(A.MAT_CODE)))""")
+        return {r[0]: float(r[1] or 0) for r in cur.fetchall() if float(r[1] or 0)}
+    except Exception:
+        return {}          # 마감 마스터 부재 등 → 이월 표시만 비운다(수불장 본체는 영향 없음)
+
+
 def _mat_ledger(cur, fr6, to6, zero):
     """자재 수불장 계산 — 캐시 대상. 반환 (rows, breaks, basis).
        ★엔드포인트에서 직접 계산하던 것을 함수로 뺐다: PRD/SAL 과 같이 캐시에 태우기 위함.
@@ -1957,13 +1993,19 @@ def _mat_ledger(cur, fr6, to6, zero):
             if _c:
                 _v[1] = _c
     codes = {c for c in set(begin) | set(agg) | set(state) if c in scope and str(c or "").strip()}
+    # ★이월(협력사 보관) 수량 — 행 필터보다 **먼저** 구한다(이월 있는 품목을 숨기지 않기 위해).
+    _cq0 = _carry_out_qty(cur, to6[:4])
     rows, breaks = [], []
     for c in sorted(codes):
         bq, bavg = begin.get(c, [0.0, 0.0])
         a = agg.get(c, {"inq": 0.0, "inamt": 0.0, "outq": 0.0, "outamt": 0.0,
                         "trans": 0.0, "transamt": 0.0})
         eq, eavg = state.get(c, [0.0, 0.0])
-        if not zero and abs(bq) < 1e-9 and abs(a["inq"]) < 1e-9 and abs(a["outq"]) < 1e-9                and abs(a["trans"]) < 1e-9 and abs(eq) < 1e-9:
+        # ★이월(협력사 보관)이 있으면 창고 이동이 0 이어도 **숨기지 않는다** —
+        #   "우리 재고"인데 화면에서 사라지면 이월을 별도로 표현하는 의미가 없다.
+        #   (실측 2608: 기본 조회에서 9품목이 이렇게 가려졌다.)
+        if (not zero and abs(bq) < 1e-9 and abs(a["inq"]) < 1e-9 and abs(a["outq"]) < 1e-9
+                and abs(a["trans"]) < 1e-9 and abs(eq) < 1e-9 and not _cq0.get(c)):
             continue
         # ★불변식 검산 — 어기면 버그다(§7-2). 화면에 숨기지 말고 드러낸다.
         #   수량축과 **금액축을 모두** 본다(금액만 깨지는 결함이 실제로 있었다).
@@ -1985,7 +2027,17 @@ def _mat_ledger(cur, fr6, to6, zero):
                      "iq": round(a["inq"], 4), "ia": round(a["inamt"], 2),
                      "oq": round(a["outq"], 4), "oa": round(a["outamt"], 2),
                      "tq": round(a["trans"], 4), "ta": round(a["transamt"], 2),
-                     "sq": round(eq, 4), "sa": round(eq * eavg, 2), "avg": round(eavg, 4)})
+                     "sq": round(eq, 4), "sa": round(eq * eavg, 2), "avg": round(eavg, 4),
+                     "cq": 0.0, "ca": 0.0})   # 이월(협력사 보관) — 아래에서 채운다
+    # ★이월재고 = 창고에서 나갔지만(tag5) 매출로 인식하지 않고 **협력사에 있는 우리 재고**.
+    #   기말(창고)에 섞지 않고 별도 컬럼으로 둔다. 평가는 그 품목의 기말 이동평균단가(원가).
+    _cq = _cq0
+    if _cq:
+        for r in rows:
+            q = _cq.get(r["cd"])
+            if q:
+                r["cq"] = round(q, 4)
+                r["ca"] = round(q * r["avg"], 2)
     _attach_item_info(cur, rows, to6)
     return rows, breaks, (f"기초 {base_ymd} {src}" + (f" → 전표이월 {pre_start}~{pre_end}" if pre_start <= pre_end else ""))
 
@@ -2037,10 +2089,14 @@ def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str 
         if q:
             k = q.strip().upper()
             rows = [r for r in rows if k in r["cd"] or k in str(r.get("nm", "")).upper()]
-        tot = {f: round(sum(r[f] for r in rows), 2)
-               for f in ("bq", "ba", "iq", "ia", "oq", "oa", "tq", "ta", "va", "sq", "sa")}
+        tot = {f: round(sum(r.get(f, 0) for r in rows), 2)
+               for f in ("bq", "ba", "iq", "ia", "oq", "oa", "tq", "ta", "va", "sq", "sa", "cq", "ca")}
         va_rows = [r["cd"] for r in rows if abs(r["va"]) > 1.0]
         return {"domain": d, "from": fr6, "to": to6, "count": len(rows), "rows": rows, "totals": tot,
+                # ★이월 = 매출 아님·협력사 보관 중인 우리 재고. 기말(창고)과 **별도**다.
+                "carry": {"qty": tot["cq"], "amt": tot["ca"],
+                          "items": len([r for r in rows if r.get("cq")]),
+                          "why": "불출(tag5)했으나 협력사와 협의해 이월 — 당월 매출 아님, 협력사 보관 우리 재고(원가평가)"},
                 "basis": basis,
                 "invariant_breaks": breaks,
                 "valuation_adjust": {"count": len(va_rows), "amount": tot["va"], "items": va_rows[:50],

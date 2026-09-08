@@ -984,7 +984,29 @@ def _sq_moved(key, expect):
     return chk
 
 
+def _ck_carry(res, ctx):
+    """이월(협력사 보관) 별도 표현이 살아 있는가.
+       대표 정의: 불출했지만 협력사와 협의해 이월하면 **당월 매출이 아니라 협력사에 있는 우리 재고**.
+       ⟹ 기말(창고)과 **섞이면 안 되고**, 창고 이동이 0 이어도 **숨기면 안 된다**."""
+    car = res.get("carry")
+    if not isinstance(car, dict):
+        return False, "carry 요약이 없다 — 이월 별도 표현이 빠졌다"
+    rows = res.get("rows") or []
+    ssum = round(sum(float(r.get("cq") or 0) for r in rows), 2)
+    ok = abs(ssum - float(car.get("qty") or 0)) < 0.01
+    # 창고 이동·잔량이 전부 0 인데 이월만 있는 행 = 전량 협력사 보관. 이게 안 보이면 회귀다.
+    onlyc = [r for r in rows if float(r.get("cq") or 0)
+             and not any(abs(float(r.get(k) or 0)) > 1e-9 for k in ("bq", "iq", "oq", "tq", "sq"))]
+    return ok, (f"이월 {car.get('items')}품목 · 수량 {float(car.get('qty') or 0):,.0f} · "
+                f"금액 {float(car.get('amt') or 0):,.0f}원(원가) · 전량이월 행 {len(onlyc)} · "
+                f"행합{'일치' if ok else '★불일치'}")
+
+
 LEDGER_HTTP_CASES = [
+    # ★이월 = 매출 아님·협력사 보관 우리 재고. 기말(창고)과 별도 컬럼으로 나와야 한다.
+    #   2608 을 고정 시료로 쓴다(이월이 실제로 있는 달). 수치가 바뀌어도 구조·정합은 유지돼야 한다.
+    dict(kind="S", name="[HTTP] 이월재고(협력사 보관) 별도 표현", method="GET", expect=200, check=_ck_carry,
+         path="/api/close/ledger?domain=MAT&d_from=260801&d_to=260831&nocache=1"),
     dict(kind="S", name="[HTTP] 마감현황 — 일=잠정/월=확정 구분", method="GET",
          path="/api/close/status", expect=200, check=_ck_status),
     dict(kind="S", name="[HTTP] 자재 수불장", method="GET", expect=200, check=_ck_ledger,
