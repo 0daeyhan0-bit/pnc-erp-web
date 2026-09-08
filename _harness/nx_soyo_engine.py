@@ -876,15 +876,17 @@ def dong_weight_by_spec(eng, item):
 
 
 def rawtube_by_spec(eng):
-    """규격(metal,diam,thick) → 원자재 raw tube 코드(7072AR9374x, Tube,Raw) 매핑. 캐시.
-    ★1:1 확인(2026-09-08: 14 CU tube·규격중복0). 절삭 원자재 중량차감의 차감대상 코드 결정용."""
+    """규격(metal,diam,thick) → 원소재(raw material) 코드 후보리스트 매핑. 캐시.
+    ★소스=nx.item sgroup='210'(원소재군)·metal∈(CU,고강도) — "Tube,Raw" 이름뿐 아니라 "diam*thick*length (O)"·"고강도관"
+      명칭도 포함(이름필터는 놓침, 실측 2026-09-08). 한 규격에 길이/경도 변형(-2160/-H 등) 다수 가능 → 후보리스트.
+    반환 {(metal,diam,thick): [codes]}. 절삭 원자재 중량차감의 차감대상 후보(변형 택1 규칙은 호출부/설계 확정)."""
     if hasattr(eng, '_rtbs'):
         return eng._rtbs
     eng.cur.execute("""SELECT LTRIM(RTRIM(metal_gubun)), ISNULL(diam,0), ISNULL(thick,0), UPPER(LTRIM(RTRIM(item_code)))
-        FROM nx.item WHERE item_name LIKE '%Raw%' AND ISNULL(diam,0)>0 AND metal_gubun IN (N'CU', N'고강도')""")
+        FROM nx.item WHERE sgroup='210' AND ISNULL(diam,0)>0 AND metal_gubun IN (N'CU', N'고강도')""")
     m = {}
     for mg, d, t, code in eng.cur.fetchall():
-        m[((mg or '').strip(), float(d or 0), float(t or 0))] = code
+        m.setdefault(((mg or '').strip(), float(d or 0), float(t or 0)), []).append(code)
     eng._rtbs = m
     return m
 
