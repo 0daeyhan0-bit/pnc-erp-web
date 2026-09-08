@@ -336,12 +336,12 @@ def stock_flow_rollup(eng, seed):
     ★소스=bom_line 직독(_stk_lines) — v_pr_bom 용접브랜치 2배 방출 회피(미러 diff0)."""
     fix = {}
     def walk(node, val, seen, depth):
-        if val <= 0 or depth > 40:
+        if val == 0 or depth > 40:   # ★음수재고도 전파(미러 CTE 동일). 0 만 정지(0×use=0)
             return
         for (c, uq, ex) in _stk_lines(eng, node):
             if ex == '1':
                 continue
-            ev = _sqlint(val * uq)
+            ev = _sqlint(val * uq)   # _sqlint=0쪽 버림(음수 포함)
             if ev == 0:
                 continue
             key = (node, c)
@@ -350,7 +350,7 @@ def stock_flow_rollup(eng, seed):
                 walk(c, ev, seen | {c}, depth + 1)
     for it, v in seed.items():
         vi = _sqlint(v) if not isinstance(v, int) else v
-        if vi <= 0:
+        if vi == 0:
             continue
         k = it.strip().upper()
         walk(k, vi, {k}, 0)
