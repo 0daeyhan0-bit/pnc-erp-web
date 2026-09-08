@@ -54,7 +54,7 @@
 ### (a) 레거시-fed 읽기전용 = 동결 stale = ★진짜 blocker
 | 미러(읽기전용) | 행수 | 클린 대체 | 클린 행수 | 조치 |
 |---|---|---|---|---|
-| PR_M_ITEM_PROC_GAGONG | 9,899 | ~~nx.routing~~ **클린 부재** | — | ★**정정(2026-09-09 검증)**: routing.proc_code(11/12/100=공정작업)≠GAGONG_PROC_CODE(S6/S11/P0002=가공파트투입)·80/80 불일치. 동일스키마 `nx.route_proc_gagong`=**0행(빈)**. ⟹ **품목별공정 클린화(population) 선행 = 큰 작업**(읽기 repoint 아님). 16 reads 중 JP_PROC_METHOD 쓰는 것은 routing 불가. |
+| ~~PR_M_ITEM_PROC_GAGONG~~ ✅완료 | 9,899 | **nx.prodinfo_proc**(R01 클린) | 9,903 | ✅**완료(2026-09-09·커밋a3346da)**: R01 클린 홈=이미 있던 `nx.prodinfo_proc`(prodinfo가 씀·동일18컬럼). route_proc_gagong=R02+전용. seed=결측1품목만→⊇미러. operational 미러read **0**(직독 스왑+STEP6 base+폴백제거§1-9-1). STEP6계획 diff=사라짐0·+2(AJR73965506 웹등록 교정). 정본 ITEM_PROC_GAGONG_CLEAN_260909. |
 | ~~PR_M_ITEM_BOM · CS_M_ITEM_BOM~~ ✅완료 | — | v_pr_bom / bom_line | — | **7/7 repoint 완료(2026-09-09·diff0)**: gagong/prodsheet(3)/procbc는 v_pr_bom(부모·VIR·gpc 80/80 diff0), ready 재귀CTE는 bom_line+header(60/60 diff0·용접브랜치회피). 미러 read=0 |
 | PR_M_ITEM_SUB | 71,043 | nx.item_sub | 14,466 | ★커버리지 격차 확인 후 repoint |
 | PR_M_MODEL_BOM | 63,035 | nx.model_bom | **0(빈)** | ★clean 재빌드 필요 or 미러 유지판정 |
