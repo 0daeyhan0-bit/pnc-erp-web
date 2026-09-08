@@ -875,8 +875,37 @@ def dong_weight_by_spec(eng, item):
     return out
 
 
+def std_rawmat_of(eng, item):
+    """[가공 원소재 차감] 가공품(item)의 소재스펙 5키 → 표준원소재(STD_WON_MAT_FLAG='1') 품번 TOP1. 캐시.
+    ★레거시 정본 로직(w_pr_input 원소재 차감): 5키=[diam, thick, metal_gubun, pipe_kind(isnull→'1'), item_pipe_material]
+    로 STD 원소재 매칭. 실측 2026-09-08: STD 32종·5키중복0(유일)·nx.item에 5필드 전부 존재(클린 소스).
+    가공 실적 시 이 원소재 재고를 (수량×중량)만큼 차감. 반환 원소재 품번 or None."""
+    if not hasattr(eng, '_stdw'):
+        eng._stdw = {}
+        # 표준원소재 5키 인덱스 1회 로드
+        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(diam,0), ISNULL(thick,0),
+                LTRIM(RTRIM(ISNULL(metal_gubun,''))), LTRIM(RTRIM(ISNULL(pipe_kind,'1'))), LTRIM(RTRIM(ISNULL(item_pipe_material,'')))
+            FROM nx.item WHERE std_won_mat_flag='1'""")
+        eng._stdidx = {}
+        for code, d, t, mg, pk, pm in eng.cur.fetchall():
+            eng._stdidx.setdefault((float(d or 0), float(t or 0), (mg or '').strip(), (pk or '1').strip() or '1', (pm or '').strip()), code)
+    k = item.strip().upper()
+    if k not in eng._stdw:
+        eng.cur.execute("""SELECT ISNULL(diam,0), ISNULL(thick,0), LTRIM(RTRIM(ISNULL(metal_gubun,''))),
+                LTRIM(RTRIM(ISNULL(pipe_kind,'1'))), LTRIM(RTRIM(ISNULL(item_pipe_material,'')))
+            FROM nx.item WHERE UPPER(LTRIM(RTRIM(item_code)))=?""", k)
+        r = eng.cur.fetchone()
+        won = None
+        if r:
+            key = (float(r[0] or 0), float(r[1] or 0), (r[2] or '').strip(), (r[3] or '1').strip() or '1', (r[4] or '').strip())
+            won = eng._stdidx.get(key)
+        eng._stdw[k] = won
+    return eng._stdw[k]
+
+
 def rawtube_by_spec(eng):
     """규격(metal,diam,thick) → 원소재(raw material) 코드 후보리스트 매핑. 캐시.
+    ※표준원소재 유일매칭은 std_rawmat_of(5키·STD flag) 사용 권장. 이건 규격 후보열람용(보조).
     ★소스=nx.item sgroup='210'(원소재군)·metal∈(CU,고강도) — "Tube,Raw" 이름뿐 아니라 "diam*thick*length (O)"·"고강도관"
       명칭도 포함(이름필터는 놓침, 실측 2026-09-08). 한 규격에 길이/경도 변형(-2160/-H 등) 다수 가능 → 후보리스트.
     반환 {(metal,diam,thick): [codes]}. 절삭 원자재 중량차감의 차감대상 후보(변형 택1 규칙은 호출부/설계 확정)."""
