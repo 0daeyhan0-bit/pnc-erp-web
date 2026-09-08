@@ -8,7 +8,7 @@ from routers.auth import (require_user, scope_cust, staff_only,
                           assert_own_barcode)   # ★소속 강제 (2026-08-29)
 # ★라이브(_conn) 미import — 이 도메인은 nx 단일소스(§1-9-1). 실수로 쓰이지 않게 뺀다.
 #   (_conn·_b·_num 은 이 파일에서 실사용 0회라 병합 시 제외 — 2026-08-30)
-from common import _nx, _nx_tx, _d6, _assert_open, stock_changed, _sub_desc_plain
+from common import _nx, _nx_tx, _d6, _assert_open, stock_changed, _sub_desc_plain, _get_cost_engine
 
 router = APIRouter()
 
@@ -392,7 +392,23 @@ SELECT mat_code, MAX(in_cust_code) in_cust_code, SUM(mat_use_qty) mat_use_qty,
 
 
 def _set_bom_expand(cur, item, cust, ymd):
-    """세트도번 → 그 거래처가 대는 자도번 목록. 레거시 dw_6 동일."""
+    """세트도번 → 그 거래처가 대는 자도번 목록. 레거시 dw_6.
+       ★소요엔진 이관(2026-09-08·§1-10): nx_soyo_engine.setin_soyo(v_pr_bom·거래처path·순환방지·INT누적)로 전환.
+       구 _DW6_SQL(재귀CTE)과 diff0(62/62) 검증 후. cost=price_item(매입,as-of) 부가. 엔진 미가용시 _DW6_SQL 폴백."""
+    try:
+        import nx_soyo_engine as _soyo
+    except Exception:
+        _soyo = None
+    if _soyo is not None:
+        eng = _get_cost_engine()
+        rows = _soyo.setin_soyo(eng, str(item).strip().upper(), str(cust).strip())
+        for r in rows:
+            cur.execute("""SELECT TOP 1 price FROM nx.price_item WHERE item_code=? AND vendor_code=?
+                            AND price_type='매입' AND apply_ymd<=? AND currency='KRW' ORDER BY apply_ymd DESC""",
+                        r["mat_code"], str(cust).strip(), ymd)
+            pr = cur.fetchone()
+            r["cost"] = float(pr[0]) if pr and pr[0] is not None else 0.0
+        return rows
     cur.execute(_DW6_SQL, item, ymd, cust)
     return [{"mat_code": str(r[0]).strip(), "cust": str(r[1] or "").strip(),
              "use_qty": float(r[2] or 0), "insp_flag": str(r[3] or "N").strip(),
