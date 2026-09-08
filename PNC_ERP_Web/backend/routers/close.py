@@ -22,6 +22,10 @@ router = APIRouter()
 
 DOMAINS = {"MAT": "자재", "PRD": "생산", "SAL": "영업"}
 SNAP_READY = ("MAT", "PRD", "SAL")   # 스냅샷 확정 가능 도메인(PRD·SAL = 2026-08-27 추가, C2)
+# ★마감은 **시스템 단위**다(2026-09-08 대표 지시). 부서별로 따로 닫으면 자재만 풀리고
+#   생산·영업이 잠긴 채 남는다 — 실제로 그 사고가 났다. 순서는 단가 의존을 따른다:
+#   자재 확정단가 → 생산(BOM 부품비) → 영업(제품원가).
+CLOSE_ORDER = ("MAT", "PRD", "SAL")
 
 
 def _norm(domain, ptype, period):
@@ -97,16 +101,27 @@ def close_status():
 
 
 @router.get("/api/close/calendar")
-def close_calendar(domain: str = Query("MAT"), ym: str = Query("")):
-    """일자별 마감 캘린더(해당 월). 월마감돼 있으면 그 달 전 일자를 마감으로 본다(일마감 ⊂ 월마감)."""
-    d, _t, y = _norm(domain, "M", ym or "0000")
+def close_calendar(domain: str = Query(""), ym: str = Query("")):
+    """일자별 마감 캘린더(해당 월). 월마감돼 있으면 그 달 전 일자를 마감으로 본다(일마감 ⊂ 월마감).
+       ★시스템 단위(domain 생략/ALL) = 세 도메인이 **모두** 닫힌 날만 '마감', 일부만 닫힌 날은 '부분'.
+         부분이 보이면 그 날은 아직 시스템이 닫힌 게 아니다 — 눈으로 바로 잡으라고 따로 뺀다."""
+    doms = list(CLOSE_ORDER) if _is_all_domain(domain) else [_norm(domain, "M", ym or "0000")[0]]
+    _d0, _t, y = _norm(doms[0], "M", ym or "0000")
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute("""SELECT period FROM nx.period_close
-                       WHERE domain=? AND ptype='D' AND close_flag=1 AND period LIKE ?""", d, y + "%")
-        days = {r[0] for r in cur.fetchall()}
-        return {"domain": d, "ym": y, "month_closed": 1 if _is_closed(cur, d, "M", y) else 0,
-                "closed_days": sorted(days)}
+        cnt = {}
+        for d in doms:
+            cur.execute("""SELECT period FROM nx.period_close
+                           WHERE domain=? AND ptype='D' AND close_flag=1 AND period LIKE ?""", d, y + "%")
+            for r in cur.fetchall():
+                cnt[r[0]] = cnt.get(r[0], 0) + 1
+        n = len(doms)
+        mc = [d for d in doms if _is_closed(cur, d, "M", y)]
+        return {"domain": ("ALL" if n > 1 else doms[0]), "ym": y, "domains": doms,
+                "month_closed": 1 if len(mc) == n else 0,
+                "month_part": 1 if (mc and len(mc) < n) else 0,
+                "closed_days": sorted(k for k, v in cnt.items() if v >= n),
+                "part_days": sorted(k for k, v in cnt.items() if v < n)}
     finally:
         cn.close()
 
@@ -1479,9 +1494,51 @@ def close_anomaly(domain: str = Query("MAT"), ptype: str = Query("M"), period: s
         cn.close()
 
 
+def _is_all_domain(domain):
+    """빈 값·ALL·SYS = 시스템 단위(전 도메인). 마감은 회사 단위 행위지 부서별 행위가 아니다."""
+    return str(domain or "").strip().upper() in ("", "ALL", "SYS", "*")
+
+
+def _close_all(payload, fn, order, verb):
+    """전 도메인 일괄 실행. 한 도메인이 걸려도 나머지는 진행하고, 무엇이 남았는지 msg 에 남긴다.
+       (전부 실패하면 첫 사유를 그대로 올려 화면이 진짜 원인을 보여주게 한다)"""
+    ok, skip, fail = [], [], []
+    for d in order:
+        pl = dict(payload); pl["domain"] = d
+        try:
+            ok.append(fn(pl))
+        except HTTPException as e:
+            (skip if e.status_code == 409 else fail).append((d, str(e.detail)))
+        except Exception as e:
+            fail.append((d, f"{type(e).__name__}: {e}"))
+    if not ok:
+        d0, det0 = (fail or skip)[0]
+        raise HTTPException(500 if fail else 409, f"{DOMAINS[d0]} — {det0}")
+    t = str(payload.get("ptype", "")).strip().upper()
+    part = " · ".join(f"{DOMAINS[r['domain']]} {(r.get('snapshot_rows') or r.get('snapshot_removed') or 0):,}품목"
+                      for r in ok)
+    msg = f"시스템 {'월' if t == 'M' else '일'}{verb} — " + part
+    for d, det in (skip + fail):
+        msg += f"\n✖ {DOMAINS[d]} — {det}"
+    return {"ok": (not fail and not skip), "domain": "ALL", "ptype": t,
+            "period": (ok[0]["period"] if ok else ""),
+            "snapshot_rows": sum(int(r.get("snapshot_rows") or 0) for r in ok),
+            "snapshot_removed": sum(int(r.get("snapshot_removed") or 0) for r in ok),
+            "results": ok,
+            "skipped": [{"domain": d, "detail": x} for d, x in skip],
+            "failed": [{"domain": d, "detail": x} for d, x in fail], "msg": msg}
+
+
 @router.post("/api/close/run")
 def close_run(payload: dict = Body(...)):
-    """마감 실행. ★2026-09-08 재설계(CLOSE_REDESIGN §3·§5·§8-2)로 일/월의 성격이 갈린다.
+    """마감 실행 — domain 을 생략하거나 ALL 이면 **시스템 단위**(자재→생산→영업 일괄)."""
+    if _is_all_domain(payload.get("domain")):
+        return _close_all(payload, _close_run_one, CLOSE_ORDER, "마감")
+    return _close_run_one(payload)
+
+
+def _close_run_one(payload: dict):
+    """마감 실행(단일 도메인). ★2026-09-08 재설계(CLOSE_REDESIGN §3·§5·§8-2)로 일/월의 성격이 갈린다.
          · 일마감(D) = **잠정 스냅샷**. 잠그지 않고(=_lock_msg 대상 아님) 순서 강제도 없다.
                        재실행 = 갱신(refresh, 멱등) — 조정이 들어오면 다시 돌린다.
          · 월마감(M) = **유일한 확정·잠금**. 중복 확정 금지 + 직전 월 연쇄 가드 유지.
@@ -1547,7 +1604,14 @@ def close_run(payload: dict = Body(...)):
 
 @router.post("/api/close/cancel")
 def close_cancel(payload: dict = Body(...)):
-    """마감 해제(reopen) = 잠금 해제 + 스냅샷 제거 + 로그.
+    """마감 해제 — domain 생략/ALL 이면 시스템 단위(영업→생산→자재, 마감의 역순)."""
+    if _is_all_domain(payload.get("domain")):
+        return _close_all(payload, _close_cancel_one, tuple(reversed(CLOSE_ORDER)), "마감 해제")
+    return _close_cancel_one(payload)
+
+
+def _close_cancel_one(payload: dict):
+    """마감 해제(reopen, 단일 도메인) = 잠금 해제 + 스냅샷 제거 + 로그.
        ★월마감(확정) 해제 = 수퍼관리자만 + 후속 월이 마감돼 있으면 불가(기초 연쇄의존).
        ★일마감(잠정) 해제 = 그냥 잠정 스냅샷 버리기 → 일반 마감권한, 순서 가드 없음.
          (확정을 되돌리는 게 아니므로 수퍼관리자까지 요구하면 과하다 — CLOSE_REDESIGN §3·#3)"""
