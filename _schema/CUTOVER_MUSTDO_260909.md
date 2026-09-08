@@ -54,7 +54,7 @@
 ### (a) 레거시-fed 읽기전용 = 동결 stale = ★진짜 blocker
 | 미러(읽기전용) | 행수 | 클린 대체 | 클린 행수 | 조치 |
 |---|---|---|---|---|
-| PR_M_ITEM_PROC_GAGONG | 9,899 | nx.routing | 173,099 | 읽기 repoint(grain 매핑 검증) |
+| PR_M_ITEM_PROC_GAGONG | 9,899 | ~~nx.routing~~ **클린 부재** | — | ★**정정(2026-09-09 검증)**: routing.proc_code(11/12/100=공정작업)≠GAGONG_PROC_CODE(S6/S11/P0002=가공파트투입)·80/80 불일치. 동일스키마 `nx.route_proc_gagong`=**0행(빈)**. ⟹ **품목별공정 클린화(population) 선행 = 큰 작업**(읽기 repoint 아님). 16 reads 중 JP_PROC_METHOD 쓰는 것은 routing 불가. |
 | ~~PR_M_ITEM_BOM · CS_M_ITEM_BOM~~ ✅완료 | — | v_pr_bom / bom_line | — | **7/7 repoint 완료(2026-09-09·diff0)**: gagong/prodsheet(3)/procbc는 v_pr_bom(부모·VIR·gpc 80/80 diff0), ready 재귀CTE는 bom_line+header(60/60 diff0·용접브랜치회피). 미러 read=0 |
 | PR_M_ITEM_SUB | 71,043 | nx.item_sub | 14,466 | ★커버리지 격차 확인 후 repoint |
 | PR_M_MODEL_BOM | 63,035 | nx.model_bom | **0(빈)** | ★clean 재빌드 필요 or 미러 유지판정 |
