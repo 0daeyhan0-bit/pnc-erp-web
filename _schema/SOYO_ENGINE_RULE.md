@@ -146,7 +146,7 @@ LG BOM(Assembly Pull) 기준 전개. 소스 = `nx.lg_bom_ver`(point-in-time).
 | 3 | `backflush.py:133/163/198/254` | 재고차감축(중량·다단계) | walker 신설(별도축) | nx.bom L169/206 잔존·단순치환 아님 |
 | 4 | `ready.py:106`(setcheck)·`kitting.py:89/296/832` | 키팅 물량/충당 | explode walker | |
 | 5 | `setin.py:351`(_set_bom_expand)·`procbc.py:74`(_bc_bom) | 세트입고 명세/차감 | **`setin_soyo`(신규 walker)** | ✅**setin 완료(2026-09-08)**: 거래처-path walker `setin_soyo`(순환방지·INT누적·원자재정지·set_except) 신설, 옛 _DW6_SQL과 **diff0 62/62·엔진+cost 50/50**. ★부수: 앞선 세트CTE 앵커 nx.item 전환이 재귀CTE 타입불일치 유발→CAST(varchar50) 수정. procbc는 ★**보류**(아래) |
-| 5-b | `procbc.py:74`(_bc_bom) | 세트입고 자재차감 | `setinput_bc_soyo`(walker 완성·미스왑) | ⚠**보류(2026-09-08)**: walker 빌드·60표본 53동일, 잔여7=**전부 용접봉(RAC) 정확히 2배**. 원인=**bom_line 용접봉 변형SUB 이중계상**(미러1회/bom_line2회). procbc는 dedup 안 하고 RAC 수집→bom_line 스왑시 용접봉 2배차감 회귀. **현재 procbc는 미러 읽어 정확** → **bom_line 변형SUB dedup(§3(2) 근본) 완료 후 스왑**. walker는 보존(dedup 후 즉시 적용). |
+| 5-b | `procbc.py:74`(_bc_bom, **가공바코드실적 018·세트입고 아님**) | 가공실적 하위자재 차감 | **`setinput_bc_soyo`(신규 walker)** | ✅**완료(2026-09-08)**: 래퍼 스왑(원본 _bc_bom_legacy 보존). ★**용접봉(RAC) 제외** — 가공은 원소재 절삭만·용접은 다음 공정(대표 확정)이라 가공실적에 용접봉 차감·게이팅은 부정확(레거시 BOM딸림). 자재(비용접봉) diff0 **80/80·60/60**, 용접봉 정상 드롭. bom_line 용접봉 변형SUB 2배 문제도 제외로 자동해소. |
 | 6 | `sourcing.py:2371`(current_order) | 자동발주 소요량 | **`order_soyo`(신규 walker)** | ✅**완료(2026-09-08)**: prod_soyo 재사용 불가 실증(20중8다름) → 전용 walker `order_soyo`(make_type게이트·USE_QTY·sagub·RAC제외) 신설. 옛 CTE와 **diff0 40/40(qty+sagub)** 후 스왑(레거시 CTE=폴백 보존). feat/single-source-price |
 
 **★2026-09-08 재사용 검증 교훈(대표 지적)**: "기존 walker 재사용"도 반드시 옛 로직과 **diff0로 적합성 먼저 증명**해야 한다(추측금지). 실증 결과 setin(거래처-path)·sourcing(make_type게이트) 모두 기존 walker와 계산대상이 달라 **각자 새 walker 필요**. prodsheet만 prod_input_soyo와 정확히 일치(diff0)해 재사용 성공.

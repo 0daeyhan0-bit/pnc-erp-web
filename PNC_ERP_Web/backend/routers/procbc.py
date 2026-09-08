@@ -6,6 +6,10 @@ from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
 
+try:
+    import nx_soyo_engine as _soyo   # 통일 소요엔진(CLAUDE §1-10) — common.py가 _harness를 sys.path에 추가
+except Exception:
+    _soyo = None
 router = APIRouter()
 
 # ================= 가공바코드실적처리 (w_pr_input_018) — 스캔조회 + 실적등록/취소 =================
@@ -72,7 +76,17 @@ def _bc_ctx(cur, box):
     return c
 
 def _bc_bom(cur, parent, mult=1.0, depth=0, acc=None):
-    """하위자재 전개(dw_6 = dw_pr_input_028_5) — 실측 규칙:
+    """가공바코드실적(018) 하위자재 전개 — ★소요엔진 이관(2026-09-08·§1-10): setinput_bc_soyo(nx.bom_line·VIR재귀).
+       ★용접봉 제외: 가공은 절삭만·용접은 다음 공정(대표 확정) → 용접봉 차감·게이팅 안 함(레거시 BOM딸림 교정).
+       자재(비용접봉) 미러 _bc_bom_legacy와 diff0(80/80). 엔진 미가용시 legacy 폴백.
+       반환: [(mat_code, use*mult, gpc)] — legacy와 동일 형태(용접봉만 빠짐)."""
+    if _soyo is not None and depth == 0:
+        return _soyo.setinput_bc_soyo(_get_cost_engine(), str(parent).strip().upper(), GAGONG_PART)
+    return _bc_bom_legacy(cur, parent, mult, depth, acc)
+
+
+def _bc_bom_legacy(cur, parent, mult=1.0, depth=0, acc=None):
+    """(구·롤백보존) 하위자재 전개(dw_6 = dw_pr_input_028_5) — 실측 규칙:
        · EXCEPT_FLAG='1' / SET_EXCEPT_FLAG='1' 행은 제외
        · VIR_ITEM_FLAG='1'(가상도번)은 자신을 차감하지 않고 그 자식을 USE_QTY 배로 전개
        예) AAA31179501 → ACJ75119301(가상,USE2) → PNC-EL-AA-00-06(USE2) = 4/개
@@ -91,7 +105,7 @@ def _bc_bom(cur, parent, mult=1.0, depth=0, acc=None):
         if use <= 0:
             continue
         if str(vir) == '1':                       # 가상도번 = 실물 아님 → 한 단계 더
-            _bc_bom(cur, mat, mult * use, depth + 1, acc)
+            _bc_bom_legacy(cur, mat, mult * use, depth + 1, acc)
         else:
             acc.append((mat, use * mult, gpc or GAGONG_PART))
     return acc
