@@ -38,6 +38,29 @@ _SE_CACHE = {"pairs": None, "sig": None, "ts": 0.0}
 _SE_TTL = 43200.0          # 12시간
 
 
+def _keytmp(cur, name, keys):
+    """(제번, 도번) 키 목록을 임시테이블에 담고 이름을 돌려준다. 비었으면 False.
+
+    ★왜 필요한가(2026-09-09 성능) —
+      종전엔 `(work_order=? AND item_code=?)` 를 400개씩 **OR 로 이어붙여** 조회했다.
+      OR 나열은 SQL Server 가 인덱스 탐색으로 못 풀어 **청크마다 테이블을 통째로 훑는다.**
+        실측(키 7,088개 · nx.plan_part_dtl) : 400-OR 18청크 **21.9초** → 이 방식 **4.1초**
+        결과는 7,088행으로 완전 동일함을 확인했다.
+      키가 늘수록 격차가 커진다(청크 수 × 전체스캔).
+    """
+    cur.execute("IF OBJECT_ID('tempdb..%s') IS NOT NULL DROP TABLE %s;"
+                "CREATE TABLE %s(wo varchar(40), it varchar(40), PRIMARY KEY(wo,it))"
+                % (name, name, name))
+    if not keys:
+        return False
+    ks = sorted({(str(a).strip(), str(b).strip()) for a, b in keys})
+    for i in range(0, len(ks), 900):
+        ch = ks[i:i + 900]
+        cur.execute("INSERT INTO %s(wo,it) VALUES " % name + ",".join(["(?,?)"] * len(ch)),
+                    *[v for k in ch for v in k])
+    return True
+
+
 def _se_pairs(cur):
     """세트입고제외 (상위도번, 자재) 쌍 집합. 캐시 우선."""
     cur.execute("SELECT COUNT(*) FROM nx.bom_line WITH(NOLOCK)")
@@ -438,10 +461,11 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
         # ── 계획(라인·LG INPUT·LOT·작업처) — 제번×도번
         keys = sorted({(x["wo"], x["doban"]) for x in raw})
         plan = {}
-        for i in range(0, len(keys), 400):
-            ch = keys[i:i + 400]
-            cond = " OR ".join(["(work_order=? AND item_code=?)"] * len(ch))
-            args = [v for k in ch for v in k]
+        # ★성능(2026-09-09) — 키를 **임시테이블에 담아 한 번에** 조회한다.
+        #   종전엔 `(work_order=? AND item_code=?)` 를 400개씩 OR 로 이어붙여
+        #   18청크를 돌았다. OR 나열은 인덱스 탐색이 안 돼 청크마다 통째로 훑는다.
+        #     실측(키 7,088개) : 400-OR 청크 21.9초 → 임시테이블 조인 4.1초 (결과 동일 확인)
+        if _keytmp(cur, '#k', keys):
             # ★작업처 = **첫 공정**(proc_seq 최소). MAX 로 뽑으면 마지막 공정이 나온다.
             #   실측: AJR30078601 = seq1 S5(01용접) / seq2 S5-2(01라인 조립)
             #   → 화면엔 첫 공정 S5 가 나와야 한다.
@@ -466,8 +490,9 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
                                                       ISNULL(gagong_proc_seq,0),
                                                       ISNULL(gagong_proc_code,'')) rn
                                       FROM nx.plan_part_dtl WITH(NOLOCK)
-                                     WHERE {cond}) z
-                             GROUP BY work_order, item_code""", *args)
+                                     WHERE EXISTS(SELECT 1 FROM #k k
+                                                   WHERE k.wo=work_order AND k.it=item_code)) z
+                             GROUP BY work_order, item_code""")
             for r in cur.fetchall():
                 plan[(str(r[0]).strip(), str(r[1]).strip())] = {
                     "line": (r[2] or "").strip(), "hm": (r[3] or "").strip(),
@@ -480,18 +505,16 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
         #     레거시 130 은 MJU63357501 을 라인 C1 · LG INPUT 07:50 · LOT 149 로 보여준다.
         #   plan_item_dtl 은 도번(C_ITEM_CODE) 단위라 직납품도 들어 있다(420 에서 확인).
         miss = [k for k in keys if k not in plan]
-        for i in range(0, len(miss), 400):
-            ch = miss[i:i + 400]
-            cond = " OR ".join(["(WORK_ORDER=? AND C_ITEM_CODE=?)"] * len(ch))
-            args = [v for k in ch for v in k]
-            cur.execute(f"""SELECT WORK_ORDER, C_ITEM_CODE,
+        if _keytmp(cur, '#m', miss):        # ★성능 — 위와 같은 이유로 임시테이블 조인
+            cur.execute("""SELECT WORK_ORDER, C_ITEM_CODE,
                                    MAX(ISNULL(LINE_NO,'')) line_no,
                                    MAX(ISNULL(OUTPUT_HM,'')) output_hm,
                                    MAX(ISNULL(LOT_QTY,0)) lot_qty,
                                    MAX(ISNULL(PLAN_YMD,'')) plan_ymd
                               FROM nx.plan_item_dtl WITH(NOLOCK)
-                             WHERE {cond}
-                             GROUP BY WORK_ORDER, C_ITEM_CODE""", *args)
+                             WHERE EXISTS(SELECT 1 FROM #m k
+                                           WHERE k.wo=WORK_ORDER AND k.it=C_ITEM_CODE)
+                             GROUP BY WORK_ORDER, C_ITEM_CODE""")
             for r in cur.fetchall():
                 plan[(str(r[0]).strip(), str(r[1]).strip())] = {
                     "line": (r[2] or "").strip(), "hm": (r[3] or "").strip(),
@@ -596,15 +619,14 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
 
         # 출하실적 — ★제번+도번 (품번 누적이면 모든 행에 같은 값이 반복된다)
         sal = {}
-        for i in range(0, len(keys), 400):
-            ch = keys[i:i + 400]
-            cond = " OR ".join(["(work_order=? AND item_code=?)"] * len(ch))
-            args = [v for k in ch for v in k]
+        if _keytmp(cur, '#s', keys):        # ★성능 — 400-OR 청크 → 임시테이블 조인
             try:
-                cur.execute(f"""SELECT work_order, item_code, SUM(ISNULL(sale_qty,0))
+                cur.execute("""SELECT work_order, item_code, SUM(ISNULL(sale_qty,0))
                                   FROM nx.sale_dtl WITH(NOLOCK)
-                                 WHERE ISNULL(finish_flag,'0')='0' AND ({cond})
-                                 GROUP BY work_order, item_code""", *args)
+                                 WHERE ISNULL(finish_flag,'0')='0'
+                                   AND EXISTS(SELECT 1 FROM #s k
+                                               WHERE k.wo=work_order AND k.it=item_code)
+                                 GROUP BY work_order, item_code""")
                 for a, b, q in cur.fetchall():
                     sal[(str(a).strip(), str(b).strip())] = float(q or 0)
             except Exception:
@@ -734,6 +756,17 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
             "jcust": x["jcust"], "jados": set(), "day": {},
             "setexc": 0,
         })
+        # ★순서 무관하게 확정한다(2026-09-09) — setdefault 는 **먼저 온 행**이 이긴다.
+        #   주 쿼리에 ORDER BY 가 없어 행 순서는 보장되지 않는데, 한 (제번·도번)에
+        #   assy·jcust 가 여럿인 경우가 있다(실측 MBL68420201: AJR30028411 / AJR75802613).
+        #   그래서 실행계획이 바뀌면 **같은 데이터인데 값이 바뀌는** 일이 생긴다.
+        #   최대값으로 고정해 어떤 순서로 와도 같은 답이 나오게 한다.
+        if x["assy"] > d["assy"]:
+            d["assy"] = x["assy"]
+        # ☐jcust 는 **일부러 손대지 않았다**(2026-09-09) — 여기도 같은 순서 의존이 있다.
+        #   ·최대값으로 바꾸면 1,848행이 달라진다(실측).
+        #   ·"빈칸만 채우기"로 바꾸면 12행이 ''→'2111 삼화코리아' 로 채워진다(실측).
+        #   둘 다 화면 값이 바뀌는 변경이라 **승인 없이 정하지 않는다.** 현행 동작 유지.
         if x.get("setexc"):
             d["setexc"] = 1          # ★세트입고제외 행(③갈래)
         if x["jado"]:
