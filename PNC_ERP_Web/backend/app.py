@@ -404,6 +404,20 @@ def _warmup_heavy_queries():
                     try: eng.naewon_nodes(_wi, "260630")
                     except Exception: pass
         except Exception: pass
+        # ★무게정산(중량조정) 예열 — 재시작 후 **첫 조회만** 통째로 느렸다.
+        #     실측(2026-09-09) : 1회차 53~64초 → 2회차 2.7초  (컷오버 전 코드도 동일 = 컷오버 무관)
+        #   내역(ym=2609) : 맵적재 6.9s · 쿼리 3개 2.7s · **소요엔진 전개 루프 56.9s**
+        #     전개는 입고품목 1,492종을 엔진에 묻는다(1건당 33ms). 엔진이 그 답을 캐시하므로
+        #     **두 번째부터는 0.0초** — 즉 이건 프로세스당 1회 비용이지 매번 드는 비용이 아니다.
+        #     (품번이 거의 안 겹쳐 memo 로는 못 줄인다 — 1,494행 중 중복 2건뿐)
+        #   ⟹ 그 1회를 여기 백그라운드에서 미리 치른다. 첫 사용자도 2~3초로 연다.
+        try:
+            import weight_calc as _wc
+            from common import _cur_ym as _cym
+            _wc._load_maps(); _wc._load_weld(); _wc._load_copper_master()
+            try: _wc.compute(_cym())          # 엔진 전개 캐시 채우기(읽기전용)
+            except Exception: pass
+        except Exception: pass
     # ★TestBed(FLOW_TESTBED=1)는 예열을 **동기로** 한다 — 하네스는 커넥션이 하나라
     #   예열 스레드가 본 스레드와 다투면 HY000 이 나고, 그렇다고 끄면 엔진이 차가워
     #   생산재고조회가 타임아웃한다(실측 600s 초과). 요청을 받기 전에 끝낸다.
