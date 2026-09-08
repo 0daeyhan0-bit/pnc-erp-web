@@ -1193,20 +1193,35 @@ def _prd_price(cur, target):
     # ★단가정본 = nx.price_item '매입' (DO_NOT_USE §18). 종전엔 라이브 dbo.PR_M_ITEM_COST 직독 —
     #   컷오버에 죽는 코드였다. 정렬은 원본 그대로 **적용일 기준**(MAIN_FLAG 미사용)이라 클린으로 그대로 옮겨진다.
     #   실측(거래처별 as-of 최신): 공통 16,875 중 **실제 값차이 0**(112건은 전부 반올림 ≤0.001).
-    cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), LTRIM(RTRIM(ISNULL(vendor_code,''))), price FROM (
-                     SELECT item_code, vendor_code, CAST(price AS float) price,
-                            ROW_NUMBER() OVER(PARTITION BY item_code, vendor_code ORDER BY apply_ymd DESC) rn
+    # ★정렬 tie-break 필수 — 같은 (품목,거래처,적용일) 이 여러 행이면 rn=1 이 무작위로 뽑힌다.
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), LTRIM(RTRIM(ISNULL(vendor_code,''))),
+                          price, apply_ymd FROM (
+                     SELECT item_code, vendor_code, CAST(price AS float) price, apply_ymd,
+                            ROW_NUMBER() OVER(PARTITION BY item_code, vendor_code
+                                              ORDER BY apply_ymd DESC, CAST(price AS float) DESC) rn
                        FROM PARTNER_ERP_TEST3.nx.price_item
                       WHERE price_type='매입' AND apply_ymd <= ?) t WHERE rn=1""", target)
     bycust = {}
-    for it, cu, c in cur.fetchall():
-        bycust.setdefault(str(it), {})[str(cu)] = float(c or 0)
+    for it, cu, c, ay in cur.fetchall():
+        bycust.setdefault(str(it), {})[str(cu)] = (float(c or 0), str(ay or ""))
     for it, m in bycust.items():
         if it in px:
             continue
-        v = m.get("2228") or m.get(incust.get(it, "")) or next((x for x in m.values() if x), 0.0)
+        p2228 = m.get("2228", (0.0, ""))[0]
+        pmain = m.get(incust.get(it, ""), (0.0, ""))[0]
+        if p2228:
+            v, src = p2228, "COST2228"
+        elif pmain:
+            v, src = pmain, "COST매입처"
+        else:
+            # ★★2026-09-08 — "아무 거래처"를 **결정적으로** 고른다: 적용일 최신, 같으면 거래처코드 순.
+            #   종전엔 next(x for x in m.values()) 라 **SQL 행 순서**(무보장)에 의존했다.
+            #   실측: _prd_price('260430') 를 3회 부르면 115~158품목의 단가가 매번 달랐고,
+            #   그래서 같은 달을 재마감할 때마다 생산 기말이 달라졌다(2604 +1,036,804 등).
+            #   마감은 '확정'인데 재현되지 않던 근본 원인이다.
+            cand = sorted(((a, c) for c, (pr, a) in m.items() if pr), reverse=True)
+            v, src = (m[cand[0][1]][0], "COST임의") if cand else (0.0, "")
         if v:
-            src = "COST2228" if m.get("2228") else ("COST매입처" if m.get(incust.get(it, "")) else "COST임의")
             px[it] = (float(v), src)
     _PRD_PX_CACHE[_ck] = (px, incust)
     return px, incust
@@ -1757,16 +1772,19 @@ def _prd_ledger(cur, fr6, to6):
                 avg = a0
             st[k] = [q0 + mv["net"], avg]
 
-    if pre_start <= pre_end:
-        pre = _prd_moves(cur, pre_start, pre_end)
-        for y in sorted(pre):
-            _step(state, pre[y], px)
-    begin = {k: [v[0], v[1]] for k, v in state.items()}
-
+    # ★단가 보강(BOM 부품합산)은 **어떤 전개보다 먼저** 한다 — 마감(_snap_prd)과 같은 순서.
+    #   종전엔 pre 구간을 보강 전 px 로 먼저 돌려서, pre 가 있는 달만 마감과 값이 갈렸다.
+    #   실측 2026-09-08: pre 가 존재하는 유일한 달인 2601 에서만 −827,176 차이가 났다
+    #   (2602~2608 은 직전 월 스냅샷이 기초라 pre 가 비어 있어 원래 일치했다).
+    pre = _prd_moves(cur, pre_start, pre_end) if pre_start <= pre_end else {}
     moves = _prd_moves(cur, fr6, to6)
-    need = sorted({k[0] for y in moves for k in moves[y] if k[0] not in px}
+    need = sorted({k[0] for y in pre for k in pre[y] if k[0] not in px}
+                  | {k[0] for y in moves for k in moves[y] if k[0] not in px}
                   | {k[0] for k in state if k[0] not in px})
     px.update(_prd_price_bom(cur, to6, need))
+    for y in sorted(pre):
+        _step(state, pre[y], px)
+    begin = {k: [v[0], v[1]] for k, v in state.items()}
 
     agg = {}
     for y in sorted(moves):
