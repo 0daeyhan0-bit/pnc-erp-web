@@ -224,6 +224,14 @@ CASES = [
          scope_ymd=lambda ctx: ctx["provday"],   # ★프로브 관측일자를 그 날로(기본=오늘이라 안 보인다)
          body=lambda ctx: _save("receipt", 7, ymd=ctx["provday"])(ctx)),
 
+    # ★영업 — 제품재고조정(웹). 이 전표가 영업 수불장·마감에 잡히는지가 핵심이라
+    #   전용 프로브(제품조정)로 기록 자체를 확인한다. 부호·수불장 반영은
+    #   _schema/ledger_signs_verify.py 가 엔진 레벨로 전수 검증한다(3부서 × 입출고/반품).
+    dict(kind="F", name="제품재고조정 (prodstockadj/save)", method="POST", path="/api/prodstockadj/save",
+         probe="제품조정", delta=+13, skip_if=lambda ctx: not ctx.get("asy_item"),
+         body=lambda ctx: {"maint_ymd": YMD, "item_code": ctx["asy_item"], "maint_tag": "2",
+                           "maint_qty": 13, "maint_cost": 0, "user": "flowverify"}),
+
     # ══ [R] 규칙 : 생산실적 재고 게이트 (예외 없음) ═══════════════════
     dict(kind="R", name="백플러시 — 자재부족 차단", method="POST", path="/api/backflush/post",
          keyword="자재부족으로 생산실적 불가", skip_if=lambda ctx: "prod_item" not in ctx,

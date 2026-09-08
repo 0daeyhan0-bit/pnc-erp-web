@@ -64,7 +64,10 @@ CASES = [
     # (도메인, 유형, 설명, 테이블, 주입컬럼dict, 기대방향)  기대: +1 재고증가 / -1 재고감소
     ("MAT", "입고", "자재입고관리 (tag 9, +수량)",      "PU", dict(tag="9",  qty=+QTY), +1),
     ("MAT", "출고", "자재출고관리 (tag B, −수량)",      "PU", dict(tag="B",  qty=-QTY), -1),
-    ("MAT", "반품", "자재반품 (RT→'T' 매핑, −수량)",    "PU", dict(tag="T",  qty=-QTY), -1),
+    ("MAT", "반품", "자재반품 (RT→'U' 신설태그, −수량)", "PU", dict(tag="U",  qty=-QTY), -1),
+    # ★회귀 가드 — 레거시 'T'(생산창고 반납)는 자재창고로 **되돌아오는** 것이라 자재재고 증가가 맞다.
+    #   반품을 T 에서 떼어낸 뒤에도 이 의미가 그대로여야 한다.
+    ("MAT", "반납", "생산창고 반납 (레거시 T, −수량)",   "PUP", dict(tag="T", qty=-QTY, wh="3"), +1),
     ("SAL", "입고", "생산입고 (tag P, +수량)",          "SA", dict(tag="P",  qty=+QTY), +1),
     ("SAL", "출고", "출하등록 (tag J, −수량)",          "SA", dict(tag="J",  qty=-QTY), -1),
     # ★부호는 추측하지 말고 레거시 실적을 따른다 — nx.SA_T_STOCK_MAINT tag 'R' 전기간 1건이
@@ -164,6 +167,7 @@ def main():
     for f in fails:
         print(f"   - [{f[0]}/{f[1]}] {f[2]} → {f[5]} (Δ{f[3]:+.1f}, 기대 {'증가' if f[4]>0 else '감소'})")
     print("\n(전 케이스 롤백 — 오염 0)")
+    return 1 if fails else 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())      # ★종료코드 — FAIL 이 있으면 1 (run_testbed.ps1 / CI 게이트)

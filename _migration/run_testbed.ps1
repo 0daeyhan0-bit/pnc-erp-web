@@ -79,3 +79,13 @@ if ($fails) {
   Write-Host "  ★조치 필요 $($fails.Count)건:"
   $fails | ForEach-Object { Write-Host "    $($_.Line.Trim())" }
 }
+
+# ── 5. ★수불장 부호 전수검증 (엔진 레벨) ──────────────────────
+#   flow TestBed 는 '전표가 3곳에 기록되는가'를 본다. 그것만으로는
+#   **수불장 엔진이 그 전표를 어느 방향으로 세는가**를 못 잡는다
+#   (2026-09-08 자재반품이 재고를 +로 늘리던 결함이 그래서 안 잡혔다).
+#   ⟹ 3부서 × 입고/출고/반품/조정 을 주입→측정→롤백으로 전수 검증한다.
+Write-Host ""
+Write-Host "── 수불장 부호 전수검증 (자재·생산·영업 × 입고/출고/반품) ──"
+& python _schema/ledger_signs_verify.py 2>&1 | Tee-Object -FilePath $out -Append
+if ($LASTEXITCODE -ne 0) { Write-Host "  ★수불장 부호검증 FAIL — 위 목록 확인" }

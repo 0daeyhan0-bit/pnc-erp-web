@@ -304,17 +304,16 @@ def _snap_mat_movavg_old(cur, ptype, period):
 #   재현 검증 = _migration/legacy_total_avg_verify.py
 #     2606/2607 품목집합 diff0 · 수량 100.00% · 단가 99.81/99.79%(잔차는 전부 알고리즘 외 사유).
 
-TA_IN_TAGS = ('3', '9', 'C', 'G', 'H', 'S', 'P', 'R')      # 자재입고
-TA_OUT_TAGS = ('1', '4', '5', '6', '8', 'A', 'B', 'J')     # 자재출고
-# ★★2026-09-08 실측 결함(미해결·대표 결정 대기) — **자재반품이 재고를 반대로 움직인다.**
-#   자재반품 화면은 tag 'RT' 로 쓰지만 nx.PU_T_STOCK_MAINT.MAINT_TAG 가 varchar(1) 이라
-#   저장이 안 돼(F2), stock.py:521 이 **'RT'→'T'** 로 매핑해 넣는다.
-#   그런데 레거시 'T' = 생산창고 반납(자재창고로 되돌아옴=입고 성격) 이라 아래 엔진이
-#   SUM(-MAINT_QTY) 로 **부호를 반전**시킨다 → 반품(-25 저장)이 +25 로 잡힌다.
-#   실측: 260907 품목 1NHA0801206 에 반품 25 삽입 → net +25 (감소해야 하는데 증가).
-#   ⟹ 고치려면 (a)MAINT_TAG varchar(4) 확장 후 'RT' 직접 저장+TA_OUT_TAGS 등록 또는
-#      (b)미사용 1글자 출고태그 신설. 미러 재복제·화면 표시 영향이 있어 결정 대기.
-#   정본 _schema/CLOSE_REDESIGN.md §11.
+TA_IN_TAGS = ('3', '9', 'C', 'G', 'H', 'S', 'P', 'R')                  # 자재입고
+TA_OUT_TAGS = ('1', '4', '5', '6', '8', 'A', 'B', 'J', 'U')            # 자재출고(U=자재반품)
+# ★'U' = 자재반품 (2026-09-08 신설·교정). 경위:
+#   자재반품 화면은 'RT' 로 쓰는데 MAINT_TAG 가 varchar(1) 이라 저장이 안 됐고(F2),
+#   그 대응으로 'T' 에 매핑했더니 레거시 'T'=생산창고 반납(자재창고로 되돌아옴=입고)이라
+#   아래 T 쿼리가 SUM(-MAINT_QTY) 로 부호를 반전 → **반품인데 재고가 +로 늘었다**(실측).
+#   ⟹ 레거시가 안 쓰는 1글자 'U' 를 자재반품으로 신설하고 출고 버킷에 넣는다.
+#   (스키마 확장 대신 태그 신설 = 미러 재복제에 안전 — CLOSE_REDESIGN §11 (b)안, 대표 확정)
+#   ★자재쪽 T 쿼리엔 out_wh_gubun 필터가 없다(생산쪽은 '3' 한정) — 그래서 반품행이 걸렸다.
+#   전수검증 = _schema/ledger_signs_verify.py (3부서 × 입고/출고/반품).
 
 def _ta_rnd(x):
     """T-SQL ROUND(x,0) = 반올림(.5 는 0 에서 먼 쪽). 파이썬 round() 는 은행가반올림이라 못 씀."""
@@ -946,6 +945,8 @@ def _prd_moves(cur, d_from, d_to):
         slot(y, it, lo)["inq"] += float(q or 0)
 
     # ⑥ 제품수불 in_part 입고
+    #   ★여기는 _prd_moves — 영업쪽 {SA}(미러∪웹조정) 가 아니라 미러를 그대로 읽는다.
+    #   웹 제품재고조정(nx.prod_stock_adjust)엔 in_part_code 컬럼이 없어 이 분기 대상이 아니다.
     cur.execute(f"""SELECT a.maint_ymd, a.item_code, a.IN_PART_CODE, SUM(CAST(a.MAINT_QTY AS float))
                       FROM {T3}sa_t_stock_maint a
                      WHERE a.maint_ymd BETWEEN ? AND ? AND a.in_part_code>''
@@ -1612,13 +1613,23 @@ def _sal_moves(cur, d_from, d_to):
     T3 = "PARTNER_ERP_TEST3.nx."
     out = {}
 
+    # ★영업 원장 = **미러 ∪ 웹조정** (컷오버 원칙 — 조회는 둘 다, 쓰기는 웹 전용 테이블).
+    #   제품재고조정 화면(prodstockadj)은 미러 delta-sync clobber 를 피하려고
+    #   신규 nx.prod_stock_adjust 에 쓴다. 그런데 여기서 그 테이블을 안 읽고 있었다 →
+    #   화면에서 등록한 재고조정(2)·**반품(R)**·불량(1) 이 수불장·마감에 **전혀 안 잡혔다**.
+    #   (2026-09-08 전수검증 FAIL 실측: 조정 100 넣어도 기말 Δ+0 — ledger_signs_verify.py)
+    #   in_part_code 는 웹 테이블에 없다(생산입고 전용 컬럼) → NULL 로 맞춰 UNION.
+    SA = (f"(SELECT maint_ymd, item_code, maint_qty, maint_tag, in_part_code FROM {T3}sa_t_stock_maint"
+          f"  UNION ALL"
+          f" SELECT maint_ymd, item_code, maint_qty, maint_tag, NULL FROM {T3}prod_stock_adjust)")
+
     def slot(y, item):
         return out.setdefault(str(y), {}).setdefault(
             str(item or "").strip().upper(), {"net": 0.0, "inq": 0.0, "outq": 0.0, "adj": 0.0})
 
     # ① 생산입고(tag P, in_part 없음)  ② 창고입고(tag B,V)
     cur.execute(f"""SELECT a.maint_ymd, UPPER(a.item_code), SUM(CAST(a.maint_qty AS float))
-                      FROM {T3}sa_t_stock_maint a
+                      FROM {SA} a
                      WHERE a.maint_ymd BETWEEN ? AND ? AND a.maint_qty<>0
                        AND ((a.maint_tag='P' AND ISNULL(a.in_part_code,'')='') OR a.maint_tag IN ('B','V'))
                      GROUP BY a.maint_ymd, UPPER(a.item_code)""", d_from, d_to)
@@ -1635,7 +1646,7 @@ def _sal_moves(cur, d_from, d_to):
 
     # ④ 창고출하(tag J,8,R)
     cur.execute(f"""SELECT a.maint_ymd, UPPER(a.item_code), SUM(-CAST(a.maint_qty AS float))
-                      FROM {T3}sa_t_stock_maint a
+                      FROM {SA} a
                      WHERE a.maint_ymd BETWEEN ? AND ? AND a.maint_tag IN ('J','8','R') AND a.maint_qty<>0
                      GROUP BY a.maint_ymd, UPPER(a.item_code)""", d_from, d_to)
     for y, it, q in cur.fetchall():
@@ -1644,7 +1655,7 @@ def _sal_moves(cur, d_from, d_to):
     # ⑤ 재고조정(tag 2) — ★040 은 `qty = basic+inq-etc-outq` 로 **etc 를 뺀다**.
     #   여기서는 adj 를 더하는 형태로 통일하되 부호를 040 과 맞춘다(etc = −maint_qty 이므로 adj = +maint_qty).
     cur.execute(f"""SELECT a.maint_ymd, UPPER(a.item_code), SUM(CAST(a.maint_qty AS float))
-                      FROM {T3}sa_t_stock_maint a
+                      FROM {SA} a
                      WHERE a.maint_ymd BETWEEN ? AND ? AND a.maint_tag='2' AND a.maint_qty<>0
                      GROUP BY a.maint_ymd, UPPER(a.item_code)""", d_from, d_to)
     for y, it, q in cur.fetchall():

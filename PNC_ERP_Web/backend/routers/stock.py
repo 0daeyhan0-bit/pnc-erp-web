@@ -518,13 +518,17 @@ def stock_save(payload: dict = Body(...)):
                         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,GETDATE(),?,?,GETDATE(),?)""",
                     # ★CUST_CODE=업무상 거래처(원문 그대로) / WH_CUST_CODE=창고코드(Z99990).
                     #   출고에서 _cc 를 버킷키용으로 Z99990 으로 덮으므로 여기선 원문을 다시 쓴다.
-                    ymd, _sq, ("T" if tag == "RT" else tag),
+                    ymd, _sq, ("U" if tag == "RT" else tag),
                     (str(r.get("CUST_CODE") or "").strip() or None), _mc, store_qty, (r.get("REMARKS") or None),
                     _cc, _gp,
                     (r.get("TO_GAGONG_PROC_CODE") or None), (r.get("OUT_WH_GUBUN") or None),
                     (r.get("ITEM_CODE") or None),
                     _usr, screen, _usr, screen)
-                    # ★F2: MAINT_TAG=CHAR(1) → 반품 'RT'(2글자) 잘림오류로 수불장 누락됐음 → 'T'(자재창고반품) 매핑
+                    # ★F2: MAINT_TAG=varchar(1) → 반품 'RT'(2글자) 잘림오류로 수불장 누락 → 1글자 매핑 필요.
+                    #   ★2026-09-08 'T'→'U' 교정: 레거시 'T'=생산창고 반납(자재창고로 되돌아옴=입고)이라
+                    #   수불장 엔진이 SUM(-QTY)로 부호를 반전시켜 **반품인데 재고가 늘었다**(실측 +100).
+                    #   'U'=자재반품(우리 신설·레거시 미사용 글자) 로 바꾸고 TA_OUT_TAGS 에 등록했다.
+                    #   근거·전수검증 = _schema/CLOSE_REDESIGN.md §11~§12 · _schema/ledger_signs_verify.py
             except Exception: pass
             saved += 1
         stock_changed("stock_save")           # ★재고 변경 → 수불장 캐시 버림
@@ -956,7 +960,7 @@ def stockclose_status(ym: str = Query(""), point: str = Query("")):
 def _mat_mirror_edit(cur, ymd, mat, cc, gp, tag, old_q, new_q, window):
     """★F1: 자재 원장(stock_ledger MAT) 수정/삭제 시 조회정본(자재재고 PU_T_MAT_STOCK_WH·자재수불장 PU_T_STOCK_MAINT)도 동반 반영.
        save는 3곳 반영하나 update/delete는 원장만 고쳐 수불장·재고가 stale(F1)였음. old_q→new_q(삭제=new_q=0).
-       ★F2: PU_T_STOCK_MAINT.MAINT_TAG=CHAR(1) → 반품 'RT'(2글자)는 'T'(자재창고반품)로 매핑(truncation 방지)."""
+       ★F2: PU_T_STOCK_MAINT.MAINT_TAG=varchar(1) → 반품 'RT'(2글자)는 'U'(자재반품)로 매핑(truncation 방지)."""
     mat = str(mat or "").strip()
     if not mat: return
     # ★★자재재고 버킷의 CUST_CODE 는 **창고 소유주**('Z99990' 고정)이지 원장의 거래처(매입처)가 아니다.
@@ -970,7 +974,7 @@ def _mat_mirror_edit(cur, ymd, mat, cc, gp, tag, old_q, new_q, window):
     _led_cc = (str(cc or "").strip() or "Z99990")   # 수불장 전표에 남길 거래처(원장 값 유지)
     cc = "Z99990"                                    # 재고 버킷키 = 창고 소유주 고정
     gp = (str(gp or "").strip() or "IS0001")
-    mtag = "T" if str(tag).strip() == "RT" else (str(tag or "").strip()[:1] or "2")
+    mtag = "U" if str(tag).strip() == "RT" else (str(tag or "").strip()[:1] or "2")   # ★'T'→'U'(2026-09-08 부호반전 교정)
     dq = new_q - old_q
     # 1) 자재재고 잔액(버킷=MAT_CODE·CUST_CODE·GAGONG_PROC_CODE) 델타 반영
     try:
