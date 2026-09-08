@@ -301,6 +301,40 @@ def order_soyo(eng, item):
     return {c: (round(v[0], 4), v[1]) for c, v in agg.items() if not c.upper().startswith('RAC')}
 
 
+def _sqlint(x):
+    """SQL Server CONVERT(int, float) 동치 = 0에서 먼 쪽 반올림(2.5→3). 재고>=0 전제. Python int()(절사)와 다름."""
+    return int(x + 0.5) if x >= 0 else -int(-x + 0.5)
+
+
+def stock_flow_rollup(eng, seed):
+    """[재고충당 상향롤업 walker] kitting T_SUB_CTE·plan_part410 재귀부 재현(§1-10).
+    seed={item: 정수재고}(=CONVERT(int,Σstock)+CONVERT(int,Σpr)). 각 재고품목에서 v_pr_bom(=bom_line) 하향전개,
+    except_flag≠1, 각 레벨 CONVERT(int, 값×USE_QTY) 절사(SQL 반올림=_sqlint), fixstk[(부모,자식)] += 그 값.
+    ※USE_QTY(생산수량PR 아님)·RAC/vir/make_type 필터 없음(T_SUB_CTE 원문). 반환 {(parent,child): int_qty}.
+    미러 pr_m_item_bom 재귀CTE 대체(컷오버 안전 §1-9-1). 선형전파라 경로전개=축약Flow 동일."""
+    fix = {}
+    def walk(node, val, seen, depth):
+        if val <= 0 or depth > 40:
+            return
+        for (c, uq, ex, sg) in _vpr_order(eng, node):
+            if ex == '1':
+                continue
+            ev = _sqlint(val * uq)
+            if ev == 0:
+                continue
+            key = (node, c)
+            fix[key] = fix.get(key, 0) + ev
+            if c not in seen:
+                walk(c, ev, seen | {c}, depth + 1)
+    for it, v in seed.items():
+        vi = _sqlint(v) if not isinstance(v, int) else v
+        if vi <= 0:
+            continue
+        k = it.strip().upper()
+        walk(k, vi, {k}, 0)
+    return fix
+
+
 def _setin_lines(eng, item):
     """세트입고 전개용 v_pr_bom 자식 (child, USE_QTY, except, set_except, in_gagong_proc). 캐시."""
     if not hasattr(eng, '_setl'):
