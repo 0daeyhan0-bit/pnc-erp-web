@@ -22,6 +22,10 @@ router = APIRouter()
 
 DOMAINS = {"MAT": "자재", "PRD": "생산", "SAL": "영업"}
 SNAP_READY = ("MAT", "PRD", "SAL")   # 스냅샷 확정 가능 도메인(PRD·SAL = 2026-08-27 추가, C2)
+# ★마감은 **시스템 단위**다(2026-09-08 대표 지시). 부서별로 따로 닫으면 자재만 풀리고
+#   생산·영업이 잠긴 채 남는다 — 실제로 그 사고가 났다. 순서는 단가 의존을 따른다:
+#   자재 확정단가 → 생산(BOM 부품비) → 영업(제품원가).
+CLOSE_ORDER = ("MAT", "PRD", "SAL")
 
 
 def _norm(domain, ptype, period):
@@ -97,16 +101,27 @@ def close_status():
 
 
 @router.get("/api/close/calendar")
-def close_calendar(domain: str = Query("MAT"), ym: str = Query("")):
-    """일자별 마감 캘린더(해당 월). 월마감돼 있으면 그 달 전 일자를 마감으로 본다(일마감 ⊂ 월마감)."""
-    d, _t, y = _norm(domain, "M", ym or "0000")
+def close_calendar(domain: str = Query(""), ym: str = Query("")):
+    """일자별 마감 캘린더(해당 월). 월마감돼 있으면 그 달 전 일자를 마감으로 본다(일마감 ⊂ 월마감).
+       ★시스템 단위(domain 생략/ALL) = 세 도메인이 **모두** 닫힌 날만 '마감', 일부만 닫힌 날은 '부분'.
+         부분이 보이면 그 날은 아직 시스템이 닫힌 게 아니다 — 눈으로 바로 잡으라고 따로 뺀다."""
+    doms = list(CLOSE_ORDER) if _is_all_domain(domain) else [_norm(domain, "M", ym or "0000")[0]]
+    _d0, _t, y = _norm(doms[0], "M", ym or "0000")
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute("""SELECT period FROM nx.period_close
-                       WHERE domain=? AND ptype='D' AND close_flag=1 AND period LIKE ?""", d, y + "%")
-        days = {r[0] for r in cur.fetchall()}
-        return {"domain": d, "ym": y, "month_closed": 1 if _is_closed(cur, d, "M", y) else 0,
-                "closed_days": sorted(days)}
+        cnt = {}
+        for d in doms:
+            cur.execute("""SELECT period FROM nx.period_close
+                           WHERE domain=? AND ptype='D' AND close_flag=1 AND period LIKE ?""", d, y + "%")
+            for r in cur.fetchall():
+                cnt[r[0]] = cnt.get(r[0], 0) + 1
+        n = len(doms)
+        mc = [d for d in doms if _is_closed(cur, d, "M", y)]
+        return {"domain": ("ALL" if n > 1 else doms[0]), "ym": y, "domains": doms,
+                "month_closed": 1 if len(mc) == n else 0,
+                "month_part": 1 if (mc and len(mc) < n) else 0,
+                "closed_days": sorted(k for k, v in cnt.items() if v >= n),
+                "part_days": sorted(k for k, v in cnt.items() if v < n)}
     finally:
         cn.close()
 
@@ -529,7 +544,26 @@ def _snap_mat_totalavg(cur, ptype, period):   # ★총평균 디스패처 — �
 
 def _mv_moves(cur, d_from, d_to):
     """[d_from,d_to] 일자별 자재 이동 → {ymd: {mat: {net,inq,outq,trans,pq,pamt}}}.
-       pq/pamt = **평균단가를 갱신하는 입고**(레거시 입고 tag + 수입). 그 외는 평균 불변."""
+       pq/pamt = **평균단가를 갱신하는 입고 = 금액이 실린 매입뿐**. 그 외는 평균 불변.
+
+       ★2026-09-08 수정(대표 지적 "왜 0이 되는거지? 로직이 매우 잘못 되었는데?").
+         종전엔 입고 tag 전부를 pq/pamt 에 넣었다. 실측(2601~2608, 평가대상 품목)한 태그별 금액:
+           9 개별입고  20,688건  46,292,041,405   (금액0  0.4%)
+           S 세트입고  49,684건   8,987,343,622   (금액0  0.1%)
+           5 매출출고  14,885건 -16,967,086,657   (금액0  2.1%)
+           2 장부수정   1,662건    -226,718,415   (금액0 87.5%)
+           B 생산키팅 출고 257,424건 / C 가공입고 20,877건 / 4 생산사용 3,044건
+           P 생산완료 후 자재창고 입고 5,673건 / J 설치실적 1,351건 / 1 25건
+             → 위 6개는 **전건 금액 0**
+         즉 금액이 실린 태그는 9·S·5·2 뿐이고, 나머지는 전표에 **금액 칸이 비어 있다**.
+         그런데 _mv_step 은 avg=(q0·a0+pamt)/(q0+pq) 이므로, 금액 미기재 입고를 pq 에 넣으면
+         **0원 매입으로 해석되어 평균이 깎인다**. 금액 0 은 "0원"이 아니라 미기재다.
+       ⟹ 금액이 실린 행만 평균을 갱신한다(pq = MAINT_AMT<>0 인 행의 수량).
+          금액 미기재 입고는 현재 평균단가로 평가되어 수량·금액이 함께 들어온다.
+       ※ 미결(추측 금지 — 아직 측정 안 됨): tag P(생산완료 SUB 반입)와 C(가공입고)는
+          가공비가 붙은 물건이라 '평균 불변'이 정확한 평가인지 별도 확인이 필요하다.
+          B(출고)와 C(입고)가 같은 물건의 왕복인지도 품목 단위로 확인되지 않았다
+          — 총량은 B 17,903,019 out vs C 1,468,753 in 으로 짝이 맞지 않는다."""
     out = {}
 
     def slot(y, m):
@@ -539,16 +573,20 @@ def _mv_moves(cur, d_from, d_to):
 
     ph_in = ','.join('?' * len(TA_IN_TAGS))
     cur.execute(f"""SELECT a.MAINT_YMD, a.MAT_CODE,
-                           SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
+                           SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float)),
+                           SUM(CASE WHEN ISNULL(a.MAINT_AMT,0)<>0
+                                    THEN CAST(a.MAINT_QTY AS float) ELSE 0 END)
                       FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                       JOIN PARTNER_ERP_TEST3.nx.item m ON a.MAT_CODE = m.ITEM_CODE
                      WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_QTY <> 0
                        AND a.MAINT_TAG IN ({ph_in})
                        AND NOT (ISNULL(a.INSP_FLAG,'N') IN ('S','F') AND ISNULL(a.INSP_PROC_FLAG,'0') <> '1')
                      GROUP BY a.MAINT_YMD, a.MAT_CODE""", d_from, d_to, *TA_IN_TAGS)
-    for y, m, q, amt in cur.fetchall():
-        d = slot(y, m); q = float(q or 0)
-        d["inq"] += q; d["pq"] += q; d["pamt"] += float(amt or 0)
+    for y, m, q, amt, pq in cur.fetchall():
+        d = slot(y, m)
+        d["inq"] += float(q or 0)
+        d["pq"] += float(pq or 0)        # ★금액이 실린 매입 수량만 평균 갱신
+        d["pamt"] += float(amt or 0)
 
     # 수입(도입): DIVISION<>'Q' = 입고(금액 TAXPAYERS, 이미 원화·평균갱신) / 'Q' = 수출출고
     cur.execute("""SELECT a.MAINT_YMD, a.MAT_CODE, a.DIVISION,
@@ -561,7 +599,10 @@ def _mv_moves(cur, d_from, d_to):
         if str(div or "").strip() == 'Q':
             d["outq"] += q
         else:
-            d["inq"] += q; d["pq"] += q; d["pamt"] += float(tax or 0)
+            tax = float(tax or 0)
+            d["inq"] += q; d["pamt"] += tax
+            if tax:                       # ★금액 미기재 수입은 평균 갱신 대상이 아니다
+                d["pq"] += q
 
     ph_out = ','.join('?' * len(TA_OUT_TAGS))
     cur.execute(f"""SELECT a.MAINT_YMD, a.MAT_CODE, SUM(-CAST(a.MAINT_QTY AS float))
@@ -626,7 +667,13 @@ def _mv_buyprice(cur, target):
          전개구간에 매입이 없으면 기초 단가가 그대로 유지되는데, 레거시 기초에 금액이 0 으로
          들어온 품목은 영원히 0 이 된다(실측 2026-08-27: 자재 단가0 170건 중 73건이 이 경우).
          재고자산을 0 으로 누락시키는 것보다 **실제 지불가로 계상**하는 것이 정확하다.
-       ※이동평균법 자체를 바꾸는 것이 아니라 **결함 기초를 보정**하는 것이다."""
+       ※이동평균법 자체를 바꾸는 것이 아니라 **결함 기초를 보정**하는 것이다.
+       ★2026-09-08 분모 수정 — 종전엔 TA_IN_TAGS 전체 수량을 분모로 썼다. 그 안에 금액이
+         미기재인 가공입고(C)·생산완료 반입(P) 수량이 섞여 있어 단가가 깎였다.
+         실측 5210A22840A: 매입 tag9 20,046개/3,488,004원 = **174.00원**인데 분모에 tag C
+         18,838개가 더해져 89.93원으로 반토막 났다. ⟹ 분모도 금액이 실린 행의 수량만 쓴다.
+         1,294품목의 단가가 달라진다(수정값이 174·2,265·3,050·2,500 처럼 정수로 떨어지는 것이 근거).
+         같은 식을 쓰는 생산 단가 해석부(_prd_price ②')도 같이 고쳤다."""
     # ★캐시 키 = as-of 일자 전체(2026-08-30) — 값이 as-of 누계인데 월 키를 쓰면
     #   월초에 먼저 부른 값이 그 달 전체에 박힌다(_PRD_PX_CACHE 와 같은 결함).
     ck = str(target)
@@ -634,7 +681,9 @@ def _mv_buyprice(cur, target):
         return _MAT_BUY_CACHE[ck]
     ph_in = ','.join('?' * len(TA_IN_TAGS))
     cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(a.MAT_CODE))),
-                          SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
+                          SUM(CASE WHEN ISNULL(a.MAINT_AMT,0)<>0
+                                   THEN CAST(a.MAINT_QTY AS float) ELSE 0 END),
+                          SUM(CAST(a.MAINT_AMT AS float))
                      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                     WHERE a.MAINT_YMD <= ? AND a.MAINT_QTY <> 0
                       AND a.MAINT_TAG IN ({ph_in})
@@ -1121,7 +1170,9 @@ def _prd_price(cur, target):
     #    (신성소재 2204·성보스프링 2274 매입). 마스터에는 없어서 놓치던 것.
     ph_in = ','.join('?' * len(TA_IN_TAGS))
     cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(a.MAT_CODE))),
-                          SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
+                          SUM(CASE WHEN ISNULL(a.MAINT_AMT,0)<>0
+                                   THEN CAST(a.MAINT_QTY AS float) ELSE 0 END),
+                          SUM(CAST(a.MAINT_AMT AS float))
                      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                     WHERE a.MAINT_YMD <= ? AND a.MAINT_QTY <> 0
                       AND a.MAINT_TAG IN ({ph_in})
@@ -1142,20 +1193,35 @@ def _prd_price(cur, target):
     # ★단가정본 = nx.price_item '매입' (DO_NOT_USE §18). 종전엔 라이브 dbo.PR_M_ITEM_COST 직독 —
     #   컷오버에 죽는 코드였다. 정렬은 원본 그대로 **적용일 기준**(MAIN_FLAG 미사용)이라 클린으로 그대로 옮겨진다.
     #   실측(거래처별 as-of 최신): 공통 16,875 중 **실제 값차이 0**(112건은 전부 반올림 ≤0.001).
-    cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), LTRIM(RTRIM(ISNULL(vendor_code,''))), price FROM (
-                     SELECT item_code, vendor_code, CAST(price AS float) price,
-                            ROW_NUMBER() OVER(PARTITION BY item_code, vendor_code ORDER BY apply_ymd DESC) rn
+    # ★정렬 tie-break 필수 — 같은 (품목,거래처,적용일) 이 여러 행이면 rn=1 이 무작위로 뽑힌다.
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), LTRIM(RTRIM(ISNULL(vendor_code,''))),
+                          price, apply_ymd FROM (
+                     SELECT item_code, vendor_code, CAST(price AS float) price, apply_ymd,
+                            ROW_NUMBER() OVER(PARTITION BY item_code, vendor_code
+                                              ORDER BY apply_ymd DESC, CAST(price AS float) DESC) rn
                        FROM PARTNER_ERP_TEST3.nx.price_item
                       WHERE price_type='매입' AND apply_ymd <= ?) t WHERE rn=1""", target)
     bycust = {}
-    for it, cu, c in cur.fetchall():
-        bycust.setdefault(str(it), {})[str(cu)] = float(c or 0)
+    for it, cu, c, ay in cur.fetchall():
+        bycust.setdefault(str(it), {})[str(cu)] = (float(c or 0), str(ay or ""))
     for it, m in bycust.items():
         if it in px:
             continue
-        v = m.get("2228") or m.get(incust.get(it, "")) or next((x for x in m.values() if x), 0.0)
+        p2228 = m.get("2228", (0.0, ""))[0]
+        pmain = m.get(incust.get(it, ""), (0.0, ""))[0]
+        if p2228:
+            v, src = p2228, "COST2228"
+        elif pmain:
+            v, src = pmain, "COST매입처"
+        else:
+            # ★★2026-09-08 — "아무 거래처"를 **결정적으로** 고른다: 적용일 최신, 같으면 거래처코드 순.
+            #   종전엔 next(x for x in m.values()) 라 **SQL 행 순서**(무보장)에 의존했다.
+            #   실측: _prd_price('260430') 를 3회 부르면 115~158품목의 단가가 매번 달랐고,
+            #   그래서 같은 달을 재마감할 때마다 생산 기말이 달라졌다(2604 +1,036,804 등).
+            #   마감은 '확정'인데 재현되지 않던 근본 원인이다.
+            cand = sorted(((a, c) for c, (pr, a) in m.items() if pr), reverse=True)
+            v, src = (m[cand[0][1]][0], "COST임의") if cand else (0.0, "")
         if v:
-            src = "COST2228" if m.get("2228") else ("COST매입처" if m.get(incust.get(it, "")) else "COST임의")
             px[it] = (float(v), src)
     _PRD_PX_CACHE[_ck] = (px, incust)
     return px, incust
@@ -1256,8 +1322,14 @@ def _prd_price_bom(cur, target, need):
     return out
 
 
-def _prd_base(cur, target):
-    """기초 = 직전 확정 PRD 스냅샷. 없으면 레거시 2502 생산 월마감 시드."""
+def _prd_base(cur, target, monthly=False):
+    """기초 = 직전 확정 PRD 스냅샷. 없으면 레거시 2502 생산 월마감 시드.
+       ★monthly=True(월마감): 일마감(잠정)을 기초로 쓰지 않고 **전월 월마감**만 기초로 → 그 달 전체 재생.
+         자재(_mv_base monthly)와 같은 규칙으로 맞춘 것이다(2026-09-08).
+         종전엔 target 직전 확정을 그대로 골라 8/31 월마감이 **8/30 일마감**을 기초로 하루치만
+         전개했다 — 자재에서 −548,851 드리프트를 만든 바로 그 구조다(CLOSE_REDESIGN §13-2).
+         ※영업(_snap_sal)은 _sal_ledger 를 "그 달 1일~말일"로 부르므로 구조상 이미 전월말 기초다.
+       """
     # ★TOP 1 을 뽑고 나서 target 조건을 검사하면, 그 아래 쓸 수 있는 마감이 있어도
     #   레거시 시드로 떨어진다(MAT 에서 실측된 것과 같은 결함 — §19). 후보를 훑어 첫 유효분을 쓴다.
     cur.execute("""SELECT ptype, period FROM nx.period_close
@@ -1266,6 +1338,8 @@ def _prd_base(cur, target):
                     ORDER BY CASE WHEN ptype='D' THEN period ELSE period+'99' END DESC""", target)
     for pt, per in cur.fetchall():
         end = per if pt == 'D' else _month_end(per)
+        if monthly and pt == 'D':          # ★월마감은 잠정 일마감을 기초로 쓰지 않는다(전체재생)
+            continue
         if end < target and not (pt == 'D' and _fp_stale(cur, 'PRD', pt, per)):   # ★stale 잠정 스냅샷 건너뜀
             st = {}
             for it, lo, q, amt, av in _snapshot_rows(cur, 'PRD', pt, per, with_loc=True):
@@ -1292,7 +1366,7 @@ def _snap_prd(cur, ptype, period):
     """★생산 마감 = 이동평균법(매입가 기반, §12-8). 축=(품목×재고위치). 반환 (행수, 기준설명)."""
     import datetime as _dt
     target = period if ptype == "D" else _month_end(period)
-    state, base_ymd, src = _prd_base(cur, target)
+    state, base_ymd, src = _prd_base(cur, target, monthly=(ptype == "M"))   # ★월마감=전월말 전체재생
     try:
         b = _dt.date(2000 + int(base_ymd[:2]), int(base_ymd[2:4]), int(base_ymd[4:6])) + _dt.timedelta(days=1)
         start = f"{b.year % 100:02d}{b.month:02d}{b.day:02d}"
@@ -1471,9 +1545,51 @@ def close_anomaly(domain: str = Query("MAT"), ptype: str = Query("M"), period: s
         cn.close()
 
 
+def _is_all_domain(domain):
+    """빈 값·ALL·SYS = 시스템 단위(전 도메인). 마감은 회사 단위 행위지 부서별 행위가 아니다."""
+    return str(domain or "").strip().upper() in ("", "ALL", "SYS", "*")
+
+
+def _close_all(payload, fn, order, verb):
+    """전 도메인 일괄 실행. 한 도메인이 걸려도 나머지는 진행하고, 무엇이 남았는지 msg 에 남긴다.
+       (전부 실패하면 첫 사유를 그대로 올려 화면이 진짜 원인을 보여주게 한다)"""
+    ok, skip, fail = [], [], []
+    for d in order:
+        pl = dict(payload); pl["domain"] = d
+        try:
+            ok.append(fn(pl))
+        except HTTPException as e:
+            (skip if e.status_code == 409 else fail).append((d, str(e.detail)))
+        except Exception as e:
+            fail.append((d, f"{type(e).__name__}: {e}"))
+    if not ok:
+        d0, det0 = (fail or skip)[0]
+        raise HTTPException(500 if fail else 409, f"{DOMAINS[d0]} — {det0}")
+    t = str(payload.get("ptype", "")).strip().upper()
+    part = " · ".join(f"{DOMAINS[r['domain']]} {(r.get('snapshot_rows') or r.get('snapshot_removed') or 0):,}품목"
+                      for r in ok)
+    msg = f"시스템 {'월' if t == 'M' else '일'}{verb} — " + part
+    for d, det in (skip + fail):
+        msg += f"\n✖ {DOMAINS[d]} — {det}"
+    return {"ok": (not fail and not skip), "domain": "ALL", "ptype": t,
+            "period": (ok[0]["period"] if ok else ""),
+            "snapshot_rows": sum(int(r.get("snapshot_rows") or 0) for r in ok),
+            "snapshot_removed": sum(int(r.get("snapshot_removed") or 0) for r in ok),
+            "results": ok,
+            "skipped": [{"domain": d, "detail": x} for d, x in skip],
+            "failed": [{"domain": d, "detail": x} for d, x in fail], "msg": msg}
+
+
 @router.post("/api/close/run")
 def close_run(payload: dict = Body(...)):
-    """마감 실행. ★2026-09-08 재설계(CLOSE_REDESIGN §3·§5·§8-2)로 일/월의 성격이 갈린다.
+    """마감 실행 — domain 을 생략하거나 ALL 이면 **시스템 단위**(자재→생산→영업 일괄)."""
+    if _is_all_domain(payload.get("domain")):
+        return _close_all(payload, _close_run_one, CLOSE_ORDER, "마감")
+    return _close_run_one(payload)
+
+
+def _close_run_one(payload: dict):
+    """마감 실행(단일 도메인). ★2026-09-08 재설계(CLOSE_REDESIGN §3·§5·§8-2)로 일/월의 성격이 갈린다.
          · 일마감(D) = **잠정 스냅샷**. 잠그지 않고(=_lock_msg 대상 아님) 순서 강제도 없다.
                        재실행 = 갱신(refresh, 멱등) — 조정이 들어오면 다시 돌린다.
          · 월마감(M) = **유일한 확정·잠금**. 중복 확정 금지 + 직전 월 연쇄 가드 유지.
@@ -1539,7 +1655,14 @@ def close_run(payload: dict = Body(...)):
 
 @router.post("/api/close/cancel")
 def close_cancel(payload: dict = Body(...)):
-    """마감 해제(reopen) = 잠금 해제 + 스냅샷 제거 + 로그.
+    """마감 해제 — domain 생략/ALL 이면 시스템 단위(영업→생산→자재, 마감의 역순)."""
+    if _is_all_domain(payload.get("domain")):
+        return _close_all(payload, _close_cancel_one, tuple(reversed(CLOSE_ORDER)), "마감 해제")
+    return _close_cancel_one(payload)
+
+
+def _close_cancel_one(payload: dict):
+    """마감 해제(reopen, 단일 도메인) = 잠금 해제 + 스냅샷 제거 + 로그.
        ★월마감(확정) 해제 = 수퍼관리자만 + 후속 월이 마감돼 있으면 불가(기초 연쇄의존).
        ★일마감(잠정) 해제 = 그냥 잠정 스냅샷 버리기 → 일반 마감권한, 순서 가드 없음.
          (확정을 되돌리는 게 아니므로 수퍼관리자까지 요구하면 과하다 — CLOSE_REDESIGN §3·#3)"""
@@ -1649,16 +1772,19 @@ def _prd_ledger(cur, fr6, to6):
                 avg = a0
             st[k] = [q0 + mv["net"], avg]
 
-    if pre_start <= pre_end:
-        pre = _prd_moves(cur, pre_start, pre_end)
-        for y in sorted(pre):
-            _step(state, pre[y], px)
-    begin = {k: [v[0], v[1]] for k, v in state.items()}
-
+    # ★단가 보강(BOM 부품합산)은 **어떤 전개보다 먼저** 한다 — 마감(_snap_prd)과 같은 순서.
+    #   종전엔 pre 구간을 보강 전 px 로 먼저 돌려서, pre 가 있는 달만 마감과 값이 갈렸다.
+    #   실측 2026-09-08: pre 가 존재하는 유일한 달인 2601 에서만 −827,176 차이가 났다
+    #   (2602~2608 은 직전 월 스냅샷이 기초라 pre 가 비어 있어 원래 일치했다).
+    pre = _prd_moves(cur, pre_start, pre_end) if pre_start <= pre_end else {}
     moves = _prd_moves(cur, fr6, to6)
-    need = sorted({k[0] for y in moves for k in moves[y] if k[0] not in px}
+    need = sorted({k[0] for y in pre for k in pre[y] if k[0] not in px}
+                  | {k[0] for y in moves for k in moves[y] if k[0] not in px}
                   | {k[0] for k in state if k[0] not in px})
     px.update(_prd_price_bom(cur, to6, need))
+    for y in sorted(pre):
+        _step(state, pre[y], px)
+    begin = {k: [v[0], v[1]] for k, v in state.items()}
 
     agg = {}
     for y in sorted(moves):
