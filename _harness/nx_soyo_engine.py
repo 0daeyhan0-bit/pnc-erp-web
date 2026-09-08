@@ -855,6 +855,40 @@ def copper_by_spec(eng, item):
     return walk(item)
 
 
+# ========================= 원소재(동) 중량 소요 — 공용 정본(bom_flat 기반, =lgsagub._dong_of 승격) =========================
+# ★원소재 동 중량 소요 정본 = nx.bom_flat.weight_actual(우리실측·변형SUB dedup·검증 LG AP −0.9%). CU/고강도만.
+#   copper_by_spec/weight_explode(nx.bom_line)는 변형SUB 2중계상(−19.6%)이라 소요엔 쓰지 말 것(원가 primitive).
+#   소비자: lgsagub(사급현황)·matexpect(예상매입)·절삭(procbc 원자재 중량차감). §1-10 중량소요 통일.
+def dong_weight_by_spec(eng, item):
+    """[동 중량소요 walker] 완제품 1개 → {(metal,diam,thick): kg}. nx.bom_flat(weight_actual×qty)·metal∈(CU,고강도).
+    lgsagub._dong_of 승격판(동일 SQL). 절삭 원자재 중량차감·사급 대사 공용."""
+    eng.cur.execute("""SELECT LTRIM(RTRIM(i.metal_gubun)) mg, ISNULL(bf.fin_diam,0) d, ISNULL(bf.fin_thick,0) t,
+            SUM(ISNULL(bf.weight_actual,0)*ISNULL(bf.qty,0)) w
+          FROM nx.bom_flat bf JOIN nx.item i ON UPPER(LTRIM(RTRIM(i.item_code)))=UPPER(LTRIM(RTRIM(bf.leaf_code)))
+          WHERE UPPER(LTRIM(RTRIM(bf.item_code)))=? AND ISNULL(bf.weight_actual,0)>0
+            AND LTRIM(RTRIM(i.metal_gubun)) IN (N'CU', N'고강도')
+          GROUP BY LTRIM(RTRIM(i.metal_gubun)), ISNULL(bf.fin_diam,0), ISNULL(bf.fin_thick,0)""", item.strip().upper())
+    out = {}
+    for mg, d, t, w in eng.cur.fetchall():
+        k = ((mg or '').strip(), float(d or 0), float(t or 0))
+        out[k] = out.get(k, 0.0) + float(w or 0)
+    return out
+
+
+def rawtube_by_spec(eng):
+    """규격(metal,diam,thick) → 원자재 raw tube 코드(7072AR9374x, Tube,Raw) 매핑. 캐시.
+    ★1:1 확인(2026-09-08: 14 CU tube·규격중복0). 절삭 원자재 중량차감의 차감대상 코드 결정용."""
+    if hasattr(eng, '_rtbs'):
+        return eng._rtbs
+    eng.cur.execute("""SELECT LTRIM(RTRIM(metal_gubun)), ISNULL(diam,0), ISNULL(thick,0), UPPER(LTRIM(RTRIM(item_code)))
+        FROM nx.item WHERE item_name LIKE '%Raw%' AND ISNULL(diam,0)>0 AND metal_gubun IN (N'CU', N'고강도')""")
+    m = {}
+    for mg, d, t, code in eng.cur.fetchall():
+        m[((mg or '').strip(), float(d or 0), float(t or 0))] = code
+    eng._rtbs = m
+    return m
+
+
 # ========================= 용접봉 소요 (geom/원가/재고 트랙, =weight_calc._load_weld 재현) =========================
 # 용접봉 소요(CS_T_ITEM_WELD.ITEM_USE_QTY 관경별 × 1.5, 품목별 flat) = ★원가/재고소비 트랙 primitive. 15/15검증(레거시 w_cs_esti ×1.5룰).
 #   ★주의: 협력사 "수불정산"의 용접봉 소요 정본은 이게 아님 — **협력사 견적서 기준**(coop_quote_part_v2 ptype_v2='용접봉' soyo, compute_quote).
