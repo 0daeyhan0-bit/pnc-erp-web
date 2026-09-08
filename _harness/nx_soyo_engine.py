@@ -363,6 +363,40 @@ def setin_soyo(eng, item, cust):
              'insp_flag': (v[1] or 'N'), 'in_gpc': g} for (m, g), v in out.items()]
 
 
+def _bc_lines(eng, item):
+    """세트입고 자재차감(procbc)용 v_pr_bom 자식 (child, USE_QTY, except, set_except, in_gagong, vir). 캐시."""
+    if not hasattr(eng, '_bcl'):
+        eng._bcl = {}
+    k = item.strip().upper()
+    if k not in eng._bcl:
+        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(mat_code))), CAST(ISNULL(USE_QTY,0) AS float), ISNULL(except_flag,'0'),
+                ISNULL(set_except_flag,'0'), ISNULL(LTRIM(RTRIM(in_gagong_proc_code)),''), ISNULL(vir_item_flag,'0')
+            FROM nx.v_pr_bom WHERE UPPER(LTRIM(RTRIM(item_code)))=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
+            ORDER BY BOM_SEQ""", k)
+        eng._bcl[k] = [(str(r[0]).strip(), float(r[1] or 0), str(r[2]).strip(), str(r[3]).strip(), str(r[4]).strip(), str(r[5]).strip())
+                       for r in eng.cur.fetchall()]
+    return eng._bcl[k]
+
+
+def setinput_bc_soyo(eng, item, part_default=''):
+    """[세트입고 자재차감 walker] procbc._bc_bom(dw_pr_input_028_5) 재현 = VIR('1') 재귀(자신 미수집·자식 use배),
+    except≠1 AND set_except≠1, 비VIR 수집(use*mult, in_gagong|part_default), depth≤5. 반환 [(mat, qty, gpc)].
+    ※procbc는 dedup 안 함(레거시 원문)·sagub 무관·in_gagong grain. §1-10."""
+    acc = []
+    def walk(node, mult, depth):
+        if depth > 5:
+            return
+        for (c, q, ex, se, gpc, vir) in _bc_lines(eng, node):
+            if ex == '1' or se == '1' or q <= 0:
+                continue
+            if vir == '1':
+                walk(c, mult * q, depth + 1)
+            else:
+                acc.append((c, q * mult, gpc or part_default))
+    walk(item.strip().upper(), 1.0, 0)
+    return acc
+
+
 def plan_explode(eng, item):
     """[생산계획 stage1] STEP6 CTE_BOM 재현 → plan_part_temp(per-unit).
     v_pr_bom 재귀, except_flag≠1, level<10, PR_M_MAT 경계(추가는 하되 재귀 정지). vir_item 추적.
