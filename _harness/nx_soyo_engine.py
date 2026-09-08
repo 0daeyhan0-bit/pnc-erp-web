@@ -306,17 +306,38 @@ def _sqlint(x):
     return int(x + 0.5) if x >= 0 else -int(-x + 0.5)
 
 
+def _stk_lines(eng, item):
+    """재고롤업용 bom_line 직상위 자식 (child, qty=USE_QTY, except_flag). 캐시.
+    ★v_pr_bom 이 아니라 bom_line 직독 — v_pr_bom 은 proc_weld 용접브랜치(BOM_SEQ=900 '[weld]')를 UNION 해
+    용접봉(RAC)을 2번 방출한다. 미러 pr_m_item_bom(용접브랜치 없음)과 diff0 하려면 bom_line 브랜치만 읽어야 함.
+    max버전 헤더 조인. qty=bom_line.qty(=미러 USE_QTY, USE_QTY_PR 아님)."""
+    if not hasattr(eng, '_stkl'):
+        eng._stkl = {}
+    k = item.strip().upper()
+    if k not in eng._stkl:
+        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(bl.child_item))), CAST(bl.qty AS float),
+                CASE WHEN ISNULL(bl.except_flag,0)=1 THEN '1' ELSE '0' END
+            FROM nx.bom_header h
+            JOIN (SELECT item_code, MAX(ISNULL(version,1)) mv FROM nx.bom_header GROUP BY item_code) mx
+                 ON mx.item_code=h.item_code AND ISNULL(h.version,1)=mx.mv
+            JOIN nx.bom_line bl ON bl.bom_id=h.bom_id
+            WHERE UPPER(LTRIM(RTRIM(h.item_code)))=? ORDER BY bl.seq""", k)
+        eng._stkl[k] = [(str(r[0]).strip(), float(r[1] or 0), str(r[2]).strip()) for r in eng.cur.fetchall()]
+    return eng._stkl[k]
+
+
 def stock_flow_rollup(eng, seed):
     """[재고충당 상향롤업 walker] kitting T_SUB_CTE·plan_part410 재귀부 재현(§1-10).
-    seed={item: 정수재고}(=CONVERT(int,Σstock)+CONVERT(int,Σpr)). 각 재고품목에서 v_pr_bom(=bom_line) 하향전개,
+    seed={item: 정수재고}(=CONVERT(int,Σstock)+CONVERT(int,Σpr)). 각 재고품목에서 bom_line 하향전개,
     except_flag≠1, 각 레벨 CONVERT(int, 값×USE_QTY) 절사(SQL 반올림=_sqlint), fixstk[(부모,자식)] += 그 값.
     ※USE_QTY(생산수량PR 아님)·RAC/vir/make_type 필터 없음(T_SUB_CTE 원문). 반환 {(parent,child): int_qty}.
-    미러 pr_m_item_bom 재귀CTE 대체(컷오버 안전 §1-9-1). 선형전파라 경로전개=축약Flow 동일."""
+    미러 pr_m_item_bom 재귀CTE 대체(컷오버 안전 §1-9-1). 선형전파라 경로전개=축약Flow 동일.
+    ★소스=bom_line 직독(_stk_lines) — v_pr_bom 용접브랜치 2배 방출 회피(미러 diff0)."""
     fix = {}
     def walk(node, val, seen, depth):
         if val <= 0 or depth > 40:
             return
-        for (c, uq, ex, sg) in _vpr_order(eng, node):
+        for (c, uq, ex) in _stk_lines(eng, node):
             if ex == '1':
                 continue
             ev = _sqlint(val * uq)
