@@ -731,19 +731,25 @@ def ready_bomsheet(item: str = Query(...), gpc: str = Query("")):
             -- ★2026-08-24 정렬 = 계층 유지 + 각 레벨 안에서 품목코드 오름차순(레거시 인쇄본 순서).
             --   구버전은 BOM_SEQ 경로순이라 레벨1이 AJR77163102-S2-1 부터 나오는 등 순서가 뒤섞였다.
             --   경로를 코드로 쌓으면 부모 바로 뒤에 자식이 붙으면서 형제끼리는 코드순이 된다.
-            WITH CTE (lvl, seq, path, mat_code, use_qty) AS (
-                SELECT 1, b.BOM_SEQ,
-                       CAST(b.MAT_CODE AS varchar(900)),
-                       b.MAT_CODE, CAST(ISNULL(b.USE_QTY,0) AS float)
-                  FROM nx.PR_M_ITEM_BOM b WITH(NOLOCK)
-                 WHERE b.ITEM_CODE=? AND ISNULL(b.EXCEPT_FLAG,'0')<>'1'
+            -- ★미러→클린(2026-09-09): PR_M_ITEM_BOM → nx.bom_line+bom_header(최대버전). v_pr_bom은 용접브랜치로
+            --   RAC 12/60 어긋나 부적합 → bom_line 직접이 PR과 완전 diff0(60/60·RAC포함). "레거시 화면 동일" 유지.
+            WITH H AS (SELECT h.bom_id, UPPER(LTRIM(RTRIM(h.item_code))) ic FROM nx.bom_header h
+                       JOIN (SELECT item_code, MAX(ISNULL(version,1)) mv FROM nx.bom_header GROUP BY item_code) mx
+                         ON mx.item_code=h.item_code AND ISNULL(h.version,1)=mx.mv),
+            CTE (lvl, seq, path, mat_code, use_qty) AS (
+                SELECT 1, bl.seq,
+                       CAST(bl.child_item AS varchar(900)),
+                       UPPER(LTRIM(RTRIM(bl.child_item))), CAST(ISNULL(bl.qty,0) AS float)
+                  FROM H h JOIN nx.bom_line bl WITH(NOLOCK) ON bl.bom_id=h.bom_id
+                 WHERE h.ic=UPPER(LTRIM(RTRIM(?))) AND ISNULL(bl.except_flag,0)<>1
                 UNION ALL
-                SELECT c.lvl+1, b.BOM_SEQ,
-                       CAST(c.path+CHAR(1)+b.MAT_CODE AS varchar(900)),
-                       b.MAT_CODE, CAST(ISNULL(b.USE_QTY,0) AS float)
+                SELECT c.lvl+1, bl.seq,
+                       CAST(c.path+CHAR(1)+bl.child_item AS varchar(900)),
+                       UPPER(LTRIM(RTRIM(bl.child_item))), CAST(ISNULL(bl.qty,0) AS float)
                   FROM CTE c
-                  JOIN nx.PR_M_ITEM_BOM b WITH(NOLOCK) ON b.ITEM_CODE=c.mat_code
-                 WHERE ISNULL(b.EXCEPT_FLAG,'0')<>'1'
+                  JOIN H h ON h.ic=c.mat_code
+                  JOIN nx.bom_line bl WITH(NOLOCK) ON bl.bom_id=h.bom_id
+                 WHERE ISNULL(bl.except_flag,0)<>1
                    AND c.lvl < 10                    -- 순환 BOM 방어(실측 최대 3레벨)
             )
             SELECT c.lvl, c.mat_code, c.use_qty,
