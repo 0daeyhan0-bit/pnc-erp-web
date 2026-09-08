@@ -50,7 +50,7 @@ def qc_opt(kind: str = Query("part"), q: str = Query("")):
             cur.execute("""SELECT TOP 50 CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust
                 WHERE CUST_CODE LIKE ? OR CUST_DESC LIKE ? ORDER BY CUST_DESC""", like, like)
         elif kind == "line":
-            cur.execute("SELECT TOP 50 LINE_NO code, LINE_NO nm FROM PARTNER_ERP_TEST3.nx.PR_M_LINE_NO WHERE LINE_NO LIKE ? ORDER BY LINE_NO", like)
+            cur.execute("SELECT TOP 50 LINE_NO code, LINE_NO nm FROM PARTNER_ERP_TEST3.nx.line_no WHERE LINE_NO LIKE ? ORDER BY LINE_NO", like)
         elif kind == "item":
             cur.execute("""SELECT TOP 50 ITEM_CODE, ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item
                 WHERE ITEM_CODE LIKE ? OR item_name LIKE ? ORDER BY ITEM_CODE""", like, like)

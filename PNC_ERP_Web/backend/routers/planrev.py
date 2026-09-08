@@ -362,7 +362,7 @@ def _step7_sql(cur):
       INTO nx.plan_direct_pull
       FROM nx.plan_dtl d
       {LPJ}
-      JOIN {P}PR_M_LINE_NO L ON RTRIM(L.LINE_NO)=RTRIM(d.LINE_NO) AND ISNULL(L.CUST_MAINT_DAY,0)>0
+      JOIN {P}line_no L ON RTRIM(L.LINE_NO)=RTRIM(d.LINE_NO) AND ISNULL(L.CUST_MAINT_DAY,0)>0
       JOIN #wd w1 ON w1.ymd6={BASE}
       JOIN #wd w2 ON w2.rn=w1.rn-CAST(L.CUST_MAINT_DAY AS int)
      WHERE ISNULL(d.PLAN_YMD,'')<>''""").replace("{P}", P).replace("{LPJ}", _lpj).replace("{BASE}", _base))
@@ -1904,7 +1904,7 @@ def _ensure_line_pull(cur):
              ISNULL(l.MAINT_DAY,0), ISNULL(l.MAINT_HHMM,''), RTRIM(ISNULL(d.LINE_NO,''))
         FROM nx.plan_dtl d
         OUTER APPLY (SELECT TOP 1 m.MAINT_DAY, m.MAINT_HHMM
-                       FROM nx.PR_M_LINE_NO m
+                       FROM nx.line_no m   -- ★R01 클린(미러 직독 은퇴 260909·레거시 일치정렬)
                       WHERE RTRIM(m.LINE_NO)=RTRIM(d.LINE_NO)
                         AND m.APPLY_YMD <= ISNULL(NULLIF(d.ORG_PLAN_YMD,''), d.PLAN_YMD)
                       ORDER BY m.APPLY_YMD) l""")

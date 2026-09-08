@@ -60,6 +60,10 @@
 | PR_M_MODEL_BOM | 63,035 | nx.model_bom | **0(빈)** | ★clean 재빌드 필요 or 미러 유지판정 |
 | ~~PR_M_ITEM_BLOB~~ ✅판정 | 121,832 | nx.doc(신규) | — | ✅**동결무해 판정(2026-09-09)**: doc.py:14 설계=신규첨부→NAS+nx.doc(doc_upload 쓰기경로 有)/기존 15.9GB 도면 blob=읽기 폴백(**조회 미러∪웹 승인패턴**·불변 역사·계산무관). ⟹ **컷오버 keep-frozen(drop 금지)·15.9GB 복제 불요·마이그 불요**. 읽기=doc.py(품목첨부·시방)·gagong.py(도면K). |
 
+### A2 저위험부터 순차처리 (2026-09-09·대표지시 "하나씩 위험순위 낮은 것부터")
+- ✅**PR_M_ITEM_BLOB(121k) = 동결무해 판정**(위 (a)표): doc.py 신규첨부→nx.doc/기존 15.9GB blob=조회 미러∪웹 폴백·계산무관 → 컷오버 keep-frozen·마이그 불요.
+- ✅**PR_M_LINE_NO(42) 완료**: 클린 nx.line_no(prodinfo CRUD 웹관리)가 08-27 웹 고아편집으로 직납당김 CA→C1 이동(레거시·planrev검증기준과 모순). **대표지시 "레거시와 일치"** → `align_line_no_to_legacy.py`로 클린을 레거시 정렬(CA=1·C1=0). 5 read repoint(planrev 직납당김365·라인당김1907·qc·basemaster뷰어). **직납당김 대상=[(CA,1)] 미러=클린 diff0**·컴파일OK·잔존 미러read 0. ★교훈=웹편집이 레거시와 **충돌**(같은키 다른값)하면 레거시 우선(병행운영), 웹 신규(레거시無)는 보존(ITEM_PROC_GAGONG식).
+
 ### (보류 5종 → 확정: 웹 쓰기 0 = 레거시-fed (a), 대부분 별도 클린 존재)
 검증(2026-09-09): PR_M_WORK·WORK_SINGLE·PART_CALENDAR·LINE_NO·LINE_CALENDAR **웹 쓰기 라우터 0 = 읽기전용 (a)**.
 단 a2 대조서 별도 클린이 있었음(카운트 다름=case-sensitive 별개 테이블):
