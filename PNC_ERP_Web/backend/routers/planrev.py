@@ -327,11 +327,53 @@ def _step7_sql(cur):
     #   routing_edge 미등록 아이템은 마스터 폴백.
     #   재귀 CTE는 TOP/outer join 금지 → 오버라이드 테이블 nx.item_ov를 inner join으로 갈아끼움.
     cur.execute("IF OBJECT_ID('nx.item_ov') IS NOT NULL DROP TABLE nx.item_ov")
+    # ★★조달 지정업체를 편성 작업처에 반영 (2026-09-09 대표 지시 ④)
+    #
+    #   종전 : ov_wc = routing_edge.wc → work_code(사내) → in_cust(품목마스터 매입처)
+    #   문제 : **조달프로파일/조달후보에 지정한 업체를 편성이 전혀 안 봤다.**
+    #          그래서 ①직납품처럼 매입처가 없는 품목은 작업처가 빈칸이 되어
+    #          **협력사 계획에서 통째로 사라지고**(실측 3,943행·223품목, 그중 lv0 직납 204품목),
+    #          ②업체를 지정해도 편성이 여전히 옛 매입처로 나갔다.
+    #   대표 지시 = "조달프로파일에 등록된 매입처 기준으로 편성해야 한다.
+    #               직납품은 매입처가 없다보니 편성이 안 되는 문제가 생겨 보완이 필요하다."
+    #
+    #   지정업체 우선순위 (nx.item_ovd 로 미리 접어 둔다)
+    #     1) nx.order_vendor        발주업체·배분 팝업에서 지정 — 배분비율 최대 업체(동률이면 코드순)
+    #     2) nx.sourcing_route      조달후보 헤더(현행/활성 경로)의 vendor_code
+    #   최종 : ov_wc = routing_edge.wc → **지정업체** → work_code → in_cust
+    #     · routing_edge.wc 를 앞에 둔 이유 = 그것이 "작업처 수동편집 정본"이라 사용자가
+    #       직접 고친 값이다(planrev 주석·2026-09-01). 지정업체가 그것을 덮으면 수동편집이 사라진다.
+    #     · 지정이 없으면 식이 종전과 **완전히 같다** → 결과 무변경.
+    #       적용 시점 실측: order_vendor 0행 · sourcing_route.vendor_code 0행 ⟹ diff0 보장.
+    cur.execute("IF OBJECT_ID('nx.item_ovd') IS NOT NULL DROP TABLE nx.item_ovd")
+    cur.execute("""
+      SELECT item_code, vendor
+        INTO nx.item_ovd
+        FROM (
+          SELECT item_code, vendor,
+                 ROW_NUMBER() OVER (PARTITION BY item_code ORDER BY pri, ord, vendor) rn
+            FROM (
+              -- 1순위: 발주업체·배분 지정 (배분비율 큰 업체 먼저)
+              SELECT UPPER(LTRIM(RTRIM(o.item_code))) item_code, LTRIM(RTRIM(o.vendor_code)) vendor,
+                     1 pri, -CAST(ISNULL(o.alloc_ratio,0) AS float) ord
+                FROM nx.order_vendor o WHERE ISNULL(o.vendor_code,'')<>''
+              UNION ALL
+              -- 2순위: 조달후보 헤더(현행/활성 경로)의 업체
+              SELECT UPPER(LTRIM(RTRIM(r.item_code))), LTRIM(RTRIM(r.vendor_code)),
+                     2, CAST(ISNULL(r.route_no,0) AS float)
+                FROM nx.sourcing_route r
+               WHERE ISNULL(r.vendor_code,'')<>'' AND (r.current_flag=1 OR r.route_no=1)
+            ) u
+        ) z
+       WHERE rn=1""")
+    cur.execute("CREATE INDEX ix_item_ovd ON nx.item_ovd(item_code)")
     cur.execute(("""SELECT c.item_code, c.work_code, c.in_cust AS in_cust_code, c.prod_rate,
-        ISNULL(NULLIF(re.wc,''), CASE WHEN c.work_code>'' THEN c.work_code ELSE ISNULL(c.in_cust,'') END) AS ov_wc
+        ISNULL(NULLIF(re.wc,''), ISNULL(NULLIF(od.vendor,''),
+          CASE WHEN c.work_code>'' THEN c.work_code ELSE ISNULL(c.in_cust,'') END)) AS ov_wc
       INTO nx.item_ov FROM {P}item c
       LEFT JOIN (SELECT child_item, MAX(wc) wc FROM nx.routing_edge GROUP BY child_item) re
-        ON re.child_item=UPPER(LTRIM(RTRIM(c.item_code)))""").replace("{P}", P))
+        ON re.child_item=UPPER(LTRIM(RTRIM(c.item_code)))
+      LEFT JOIN nx.item_ovd od ON od.item_code=UPPER(LTRIM(RTRIM(c.item_code)))""").replace("{P}", P))
     cur.execute("CREATE INDEX ix_item_ov ON nx.item_ov(item_code)")
     # ※plan_part_dtl 인덱스는 넣지 않는다 — 실측 효과 0(517.0초 → 516.5초).
     #   병목은 NOT EXISTS 가 아니라 v_pr_bom(뷰) 반복 평가였다(아래 _ensure_bom_snap).
