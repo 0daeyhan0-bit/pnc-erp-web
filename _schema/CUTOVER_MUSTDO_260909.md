@@ -84,7 +84,7 @@
 
 ### 달력 3종 판정 (2026-09-09·확인완·결정보류로 넘어감)
 - **근무달력(HR_M_CALENDAR)·공장운영달력(PR_M_PART_CALENDAR)**: 클린(nx.work_calendar·nx.part_calendar)=prodinfo 매트릭스 화면만 씀=**실사용 0**. 생산계획·가공·키팅·자재는 전부 레거시 미러 읽음. ⟹ **클린 은퇴 가능·레거시 정본**(후속·day-1 blocker 아님·runway 2027-03).
-- **라인달력(line_calendar)**: 클린 nx.line_calendar=**편성이 실사용**(compose_all step L `_ensure_line_pull`→work_code(LG가동시간)→plan_line_pull 라인당김→plan_direct_pull→plan_part_mat). 미러엔 work_code 컬럼 없음. 웹이 레거시(WORK_STATS)보다 정밀(특근). ⟹ **은퇴 불가**. 방향 대표 결정보류: (A)클린 유지 vs (B)레거시 WORK_STATS 회귀(특근 정밀도 포기·클린 은퇴). **넘어감(2026-09-09)**.
+- **라인달력(line_calendar)**: 클린 nx.line_calendar=**편성이 실사용**(compose_all step L `_ensure_line_pull`→work_code(LG가동시간)→plan_line_pull 라인당김→plan_direct_pull→plan_part_mat). 미러엔 work_code 컬럼 없음. 웹이 레거시(WORK_STATS)보다 정밀(특근). ⟹ **은퇴 불가**. 방향(A클린유지/B레거시회귀). ★**2026-09-09 대표: 라인달력은 다른 개발자가 정리 담당**(내 A2 범위서 제외).
 
 ### WORK류 판정 (2026-09-09·동결 허용 non-blocker)
 - PR_M_WORK(2·read31 전역 작업명lookup)·PR_M_WORK_SINGLE(450·read8·STEP6 s_work→gagong매핑)·PR_M_WORK_ASSY(371·read2 prodinfo). 전부 **레거시-fed 읽기전용·클린無·웹편집기無·기반 작업코드(거의불변)**.
