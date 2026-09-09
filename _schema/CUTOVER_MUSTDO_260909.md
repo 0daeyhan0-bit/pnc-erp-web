@@ -59,6 +59,7 @@
 | PR_M_ITEM_SUB | 71,043 | nx.item_sub | 14,466 | ★커버리지 격차 확인 후 repoint |
 | PR_M_MODEL_BOM | 63,035 | nx.model_bom | **0(빈)** | ★clean 재빌드 필요 or 미러 유지판정 |
 | ~~PR_M_ITEM_BLOB~~ ✅판정 | 121,832 | nx.doc(신규) | — | ✅**동결무해 판정(2026-09-09)**: doc.py:14 설계=신규첨부→NAS+nx.doc(doc_upload 쓰기경로 有)/기존 15.9GB 도면 blob=읽기 폴백(**조회 미러∪웹 승인패턴**·불변 역사·계산무관). ⟹ **컷오버 keep-frozen(drop 금지)·15.9GB 복제 불요·마이그 불요**. 읽기=doc.py(품목첨부·시방)·gagong.py(도면K). |
+| ~~PR_M_MODEL_BOM~~ ✅판정 | 63,035 | nx.model_bom(0·보충) | — | ✅**동결무해 판정(2026-09-09)**: 미러 63k=모델→도번 벌크(불변·컷오버 동결돼도 읽기가능·STEP5 기존모델 전개정상). 신규모델=신규모델자동(compose→nx.model_bom)+웹(modelbom.py). 리더 extra컬럼(PROD_AVG_FLAG등) 미사용→스키마확장 불요. **급성 stale 아님(모델BOM 불변)**. ⟹ **클린단일화=후속(유지보수 창)**: ★STEP5가 미러+클린 **additive**(planrev:604+606)라 **공유nx DB에 63k 시드하면 운영 현행코드가 이중전개**(생산계획2배)→시드·repoint 동시(편성정지 창)에만 안전. EXCEPT(800)=웹store·유지. |
 
 ### A2 저위험부터 순차처리 (2026-09-09·대표지시 "하나씩 위험순위 낮은 것부터")
 - ✅**PR_M_ITEM_BLOB(121k) = 동결무해 판정**(위 (a)표): doc.py 신규첨부→nx.doc/기존 15.9GB blob=조회 미러∪웹 폴백·계산무관 → 컷오버 keep-frozen·마이그 불요.
