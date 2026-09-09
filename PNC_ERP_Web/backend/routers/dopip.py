@@ -103,7 +103,7 @@ def dopip_vendors(kind: str = Query("pur"), q: str = Query("")):
     cn = _nx(); cur = cn.cursor()
     try:
         cur.execute("""SELECT TOP 40 a.CUST_CODE, MAX(ISNULL(c.CUST_DESC,'')) nm, MAX(a.MAINT_YMD) lastymd
-              FROM nx.PU_T_STOCK_MAINT_C a LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE=a.CUST_CODE
+              FROM nx.PU_T_STOCK_MAINT_C a LEFT JOIN nx.v_cm_m_cust c ON c.CUST_CODE=a.CUST_CODE
               WHERE a.DIVISION=? AND a.CUST_CODE>'' AND (a.CUST_CODE LIKE ? OR ISNULL(c.CUST_DESC,'') LIKE ?)
               GROUP BY a.CUST_CODE ORDER BY MAX(a.MAINT_YMD) DESC""", tag, qq, qq)
         rows = [{"code": str(r[0]).strip(), "name": (str(r[1]).strip() or str(r[0]).strip())} for r in cur.fetchall()]

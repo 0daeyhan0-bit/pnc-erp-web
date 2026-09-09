@@ -119,13 +119,14 @@ def _prod_shortages(nx, comps, weld, qty):
 
 # ================= ★Phase2: 생산실적 백플러시 엔진 (실사용BOM×생산량 소비, 회수율 제외) =================
 def _is_inner_prod(cro, item):
-    """사내생산(INNER_PROD=1) 판정: MAKE_TYPE='1' 또는 가공공정(PR_M_ITEM_PROC_GAGONG) 보유. 라이브 RO."""
+    """사내생산(INNER_PROD=1) 판정: MAKE_TYPE='1' 또는 가공공정(R01 클린 nx.prodinfo_proc) 보유. 라이브 RO.
+       ★2026-09-09 미러 PR_M_ITEM_PROC_GAGONG 직독→클린 prodinfo_proc(컷오버 동결 stale 차단·ITEM_PROC_GAGONG_CLEAN_260909)."""
     c = cro.cursor()
     try:
         c.execute("SELECT ISNULL(make_type,'') FROM nx.item WHERE item_code=?", item)
         r = c.fetchone()
         if r and str(r[0]).strip() == '1': return True
-        c.execute("SELECT COUNT(*) FROM nx.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=?", item)
+        c.execute("SELECT COUNT(*) FROM nx.prodinfo_proc WHERE ITEM_CODE=?", item)
         return (c.fetchone()[0] or 0) > 0
     except Exception:
         return False
@@ -195,37 +196,9 @@ def _backflush_bom(nxc, root, cro=None):
     weld = _weld_rollup_bl(nxc, root, cro)
     return list(out.items()), weld
 
-def _sub_footprints_by_jadoban(nxc, product):
-    """★다리 C(SUB 원소재 풋프린트·읽기전용·2026-08-26): 제품의 backflush 원소재 소비를 SUB(jadoban)별로 분해.
-       ★_backflush_bom 과 동일 walk 규칙(제작서브 is_lowest≠'Y'·자식보유 전개 / leaf 소비 / 용접봉 별도)로
-       전개하되, 각 소비 leaf를 그 경로 최상위 jadoban(제품 직속 엣지 라벨)으로 귀속 → SUB grain.
-       ∴ Σ(전 jadoban) == _backflush_bom comps(자재) = 구조적 diff0(총량 불변). SUB grain은 귀속 라벨만 추가.
-       근거=SUB_MATERIAL_INTEGRATION §14. nx.bom flat(SUB노드 없음)·jadoban=그룹라벨·is_lowest=VARCHAR 'Y'.
-       반환 {jadoban(또는 '(직속)'): {원소재: cum_qty}}. #2 재고 backfill·#3 backflush SUB-grain 결선 기반."""
-    c = nxc.cursor()
-    c.execute("SELECT parent_code, child_code, CAST(qty AS float), ISNULL(role,''), ISNULL(is_lowest,''), ISNULL(jadoban,'') FROM nx.bom")
-    kids = {}
-    for p, ch, q, role, low, jad in c.fetchall():
-        kids.setdefault(str(p).strip(), []).append((str(ch).strip(), q or 0.0, str(role).strip(), str(low).strip(), str(jad).strip()))
-    g = {}
-    def walk(node, mult, top_jad, depth):
-        if depth > 15:
-            return
-        for ch, q, role, low, jad in kids.get(node, []):
-            cq = mult * q
-            if '용접봉' in (role or ''):                       # 용접봉=공정종속(backflush 별도수집) → 자재풋프린트 제외
-                continue
-            label = top_jad or (jad if jad else '(직속)')       # 경로 최상위 jadoban 전파(제품 직속 엣지 라벨)
-            if ch in kids and low != 'Y':                      # 제작 서브 → 전개(라벨 유지)
-                walk(ch, cq, label, depth + 1)
-            else:                                              # 소비 leaf → 그 SUB(label)에 귀속
-                g.setdefault(label, {})[ch] = g.get(label, {}).get(ch, 0.0) + cq
-    walk(str(product).strip(), 1.0, None, 0)
-    return g
-
-def _sub_raw_footprint(nxc, product, jadoban):
-    """다리 C 단건: 제품 내 특정 SUB(jadoban)의 원소재 풋프린트 {원소재: qty}. _sub_footprints_by_jadoban 파생."""
-    return _sub_footprints_by_jadoban(nxc, product).get(str(jadoban).strip(), {})
+# ★_sub_footprints_by_jadoban / _sub_raw_footprint 제거(2026-09-08 nx.bom 은퇴).
+#   다리 C SUB 원소재 풋프린트(읽기전용)는 nx.bom(은퇴 대상) 트리 기반이었고 live 호출처 0(죽은 코드)라 삭제.
+#   원소재 소요/중량은 bom_flat(dong_weight_by_spec)·절삭 정본으로 이관(WEIGHT_BOM_SOURCE_AUDIT_260908).
 
 WELD_WAREHOUSE = 'Q1000'   # ★용접봉 단일 생산창고 (대표 확정 2026-08-27). 공정별 창고 분리 안 함.
 
@@ -239,16 +212,17 @@ def _final_proc_code(cro, item):
     """완성공정(최종) gagong_proc_code = MAX(PROC_SEQ). method 무관·PROC_SEQ 최댓값. 라이브 RO."""
     c = cro.cursor()
     try:
-        c.execute("SELECT TOP 1 ISNULL(GAGONG_PROC_CODE,'') FROM nx.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=? ORDER BY PROC_SEQ DESC", item)
+        c.execute("SELECT TOP 1 ISNULL(GAGONG_PROC_CODE,'') FROM nx.prodinfo_proc WHERE ITEM_CODE=? ORDER BY PROC_SEQ DESC", item)
         r = c.fetchone()
         return str(r[0]).strip() if r and r[0] else ""
     except Exception:
         return ""
 
 def _is_final_product(nxc, item):
-    """최종제품(ASY) 판정: nx.bom에 child로 없으면 최상위=제품(ASY), child면 반제품(PRD)."""
+    """최종제품(ASY) 판정: BOM에 child로 없으면 최상위=제품(ASY), child면 반제품(PRD).
+       ★nx.bom → nx.bom_line 이관(2026-09-08 nx.bom 은퇴). child_item 존재=반제품(boolean 등가 확인)."""
     c = nxc.cursor()
-    c.execute("SELECT COUNT(*) FROM nx.bom WHERE child_code=?", item)
+    c.execute("SELECT COUNT(*) FROM nx.bom_line WHERE UPPER(LTRIM(RTRIM(child_item)))=?", str(item).strip().upper())
     return (c.fetchone()[0] or 0) == 0
 
 def _ring_collect(nxc, root, cro=None):

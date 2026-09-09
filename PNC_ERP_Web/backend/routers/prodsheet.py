@@ -7,6 +7,10 @@ from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile,
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _prod_stock_map, stock_changed, _assert_open)
 
 from routers.backflush import _backflush_core, _final_proc_code, _is_inner_prod, _weld_consume
+try:
+    import nx_soyo_engine as _soyo   # 통일 소요엔진(CLAUDE §1-10) — common.py가 _harness를 sys.path에 추가
+except Exception:
+    _soyo = None
 router = APIRouter()
 
 # ===================== 생산전표출력관리 (w_pr_input_490) — 전표 기준 마스터-디테일 =====================
@@ -764,7 +768,19 @@ def prodsheet_issue(payload: dict = Body(...)):
 #   [520 vs 팝업] 520=전량 한번에(바코드 2회 스캔=확인절차, 기록은 1건)
 #                 팝업(526)=부분수량 처리. 잔여 남으면 재스캔 시 "처리/총계"로 이어짐.
 def _bom_expand(cur, item, gpc_like):
-    """BOM 전개 — ★레거시 dw_pr_input_520_2 SQL 이식.
+    """BOM 전개 — ★소요엔진 이관(2026-09-08·CLAUDE §1-10): `nx_soyo_engine.prod_input_soyo`(nx.bom_line) 사용.
+       종전 `_bom_expand_legacy`(pr_m_item_bom 재귀CTE)와 **diff0 검증 후 전환**(bom_line↔레거시 sync 완료 전제,
+       BOM_LINE_LEGACY_SYNC_260908.md). 반환 시그니처·형태 동일 = [(mat_code, work_code, mat_use_qty, gagong_proc_code)].
+       엔진 미가용 시 legacy 폴백(안전)."""
+    if _soyo is None:
+        return _bom_expand_legacy(cur, item, gpc_like)
+    eng = _get_cost_engine()
+    out = _soyo.prod_input_soyo(eng, item, gpc_like)   # {(mat,gpc):(cum_use_qty, work_code)}
+    return [(m, wc, cum, g) for (m, g), (cum, wc) in out.items()]
+
+
+def _bom_expand_legacy(cur, item, gpc_like):
+    """(구·롤백보존) BOM 전개 — ★레거시 dw_pr_input_520_2 SQL 이식.
        가상도번(VIR_ITEM_FLAG='1')은 재귀로 펼치고, 사급부품(SAGUB_FLAG='1')·전개제외는 뺀다.
        ※레거시는 pr_m_item_bom_sub 서브쿼리로 사급을 봤으나 nx에 그 테이블이 없고
          PR_M_ITEM_BOM.SAGUB_FLAG 가 직접 있어 그것을 사용(2026-08-19 확인).
@@ -829,14 +845,14 @@ def _prod_dest(cur, item, upper_item=None):
     _up = str(upper_item or "").strip()
     if _up and _up != it:
         cur.execute("""SELECT ISNULL(m.in_cust,''),
-                              ISNULL((SELECT TOP 1 b.VIR_ITEM_FLAG FROM nx.CS_M_ITEM_BOM b WITH(NOLOCK)
+                              ISNULL((SELECT TOP 1 b.VIR_ITEM_FLAG FROM nx.v_pr_bom b WITH(NOLOCK)
                                        WHERE b.MAT_CODE=? ),'0')
                          FROM nx.item m WITH(NOLOCK) WHERE m.ITEM_CODE=?""", _up, _up)
         _r = cur.fetchone()
         _ic = str(_r[0] or '').strip() if _r else ''
         if _ic:
             return ("MAT", None)                 # 상위가 업체
-        cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM nx.PR_M_ITEM_PROC_GAGONG
+        cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM nx.prodinfo_proc
                         WHERE ITEM_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')<>''
                         ORDER BY PROC_SEQ DESC""", _up)
         _r2 = cur.fetchone()
@@ -850,14 +866,14 @@ def _prod_dest(cur, item, upper_item=None):
             depth += 1
             _c = stack.pop(0)
             cur.execute("""SELECT b.ITEM_CODE, ISNULL(b.VIR_ITEM_FLAG,'0'), ISNULL(m.in_cust,'')
-                             FROM nx.CS_M_ITEM_BOM b WITH(NOLOCK)
+                             FROM nx.v_pr_bom b WITH(NOLOCK)
                              LEFT JOIN nx.item m WITH(NOLOCK) ON m.ITEM_CODE=b.ITEM_CODE
                             WHERE b.MAT_CODE=?""", _c)
             for p, vir, incust in [(str(r[0] or '').strip(), str(r[1] or '0'), str(r[2] or '').strip())
                                    for r in cur.fetchall()]:
                 if incust:
                     return ("MAT", None)
-                cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM nx.PR_M_ITEM_PROC_GAGONG
+                cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM nx.prodinfo_proc
                                 WHERE ITEM_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')<>''
                                 ORDER BY PROC_SEQ DESC""", p)
                 _r3 = cur.fetchone()
@@ -1049,13 +1065,13 @@ def _apply_set_stock(cur, item, qty, box, user, win, ymd, hms):
 @router.get("/api/procbc/masters")
 def procbc_masters(part: str = Query("")):
     """상단 드롭다운 소스 — 파트 목록 / (파트 선택시) 공정코드·설비·작업자.
-       파트↔공정(S_WORK_CODE)↔설비 = nx.PR_M_ITEM_PROC_GAGONG 실측 조합
+       파트↔공정(S_WORK_CODE)↔설비 = nx.prodinfo_proc 실측 조합
        작업자 = nx.PR_M_PROC_GAGONG_WORKER (WORK_FLAG='1')"""
     nx = _nx(); cur = nx.cursor()
     cn = _conn(); c2 = cn.cursor()
     try:
         # 파트 목록(생산파트만 — 가공파트 P00xx는 별도 화면 소관)
-        cur.execute("""SELECT DISTINCT GAGONG_PROC_CODE FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
+        cur.execute("""SELECT DISTINCT GAGONG_PROC_CODE FROM nx.prodinfo_proc WITH(NOLOCK)
                         WHERE ISNULL(GAGONG_PROC_CODE,'')<>'' AND GAGONG_PROC_CODE NOT LIKE 'P00%'""")
         codes = [str(r[0]).strip() for r in cur.fetchall() if r[0]]
         nm = {}
@@ -1069,7 +1085,7 @@ def procbc_masters(part: str = Query("")):
         if p:
             # 공정코드(S_WORK_CODE) + 설비 — 그 파트에서 실제 쓰이는 조합
             cur.execute("""SELECT S_WORK_CODE, ISNULL(MACH_CODE,''), COUNT(*) c
-                             FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
+                             FROM nx.prodinfo_proc WITH(NOLOCK)
                             WHERE GAGONG_PROC_CODE=? AND ISNULL(S_WORK_CODE,'')<>''
                             GROUP BY S_WORK_CODE, ISNULL(MACH_CODE,'')
                             ORDER BY COUNT(*) DESC""", p)
@@ -1153,7 +1169,7 @@ def procbc_lookup(barcode: str = Query(...), proc_code: str = Query("")):
         # 그 공정의 전표처리구분(품목 공정마스터) + PROC_SEQ(구간기록용)
         gmeth = ""; pseq = None
         if p:
-            cur.execute("""SELECT TOP 1 ISNULL(JP_PROC_METHOD,''), PROC_SEQ FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
+            cur.execute("""SELECT TOP 1 ISNULL(JP_PROC_METHOD,''), PROC_SEQ FROM nx.prodinfo_proc WITH(NOLOCK)
                             WHERE ITEM_CODE=? AND GAGONG_PROC_CODE=?""", item, p)
             g = cur.fetchone()
             if g:
@@ -1173,7 +1189,7 @@ def procbc_lookup(barcode: str = Query(...), proc_code: str = Query("")):
                 _procs = [(str(x[0] or '').strip(), str(x[1] or '').strip()) for x in cur.fetchall()]
             if not _procs:
                 cur.execute("""SELECT ISNULL(m.GAGONG_PROC_CODE,''), ISNULL(g.GAGONG_PROC_DESC,'')
-                                 FROM nx.PR_M_ITEM_PROC_GAGONG m WITH(NOLOCK)
+                                 FROM nx.prodinfo_proc m WITH(NOLOCK)
                                  LEFT JOIN nx.PR_M_PROC_GAGONG g WITH(NOLOCK)
                                         ON g.GAGONG_PROC_CODE=m.GAGONG_PROC_CODE
                                 WHERE m.ITEM_CODE=? ORDER BY m.PROC_SEQ""", item)
@@ -1197,7 +1213,7 @@ def procbc_lookup(barcode: str = Query(...), proc_code: str = Query("")):
             if gmeth and meth and gmeth != meth:
                 _own = ""      # 이 바코드가 원래 속한 공정(같은 품목에서 실적수단이 일치하는 공정)
                 cur.execute("""SELECT TOP 1 ISNULL(m.GAGONG_PROC_CODE,''), ISNULL(g.GAGONG_PROC_DESC,'')
-                                 FROM nx.PR_M_ITEM_PROC_GAGONG m WITH(NOLOCK)
+                                 FROM nx.prodinfo_proc m WITH(NOLOCK)
                                  LEFT JOIN nx.PR_M_PROC_GAGONG g WITH(NOLOCK)
                                         ON g.GAGONG_PROC_CODE=m.GAGONG_PROC_CODE
                                 WHERE m.ITEM_CODE=? AND ISNULL(m.JP_PROC_METHOD,'')=?
@@ -1310,7 +1326,7 @@ def procbc_save(payload: dict = Body(...)):
                                 WHERE SHEET_NO=? ORDER BY PROC_SEQ""", sheet_ref)
                 _codes = [str(x[0] or '').strip() for x in cur.fetchall() if str(x[0] or '').strip()]
             if not _codes:
-                cur.execute("""SELECT ISNULL(GAGONG_PROC_CODE,'') FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
+                cur.execute("""SELECT ISNULL(GAGONG_PROC_CODE,'') FROM nx.prodinfo_proc WITH(NOLOCK)
                                 WHERE ITEM_CODE=? ORDER BY PROC_SEQ""", item)
                 _codes = [str(x[0] or '').strip() for x in cur.fetchall() if str(x[0] or '').strip()]
             if _codes and proc not in _codes:
@@ -1322,12 +1338,12 @@ def procbc_save(payload: dict = Body(...)):
             #   바코드 종류는 bc 형태로 판정(GP…=가간판 G / 8자리 숫자=전표 J / 그 외=라벨 L).
             _bcm = "G" if (bc.upper().startswith("GP") and bc[2:].isdigit()) else \
                    ("J" if (bc.lstrip("0") or "0").isdigit() else "L")
-            cur.execute("""SELECT TOP 1 ISNULL(JP_PROC_METHOD,'') FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
+            cur.execute("""SELECT TOP 1 ISNULL(JP_PROC_METHOD,'') FROM nx.prodinfo_proc WITH(NOLOCK)
                             WHERE ITEM_CODE=? AND GAGONG_PROC_CODE=?""", item, proc)
             _g = cur.fetchone()
             _gm = str(_g[0]).strip() if (_g and _g[0]) else ""
             if _gm and _gm != _bcm:
-                cur.execute("""SELECT TOP 1 ISNULL(GAGONG_PROC_CODE,'') FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
+                cur.execute("""SELECT TOP 1 ISNULL(GAGONG_PROC_CODE,'') FROM nx.prodinfo_proc WITH(NOLOCK)
                                 WHERE ITEM_CODE=? AND ISNULL(JP_PROC_METHOD,'')=? ORDER BY PROC_SEQ""", item, _bcm)
                 _o = cur.fetchone(); _own = str(_o[0]).strip() if _o else ""
                 nx.rollback()
@@ -1426,7 +1442,7 @@ def procbc_save(payload: dict = Body(...)):
             if max_seq:
                 seq_src = "전표"
         if not max_seq:      # 전표가 없는 스캔경로
-            cur.execute("""SELECT ISNULL(MAX(PROC_SEQ),0) FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
+            cur.execute("""SELECT ISNULL(MAX(PROC_SEQ),0) FROM nx.prodinfo_proc WITH(NOLOCK)
                             WHERE ITEM_CODE=?""", item)
             max_seq = int((cur.fetchone() or [0])[0] or 0)
             if max_seq:
@@ -1622,9 +1638,9 @@ def procbc_save(payload: dict = Body(...)):
             stock["mats"].append({"mat": mat, "part": part_code, "qty": round(dq, 4)})
 
         # ⑧ 준비재고 차감 — 하위 자도번의 파트별
-        cur.execute("""SELECT DISTINCT ISNULL(GAGONG_PROC_CODE,'') g FROM nx.PR_M_ITEM_BOM WITH(NOLOCK)
+        cur.execute("""SELECT DISTINCT ISNULL(GAGONG_PROC_CODE,'') g FROM nx.v_pr_bom WITH(NOLOCK)
                         WHERE ITEM_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')<>''
-                          AND ISNULL(EXCEPT_FLAG,'0')<>'1'""", item)
+                          AND ISNULL(EXCEPT_FLAG,'0')<>'1'""", item)  # ★미러→클린(v_pr_bom·DISTINCT gpc diff0 80/80·2026-09-09)
         parts = [str(r[0]).strip() for r in cur.fetchall()
                  if r[0] and str(r[0]).strip().upper() not in ('Q1000', 'Q2000')]
         if not parts:

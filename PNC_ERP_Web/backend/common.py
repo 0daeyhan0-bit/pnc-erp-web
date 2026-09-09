@@ -485,7 +485,7 @@ def _custnm_map(cur, codes):
     codes = sorted({str(c).strip() for c in codes if str(c or "").strip()})
     for i in range(0, len(codes), 900):
         ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
-        cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
+        cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE IN ({ph})", *ch)
         for r in cur.fetchall(): m[str(r[0]).strip()] = r[1]
     return m
 
@@ -800,7 +800,7 @@ _SALE_MAGAM = """WITH MAGAM(CUST_CODE,JUN_YYMM,JUN_MAGAM_DAY,MAGAM_DAY) AS (
   SELECT CUST_CODE, format(dateadd(MONTH,-1,convert(date,'{ym}'+'01',12)),'yyMM') JUN_YYMM,
     ISNULL((SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=A.CUST_CODE AND APPLY_YYMM<=format(dateadd(MONTH,-1,convert(date,'{ym}'+'01',12)),'yyMM') ORDER BY APPLY_YYMM DESC),'31') JUN_MAGAM_DAY,
     ISNULL((SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=A.CUST_CODE AND APPLY_YYMM<='{ym}' ORDER BY APPLY_YYMM DESC),'31') MAGAM_DAY
-  FROM PARTNER_ERP_TEST3.nx.CM_M_CUST A)"""
+  FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust A)"""
 
 
 # ── 도메인간 공유(추출) ──

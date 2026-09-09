@@ -70,7 +70,7 @@ def bom_iteminfo(item: str = Query(...)):
                 d[k] = ("" if v is None else str(v).strip())
         cust = ""
         if d.get("in_cust"):
-            cur.execute("SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=?", d["in_cust"])
+            cur.execute("SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE=?", d["in_cust"])
             rc = cur.fetchone()
             if rc and rc[0]:
                 cust = str(rc[0]).strip()
@@ -112,7 +112,7 @@ def bom_get(item: str = Query(..., description="품번")):
                    ISNULL(ci.in_cust,'') AS in_cust, ISNULL(pc.CUST_DESC,'') AS cust_name
             FROM nx.bom_line l
             LEFT JOIN nx.item ci ON ci.item_code = l.child_item
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST pc ON pc.CUST_CODE = ci.in_cust
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust pc ON pc.CUST_CODE = ci.in_cust
             WHERE l.bom_id = ? ORDER BY l.seq""", bom_id)
         cols = [d[0] for d in cur.description]
         lines = []
@@ -150,7 +150,7 @@ def bom_flatget(item: str = Query(..., description="원본 품번")):
                    ISNULL(pc.CUST_DESC,'') cust_name
             FROM nx.bom_flat f
             LEFT JOIN nx.item i ON i.item_code = f.leaf_code
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST pc ON pc.CUST_CODE = i.in_cust
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust pc ON pc.CUST_CODE = i.in_cust
             WHERE f.item_code = ? ORDER BY f.leaf_code""", item)
         from decimal import Decimal as _Dec
         cols = [d[0] for d in cur.description]
@@ -200,7 +200,7 @@ def item_vendorsearch(q: str = Query("")):
     cn = _nx(); cur = cn.cursor()
     try:
         like = f"%{q.strip()}%"
-        cur.execute("""SELECT TOP 30 c.CUST_CODE, c.CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST c
+        cur.execute("""SELECT TOP 30 c.CUST_CODE, c.CUST_DESC FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust c
             WHERE c.CUST_CODE LIKE ? OR c.CUST_DESC LIKE ? ORDER BY c.CUST_CODE""", like, like)
         return {"rows": [{"code": r[0], "name": r[1]} for r in cur.fetchall()]}
     finally:
@@ -279,7 +279,7 @@ def _bom_tree_route(item, route_id):
         vmap = {}
         for i in range(0, len(vcodes), 900):
             ch = vcodes[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE IN ({ph})", *ch)
             for rr in cur.fetchall(): vmap[str(rr[0]).strip()] = rr[1]
         cur.execute("SELECT ISNULL(item_name,'') FROM nx.item WHERE item_code=?", ritem)
         rr = cur.fetchone(); rootnm = rr[0] if rr else ""
@@ -358,7 +358,7 @@ def _bom_tree_nx(item, real, expandbuy=0):
             cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.item_name,''), ISNULL(m.item_spec,''),
                   ISNULL(m.in_cust,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
                   ISNULL(m.diam,0), ISNULL(m.thick,0), ISNULL(m.length,0)
-                FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
+                FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=m.in_cust
                 WHERE m.ITEM_CODE IN ({inl})""")
             for r in cur.fetchall():
                 info[(r[0] or '').strip()] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
@@ -475,7 +475,7 @@ def bom_tree(item: str = Query(..., description="품번"), real: int = Query(1, 
                 cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.item_name,''), ISNULL(m.item_spec,''),
                       ISNULL(m.in_cust,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
                       ISNULL(m.diam,0), ISNULL(m.thick,0), ISNULL(m.length,0)
-                    FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
+                    FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=m.in_cust
                     WHERE m.ITEM_CODE IN ({ph})""", *chunk)
                 for r in cur.fetchall():
                     info[r[0]] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
@@ -545,7 +545,7 @@ def bom_whereused(item: str = Query(..., description="품번 — 이 품번을 �
             cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.item_name,''), ISNULL(m.item_spec,''),
                   ISNULL(m.in_cust,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
                   ISNULL(m.diam,0), ISNULL(m.thick,0), ISNULL(m.length,0)
-                FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
+                FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=m.in_cust
                 WHERE m.ITEM_CODE IN ({inl})""")
             for r in cur.fetchall():
                 info[(r[0] or '').strip()] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
@@ -628,7 +628,10 @@ def _refresh_shared(cur, code):
 
 
 def _mint_sub(cur, sig, rep_item, nm='', birth_assy=None, birth_route=None):
-    """레지스트리 dedup-safe 등록 + 출생라벨. sig 존재 시 기존 S **강제재사용**(중복 완전차단=사장님 확정:
+    """구조 SUB(=자도번=하위조립품) 레지스트리 dedup-safe 등록 + 출생라벨.
+       ★★이름충돌 주의(SUB_ARCHITECTURE_REANALYSIS §1): ①여기 '구조 SUB'(자도번·하위조립품) ≠ **PR_M_ITEM_SUB**(품목 1:1 부가정보=검사·포장·지그, 구조 무관)
+         ②우리 정규형 **`품번_S{nn}`(언더스코어)** ≠ 레거시 접미사 **`-S1`(대시·sub_variant_map·분석용)**(BOM_STRUCTURE_CANON §2 "혼동 절대 금지").
+       레지스트리 dedup: sig 존재 시 기존 S **강제재사용**(중복 완전차단=사장님 확정:
        동일 품목+공정용접+제작처면 무조건 재사용)·공용flag 갱신. 없으면 신규 S##### 발급.
        birth_assy/route 주어지면(route 편성) 출생라벨 {ASSY}_R{route}_S{nn}(영속번호=(assy,route)별 max+1) 부여.
        반환 (sub_code, is_new). ★DROP+재빌드 재실행 금지(append-only)."""
@@ -1454,18 +1457,13 @@ def _copy_proc(cur, source, target):
 
 def _copy_prodinfo(cur, source, target):
     """★생산 ST축(생산정보=생산공정순서) source→target(품번키·route_id 없음) 복사 = nx.prodinfo_proc.
-       source 유효본 = 웹편집분 nx.prodinfo_proc 있으면 그것, 없으면 레거시 PR_M_ITEM_PROC_GAGONG(prodinfo 화면 읽기 패턴과 동일).
+       source = R01 클린 nx.prodinfo_proc 단일(미러 폴백 은퇴 260909·클린⊇미러).
        ★원가축(_copy_proc)과 별개 테이블·별개 개념. 반환=복사행수."""
+    # ★2026-09-09 미러 폴백 은퇴(§1-9-1): R01 클린 nx.prodinfo_proc 단일본만 복사(prodinfo_proc⊇미러·ITEM_PROC_GAGONG_CLEAN_260909)
     cur.execute("DELETE FROM nx.prodinfo_proc WHERE item_code=?", target)
-    cur.execute("SELECT COUNT(*) FROM nx.prodinfo_proc WHERE item_code=?", source)
-    if cur.fetchone()[0] > 0:   # 웹편집 클린본
-        cur.execute("""INSERT INTO nx.prodinfo_proc(item_code,proc_seq,work_code,gagong_proc_code,s_work_code,mach_code,work_qty,std_size,mix_gagong,gagong_proc_flag,gagong_proc_seq,ready_st,mach_ct,inwon,human_st,tot_st,jp_proc_method,lt_hr,key_id,upd_user,upd_at)
-            SELECT ?,proc_seq,work_code,gagong_proc_code,s_work_code,mach_code,work_qty,std_size,mix_gagong,gagong_proc_flag,gagong_proc_seq,ready_st,mach_ct,inwon,human_st,tot_st,jp_proc_method,lt_hr,key_id,'copyproc',getdate()
-            FROM nx.prodinfo_proc WHERE item_code=?""", target, source)
-    else:                        # 레거시 품번키 fallback(원본이 아직 웹편집 전)
-        cur.execute("""INSERT INTO nx.prodinfo_proc(item_code,proc_seq,work_code,gagong_proc_code,s_work_code,mach_code,work_qty,std_size,mix_gagong,gagong_proc_flag,gagong_proc_seq,ready_st,mach_ct,inwon,human_st,tot_st,jp_proc_method,lt_hr,key_id,upd_user,upd_at)
-            SELECT ?,PROC_SEQ,WORK_CODE,GAGONG_PROC_CODE,S_WORK_CODE,MACH_CODE,WORK_QTY,STD_SIZE,MIX_GAGONG,GAGONG_PROC_FLAG,GAGONG_PROC_SEQ,READY_ST,MACH_CT,INWON,HUMAN_ST,TOT_ST,JP_PROC_METHOD,LT_HR,KEY_ID,'copyproc',getdate()
-            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=?""", target, source)
+    cur.execute("""INSERT INTO nx.prodinfo_proc(item_code,proc_seq,work_code,gagong_proc_code,s_work_code,mach_code,work_qty,std_size,mix_gagong,gagong_proc_flag,gagong_proc_seq,ready_st,mach_ct,inwon,human_st,tot_st,jp_proc_method,lt_hr,key_id,upd_user,upd_at)
+        SELECT ?,proc_seq,work_code,gagong_proc_code,s_work_code,mach_code,work_qty,std_size,mix_gagong,gagong_proc_flag,gagong_proc_seq,ready_st,mach_ct,inwon,human_st,tot_st,jp_proc_method,lt_hr,key_id,'copyproc',getdate()
+        FROM nx.prodinfo_proc WHERE item_code=?""", target, source)
     return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
 
 

@@ -146,7 +146,7 @@ def _load_custnm():
         cn = _nx(); cur = cn.cursor()
         codes = list(W._COOP_CUST_VENDOR.keys())
         ph = ",".join("?" for _ in codes)
-        cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM nx.CM_M_CUST WHERE LTRIM(RTRIM(CUST_CODE)) IN ({ph})", *codes)
+        cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM nx.v_cm_m_cust WHERE LTRIM(RTRIM(CUST_CODE)) IN ({ph})", *codes)
         for c, n in cur.fetchall():
             _CUSTNM[str(c).strip()] = str(n).strip() or str(c).strip()
         cn.close()

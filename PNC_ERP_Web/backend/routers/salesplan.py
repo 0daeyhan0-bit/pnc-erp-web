@@ -79,7 +79,9 @@ def salesplan(from_ymd: str = Query(...), days: int = Query(7), gubun: str = Que
         #         050 의 '추가계획' 갈래(data_gubun=2)와 비고(remarks)가 여기서 온다.
         _REPOINT = {"sa_t_plan_item_dtl": "PARTNER_ERP_TEST3.nx.v_sale_plan_item_050",
                     "sa_t_plan_dtl":      "PARTNER_ERP_TEST3.nx.v_sale_plan_050",
-                    "pr_t_plan_input":    "PARTNER_ERP_TEST3.nx.v_plan_input_050"}
+                    "pr_t_plan_input":    "PARTNER_ERP_TEST3.nx.v_plan_input_050",
+                    # ★2026-09-09 nx모드 작업처 3단폴백 = R01 클린 prodinfo_proc(미러 직독 은퇴·§1-9-1·ITEM_PROC_GAGONG_CLEAN_260909)
+                    "PR_M_ITEM_PROC_GAGONG": "PARTNER_ERP_TEST3.nx.prodinfo_proc"}
         if not _live:
             import re as _re
             # ★긴 이름 먼저 — sa_t_plan_item_dtl 이 sa_t_plan_dtl 을 접두사로 품지는 않지만

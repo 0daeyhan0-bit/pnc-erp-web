@@ -8,7 +8,7 @@ from routers.auth import (require_user, scope_cust, staff_only,
                           assert_own_barcode)   # ★소속 강제 (2026-08-29)
 # ★라이브(_conn) 미import — 이 도메인은 nx 단일소스(§1-9-1). 실수로 쓰이지 않게 뺀다.
 #   (_conn·_b·_num 은 이 파일에서 실사용 0회라 병합 시 제외 — 2026-08-30)
-from common import _nx, _nx_tx, _d6, _assert_open, stock_changed, _sub_desc_plain
+from common import _nx, _nx_tx, _d6, _assert_open, stock_changed, _sub_desc_plain, _get_cost_engine
 
 router = APIRouter()
 
@@ -68,13 +68,13 @@ def setin_list(request: Request, cust: str = Query(""), fr: str = Query(""), to:
               ISNULL(h.deliver_qty,0) deliver_qty,
               STUFF((SELECT ','+d.mat_code FROM nx.set_input_req_dtl d WHERE d.sheet_no=h.sheet_no FOR XML PATH('')),1,1,'') jadolist
             FROM nx.set_input_req h
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.in_cust_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=h.in_cust_code
             LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=h.item_code
             WHERE {where} ORDER BY h.in_cust_code, h.input_ymd, h.sheet_no""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         cur.execute("""SELECT h.in_cust_code, MAX(ISNULL(c.CUST_DESC,'')) nm, COUNT(*) n
-            FROM nx.set_input_req h LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.in_cust_code
+            FROM nx.set_input_req h LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=h.in_cust_code
             WHERE h.remarks='PLAN_COMPOSE' GROUP BY h.in_cust_code ORDER BY COUNT(*) DESC""")
         custs = [{"code": r[0], "nm": r[1], "n": r[2]} for r in cur.fetchall()]
         return {"rows": rows, "cnt": len(rows), "custs": custs}
@@ -165,7 +165,7 @@ def setin_invoice(request: Request, barcode: str = Query(...)):
         cust = rc[0]
         cur.execute("""SELECT ISNULL(BUSINESS_NO,''),ISNULL(CUST_DESC,''),ISNULL(OWNER_NAME,''),
             LTRIM(ISNULL(ADDRESS,'')+' '+ISNULL(ADDRESS_DTL,'')),ISNULL(PHONE_NO,''),ISNULL(FAX_NO,'')
-            FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=?""", cust)
+            FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE=?""", cust)
         s = cur.fetchone() or ('',)*6
         supplier = {"biz": _fmtbiz(s[0]), "nm": (s[1] or '').strip(), "owner": (s[2] or '').strip(), "addr": (s[3] or '').strip(), "tel": (s[4] or '').strip(), "fax": (s[5] or '').strip()}
         cur.execute("""SELECT TOP 1 ISNULL(BUSINESS_NO,''),ISNULL(COMPANY_DESCK,''),ISNULL(OWNER_NAME,''),
@@ -210,7 +210,7 @@ def setstock_list(request: Request, fr: str = Query(""), to: str = Query(""), cu
               ISNULL(c.CUST_DESC,'') custnm, m.item_code, ISNULL(i.item_name,'') itemnm, m.maint_qty, m.sheet_no,
               m.manual_sheet_no, m.status, ISNULL(m.derived_flag,'0') derived_flag, m.insert_datetime,
               ISNULL(RTRIM(i.in_cust),'') direct_cust,
-              ISNULL((SELECT RTRIM(dc.CUST_DESC) FROM PARTNER_ERP_TEST3.nx.CM_M_CUST dc
+              ISNULL((SELECT RTRIM(dc.CUST_DESC) FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust dc
                        WHERE RTRIM(dc.CUST_CODE)=RTRIM(i.in_cust)),'') direct_nm,
               ISNULL((SELECT -SUM(CAST(l.MAINT_QTY AS float)) FROM nx.stock_ledger l WITH(NOLOCK)
                        WHERE l.MAINT_YMD=m.maint_ymd AND l.MAINT_TAG='B'
@@ -218,7 +218,7 @@ def setstock_list(request: Request, fr: str = Query(""), to: str = Query(""), cu
                          AND ISNULL(RTRIM(l.OUT_WH_GUBUN),'')='2'
                          AND l.REMARKS=N'직납품 영업창고 출고'),0) direct_qty
             FROM nx.set_stock_maint m
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.cust_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=m.cust_code
             LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=m.item_code
             WHERE {' AND '.join(w)} ORDER BY m.maint_ymd DESC, m.maint_seq DESC""", *p)
         cols = [d[0] for d in cur.description]
@@ -237,7 +237,7 @@ def setstock_scan(request: Request, barcode: str = Query(...)):
         cur.execute("""SELECT h.item_code, ISNULL(i.item_name,'') itemnm, ISNULL(h.deliver_qty,h.input_req_qty) qty,
               h.in_cust_code, ISNULL(c.CUST_DESC,'') custnm, h.status, ISNULL(h.insp_flag,'0') insp,
               (SELECT COUNT(*) FROM nx.set_input_req_dtl d WHERE d.sheet_no=h.sheet_no) jcnt
-            FROM nx.set_input_req h LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.in_cust_code
+            FROM nx.set_input_req h LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=h.in_cust_code
             LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=h.item_code
             WHERE h.barcode_no=? ORDER BY h.item_code""", bc)
         cols = [d[0] for d in cur.description]
@@ -306,7 +306,7 @@ def setin_stat(fr: str = Query(""), to: str = Query(""), cust: str = Query(""),
                      WHERE g.MAINT_TAG='S' AND g.SET_MAINT_YMD=m.maint_ymd
                        AND g.SET_MAINT_SEQ=m.maint_seq) jado_qty
               FROM nx.set_stock_maint m WITH(NOLOCK)
-              LEFT JOIN nx.CM_M_CUST c WITH(NOLOCK) ON c.CUST_CODE=m.cust_code
+              LEFT JOIN nx.v_cm_m_cust c WITH(NOLOCK) ON c.CUST_CODE=m.cust_code
               LEFT JOIN nx.item i WITH(NOLOCK) ON i.item_code=m.item_code
               {where}
              ORDER BY m.maint_ymd DESC, m.maint_seq""", *p)
@@ -351,38 +351,38 @@ def setin_stat(fr: str = Query(""), to: str = Query(""), cust: str = Query(""),
 _DW6_SQL = """
 WITH CTE_BOM(mat_code, in_cust_code, mat_use_qty, cum_in_cust_code,
              set_except_flag, insp_flag, in_gagong_proc_code) AS (
-  SELECT i.item_code,
-         CASE WHEN i.work_code > '' THEN i.work_code ELSE i.in_cust_code END,
+  SELECT CAST(i.item_code AS varchar(50)),
+         CASE WHEN i.work_code > '' THEN i.work_code ELSE i.in_cust END,
          1,
          CONVERT(varchar(500),'||' + CASE WHEN i.work_code > '' THEN i.work_code
-                                          ELSE i.in_cust_code END + '|'),
+                                          ELSE i.in_cust END + '|'),
          '0',
          (SELECT insp_flag FROM nx.pr_m_item_sub s WHERE i.item_code = s.item_code),
          CONVERT(varchar(10),'')
-    FROM nx.pr_m_item i
+    FROM nx.item i
    WHERE i.item_code = ?
   UNION ALL
-  SELECT b1.mat_code,
-         CASE WHEN m.work_code > '' THEN m.work_code ELSE m.in_cust_code END,
+  SELECT CAST(b1.mat_code AS varchar(50)),
+         CASE WHEN m.work_code > '' THEN m.work_code ELSE m.in_cust END,
          CONVERT(int, CASE WHEN cb.mat_use_qty = 0 THEN 0
                       ELSE CONVERT(NUMERIC(18,5), cb.mat_use_qty * b1.use_qty) END),
          CONVERT(varchar(500), cb.cum_in_cust_code + '|'
-                 + CASE WHEN m.work_code > '' THEN m.work_code ELSE m.in_cust_code END + '|'),
+                 + CASE WHEN m.work_code > '' THEN m.work_code ELSE m.in_cust END + '|'),
          ISNULL(b1.set_except_flag,'0'),
          (SELECT insp_flag FROM nx.pr_m_item_sub s WHERE m.item_code = s.item_code),
          b1.in_gagong_proc_code
     FROM CTE_BOM cb
     JOIN nx.pr_m_item_bom b1 ON cb.mat_code = b1.item_code
-    JOIN nx.pr_m_item m      ON b1.mat_code = m.item_code
+    JOIN nx.item m      ON b1.mat_code = m.item_code
    WHERE ISNULL(b1.except_flag,'0') <> '1'
      AND NOT EXISTS (SELECT '2' FROM nx.pr_m_mat WHERE mat_code = b1.mat_code)
 )
 SELECT mat_code, MAX(in_cust_code) in_cust_code, SUM(mat_use_qty) mat_use_qty,
        ISNULL(MAX(insp_flag),'N') insp_flag, ISNULL(in_gagong_proc_code,'') in_gpc,
-       ISNULL((SELECT TOP 1 item_cost FROM nx.pr_m_item_cost
-                WHERE item_code = a.mat_code AND cust_code = MAX(a.in_cust_code)
-                  AND cost_tag = '1' AND cost_apply_ymd <= ? AND currency = 'KRW'
-                ORDER BY cost_apply_ymd DESC),0) item_cost
+       ISNULL((SELECT TOP 1 price FROM nx.price_item
+                WHERE item_code = a.mat_code AND vendor_code = MAX(a.in_cust_code)
+                  AND price_type = '매입' AND apply_ymd <= ? AND currency = 'KRW'
+                ORDER BY apply_ymd DESC),0) item_cost
   FROM CTE_BOM a
  WHERE a.in_cust_code = ?
    AND CHARINDEX('||' + a.in_cust_code + '||', a.cum_in_cust_code) = 0
@@ -392,7 +392,23 @@ SELECT mat_code, MAX(in_cust_code) in_cust_code, SUM(mat_use_qty) mat_use_qty,
 
 
 def _set_bom_expand(cur, item, cust, ymd):
-    """세트도번 → 그 거래처가 대는 자도번 목록. 레거시 dw_6 동일."""
+    """세트도번 → 그 거래처가 대는 자도번 목록. 레거시 dw_6.
+       ★소요엔진 이관(2026-09-08·§1-10): nx_soyo_engine.setin_soyo(v_pr_bom·거래처path·순환방지·INT누적)로 전환.
+       구 _DW6_SQL(재귀CTE)과 diff0(62/62) 검증 후. cost=price_item(매입,as-of) 부가. 엔진 미가용시 _DW6_SQL 폴백."""
+    try:
+        import nx_soyo_engine as _soyo
+    except Exception:
+        _soyo = None
+    if _soyo is not None:
+        eng = _get_cost_engine()
+        rows = _soyo.setin_soyo(eng, str(item).strip().upper(), str(cust).strip())
+        for r in rows:
+            cur.execute("""SELECT TOP 1 price FROM nx.price_item WHERE item_code=? AND vendor_code=?
+                            AND price_type='매입' AND apply_ymd<=? AND currency='KRW' ORDER BY apply_ymd DESC""",
+                        r["mat_code"], str(cust).strip(), ymd)
+            pr = cur.fetchone()
+            r["cost"] = float(pr[0]) if pr and pr[0] is not None else 0.0
+        return rows
     cur.execute(_DW6_SQL, item, ymd, cust)
     return [{"mat_code": str(r[0]).strip(), "cust": str(r[1] or "").strip(),
              "use_qty": float(r[2] or 0), "insp_flag": str(r[3] or "N").strip(),
@@ -428,7 +444,7 @@ def _apply_sagub(cur, ymd, cust, mats, user, win, ref=""):
                      FROM nx.pr_m_item_bom b WITH(NOLOCK)
                      JOIN nx.pr_m_item_bom_sub c WITH(NOLOCK)
                        ON b.item_code=c.item_code AND b.mat_code=c.mat_code
-                     JOIN nx.pr_m_item a WITH(NOLOCK) ON b.mat_code=a.item_code
+                     JOIN nx.item a WITH(NOLOCK) ON b.mat_code=a.item_code
                     WHERE b.item_code=? AND c.sagub_flag='1'
                     GROUP BY b.mat_code) AS S
                ON (T.MAT_CODE=S.mat_code AND T.CUST_CODE=S.cust_code)
@@ -454,7 +470,7 @@ def _apply_sagub(cur, ymd, cust, mats, user, win, ref=""):
                    b.use_qty * ? * -1, ?, ?, ?, ?,
                    ?, GETDATE(), ?, ?, GETDATE(), ?
               FROM nx.pr_m_item_bom b WITH(NOLOCK)
-              JOIN nx.pr_m_item a WITH(NOLOCK) ON b.mat_code=a.item_code
+              JOIN nx.item a WITH(NOLOCK) ON b.mat_code=a.item_code
              WHERE b.item_code=? AND b.sagub_flag='1'
         """, ymd, sseq, cust, qty, ref, mat_code, ymd, 0,
              user, win, user, win, mat_code)
@@ -490,12 +506,12 @@ def setstock_manual_prep(cust: str = Query(""), item: str = Query("")):
         #   pr_m_item.in_cust_code = 화면거래처 AND work_code = '' → '직납품'
         cur.execute(f"""SELECT TOP 500 m.item_code, ISNULL(i.item_name,'') itemnm,
                                SUM(m.maint_qty) stock_qty,
-                               MAX(CASE WHEN ISNULL(pi.IN_CUST_CODE,'')=m.cust_code
-                                         AND ISNULL(pi.WORK_CODE,'')=''
+                               MAX(CASE WHEN ISNULL(pi.in_cust,'')=m.cust_code
+                                         AND ISNULL(pi.work_code,'')=''
                                         THEN '1' ELSE '0' END) direct
                           FROM nx.set_stock_maint m WITH(NOLOCK)
                           LEFT JOIN nx.item i WITH(NOLOCK) ON i.item_code=m.item_code
-                          LEFT JOIN nx.pr_m_item pi WITH(NOLOCK) ON pi.ITEM_CODE=m.item_code
+                          LEFT JOIN nx.item pi WITH(NOLOCK) ON pi.item_code=m.item_code
                           {where}
                          GROUP BY m.item_code, i.item_name
                          ORDER BY m.item_code""", *p)
@@ -513,7 +529,7 @@ def setstock_manual_prep(cust: str = Query(""), item: str = Query("")):
         custs = []
         try:
             cur.execute("""SELECT RTRIM(CUST_CODE), RTRIM(CUST_DESC)
-                             FROM nx.CM_M_CUST WITH(NOLOCK)
+                             FROM nx.v_cm_m_cust WITH(NOLOCK)
                             WHERE ISNULL(RTRIM(CUST_DESC),'')<>''
                             ORDER BY CUST_DESC""")
             custs = [{"code": str(r[0]).strip(), "nm": str(r[1]).strip()}
@@ -770,7 +786,7 @@ def setadj_list(fr: str = Query(""), to: str = Query(""), cust: str = Query(""),
                    m.maint_qty, ISNULL(m.remarks,'') remarks,
                    ISNULL(m.insert_user_id,'') user_id, m.insert_datetime
               FROM nx.set_stock_maint m WITH(NOLOCK)
-              LEFT JOIN nx.CM_M_CUST c WITH(NOLOCK) ON c.CUST_CODE=m.cust_code
+              LEFT JOIN nx.v_cm_m_cust c WITH(NOLOCK) ON c.CUST_CODE=m.cust_code
               LEFT JOIN nx.item i WITH(NOLOCK) ON i.item_code=m.item_code
              WHERE {' AND '.join(w)}
              ORDER BY m.maint_ymd DESC, m.maint_seq DESC""", *p)
@@ -977,22 +993,23 @@ def _derive_set_stock(cur, cust, doban, qty, sheet, bc, mseq, today):
     cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.stock_ledger WHERE MAINT_YMD=?", today)
     lseq = int(cur.fetchone()[0])
     # ★레거시 135(dw_pr_input_135_5) 원문: 세트입고요청 명세(_DTL)를 그대로 읽는다.
-    #   단가 = pr_m_item_cost(cost_tag='1', 거래처별, 입고일 이하 최신). 입고창고 'IS0001' 하드코딩.
+    #   단가 = nx.price_item(price_type='매입', 거래처별, 입고일 이하 최신). 입고창고 'IS0001' 하드코딩.
+    #   ※단일데이터셋 전환(2026-09-08): pr_m_item_cost(미러)→price_item(클린 편집대상). 미러는 컷오버 후 write-dead.
     #   ※웹 명세(set_input_req_dtl)가 비어 있으면 미러(_DTL)를 원천으로 쓴다.
     cur.execute("""SELECT d.mat_code, d.use_qty,
-                          ISNULL((SELECT TOP 1 c.item_cost FROM nx.pr_m_item_cost c WITH(NOLOCK)
-                                   WHERE c.item_code=d.mat_code AND c.cust_code=?
-                                     AND c.cost_tag='1' AND c.currency='KRW'
-                                     AND c.cost_apply_ymd<=? ORDER BY c.cost_apply_ymd DESC),0) cost
+                          ISNULL((SELECT TOP 1 c.price FROM nx.price_item c WITH(NOLOCK)
+                                   WHERE c.item_code=d.mat_code AND c.vendor_code=?
+                                     AND c.price_type='매입' AND c.currency='KRW'
+                                     AND c.apply_ymd<=? ORDER BY c.apply_ymd DESC),0) cost
                      FROM nx.set_input_req_dtl d WITH(NOLOCK)
                     WHERE d.sheet_no=?""", cust, today, sheet)
     dtl = cur.fetchall()
     if not dtl:
         cur.execute("""SELECT d.MAT_CODE, d.USE_QTY,
-                              ISNULL((SELECT TOP 1 c.item_cost FROM nx.pr_m_item_cost c WITH(NOLOCK)
-                                       WHERE c.item_code=d.MAT_CODE AND c.cust_code=?
-                                         AND c.cost_tag='1' AND c.currency='KRW'
-                                         AND c.cost_apply_ymd<=? ORDER BY c.cost_apply_ymd DESC),0) cost
+                              ISNULL((SELECT TOP 1 c.price FROM nx.price_item c WITH(NOLOCK)
+                                       WHERE c.item_code=d.MAT_CODE AND c.vendor_code=?
+                                         AND c.price_type='매입' AND c.currency='KRW'
+                                         AND c.apply_ymd<=? ORDER BY c.apply_ymd DESC),0) cost
                          FROM nx.PU_T_SET_INPUT_REQ_DTL d WITH(NOLOCK)
                         WHERE d.SHEET_NO=? AND ISNULL(d.ITEM_GUBUN,'1')='1'""", cust, today, sheet)
         dtl = cur.fetchall()
@@ -1260,7 +1277,7 @@ def setinsp_list(request: Request, frm: str = Query(""), to: str = Query(""),
     try:
         cur.execute("""SELECT TOP {} m.maint_ymd, m.maint_seq, RTRIM(ISNULL(m.maint_tag,'')),
                   RTRIM(ISNULL(m.cust_code,'')), ISNULL(RTRIM(c.CUST_DESC),''),
-                  RTRIM(ISNULL(m.item_code,'')), ISNULL(RTRIM(i.ITEM_DESC),''),
+                  RTRIM(ISNULL(m.item_code,'')), ISNULL(RTRIM(i.item_name),''),
                   CAST(ISNULL(m.maint_qty,0) AS float), RTRIM(ISNULL(m.sheet_no,'')),
                   RTRIM(ISNULL(m.status,'')), RTRIM(ISNULL(m.derived_flag,'0')),
                   CONVERT(varchar(19), m.insert_datetime, 120),
@@ -1270,8 +1287,8 @@ def setinsp_list(request: Request, frm: str = Query(""), to: str = Query(""),
                   CONVERT(varchar(19), q.status_dt, 120), ISNULL(RTRIM(q.status_user),''),
                   {INSPSRC}
              FROM nx.set_stock_maint m WITH(NOLOCK)
-             LEFT JOIN nx.CM_M_CUST c WITH(NOLOCK) ON RTRIM(c.CUST_CODE)=RTRIM(m.cust_code)
-             LEFT JOIN nx.PR_M_ITEM i WITH(NOLOCK) ON RTRIM(i.ITEM_CODE)=RTRIM(m.item_code)
+             LEFT JOIN nx.v_cm_m_cust c WITH(NOLOCK) ON RTRIM(c.CUST_CODE)=RTRIM(m.cust_code)
+             LEFT JOIN nx.item i WITH(NOLOCK) ON RTRIM(i.item_code)=RTRIM(m.item_code)
              LEFT JOIN nx.set_input_req q WITH(NOLOCK)
                     ON RTRIM(ISNULL(q.barcode_no,''))=RTRIM(ISNULL(m.sheet_no,''))
                    AND RTRIM(ISNULL(q.item_code,''))=RTRIM(ISNULL(m.item_code,''))

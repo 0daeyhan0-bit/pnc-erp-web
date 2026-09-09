@@ -113,7 +113,7 @@ def cost_sil(item: str = Query(..., description="품번"),
             try:
                 for i in range(0, len(codes), 900):
                     ch = codes[i:i + 900]; ph = ",".join("?" * len(ch))
-                    eng.cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
+                    eng.cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE IN ({ph})", *ch)
                     for r in eng.cur.fetchall(): vmap[str(r[0]).strip()] = str(r[1]).strip()
             except Exception:
                 pass
@@ -124,7 +124,7 @@ def cost_sil(item: str = Query(..., description="품번"),
                     try:
                         for i in range(0, len(miss), 900):
                             ch = miss[i:i + 900]; ph = ",".join("?" * len(ch))
-                            c2.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
+                            c2.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE IN ({ph})", *ch)
                             for r in c2.fetchall(): vmap.setdefault(str(r[0]).strip(), str(r[1]).strip())
                     finally:
                         cn.close()
@@ -238,7 +238,7 @@ def cost_nae(item: str = Query(..., description="품번"),
                 ck = codes[i:i+400]; ph = ",".join("?" * len(ck))
                 eng.cur.execute(f"""SELECT it.item_code, ISNULL(pc.CUST_DESC,'')
                     FROM nx.item it
-                    LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST pc ON pc.CUST_CODE = it.in_cust
+                    LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust pc ON pc.CUST_CODE = it.in_cust
                     WHERE it.item_code IN ({ph})""", *ck)
                 for r in eng.cur.fetchall():
                     custm[(r[0] or "").strip()] = (r[1] or "").strip()
@@ -988,13 +988,13 @@ def cost_proc_save(payload: dict = Body(...)):
 def weld_get(node: str = Query(..., description="용접 관경별 조회 대상 노드(제품/SUB)"),
              roll: int = Query(1, description="1=제품 레벨 전노드(subtree) 롤업(평면모델·기본), 0=해당 노드 자체만")):
     """노드의 용접봉별 관경별 용접점수(nx.item_weld) 반환 — 내부원가/BOM구성 조립공정(용접) 편집 프리로드.
-       roll=1(기본): node + nx.bom 하위 전노드 관경별 횟수 롤업(제품 레벨=전노드 합, 평면 모델 정합 = 소요량 0.0495 등).
+       roll=1(기본): node + ★bom_line 하위 전노드 관경별 횟수 롤업(제품 레벨=전노드 합. 실쿼리=nx.bom_line+bom_header, nx.bom 아님).
        ★프리로드/표시 전용. 저장(weld/save)은 노드 단위 — 제품 롤업 저장 분배는 별도 설계."""
     node = node.strip()
     nx = _nx(); cur = nx.cursor()
     try:
         nodes = {node}
-        if roll:                                   # nx.bom 하위 전노드 수집(용접봉 RAC 제외한 구성 자식 전개)
+        if roll:                                   # bom_line 하위 전노드 수집(용접봉 RAC 제외한 구성 자식 전개. 실쿼리=nx.bom_line, nx.bom 아님)
             frontier = [node]; seen = set()
             while frontier:
                 batch = [x for x in frontier if x not in seen]

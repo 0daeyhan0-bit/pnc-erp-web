@@ -144,7 +144,7 @@ nx 테이블은 **설계상 두 갈래**(CUTOVER_DELTA §2):
 | 품목 | `PR_M_ITEM` | 13 | `nx.item` | `nx.item`(20곳: bom/item/sourcing/esticost) | 🔴 활성 |
 | 단가 | `PR_M_ITEM_COST` | 7 | `nx.price_item` | `nx.price_item`(6곳: price/pricemgmt) | 🔴 활성 |
 | BOM | `PR_M_ITEM_BOM` 19 · `CS_M_ITEM_BOM` 6 | 25 | `nx.bom_line`+엔진 | (엔진 경유) | 🟡 확인필요 |
-| BOM스냅샷 | `nx.bom`(소문자·동결) | 3(backflush 169/206/251) | `nx.bom_line`/엔진 | — | 🟡 §1-9-2 은퇴대상 |
+| BOM스냅샷 | `nx.bom`(소문자·동결) | 3(backflush 169/206/251)+원가엔진RAC잔재 | ★**`_dong_of`(bom_flat 중량소요)** (bom_line 아님) | — | 🟡 §1-9-2 은퇴대상 |
 
 - 품목 미러 13곳(도구 `cutover_retired_guard.py`): autoorder 2·matexpect 3·planrev 1·setin 6·setinstat 1.
 - 합계 ~194곳. **기계적 치환 아님** — 클린 스키마가 미러와 다름(아래 6-B).
@@ -164,10 +164,17 @@ nx 테이블은 **설계상 두 갈래**(CUTOVER_DELTA §2):
 ### 6-C. 전환계획 (옆에짓고 diff0·§1-9 원칙)
 공통 원칙: **엔드포인트별 before/after 결과 diff0 확인 후 교체**(값 바뀌면 왜 바뀌는지 실측·기록). 미러→클린은 값이 달라질 수 있음(신규/재분류 반영).
 1. **단가 7곳**(PR_M_ITEM_COST→nx.price_item) — 수량 적고 편집 활성. **1순위**. 단 sourcing "정산마스터=불변조회" 규약(§쌍5) 위반 여부 개별 확인.
+   - **✅ 완료(2026-09-08·feat/single-source-price)**: 운영 6곳 전환(setin.py 3·live_api.py 3). 매핑 = `item_cost→price·cust_code→vendor_code·cost_tag('1'→매입,'S'→TAGS,'E'→TAGE)·cost_apply_ymd→apply_ymd·currency 동일`. `dtrade.py:117`은 **대사(비교) 목적**이라 미러 유지.
+   - **검증(읽기전용)**: 최신단가 대조 = 불일치 5건 전부 **클린이 더 최신**(단가 편집이 클린에 쌓임→미러는 이미 옛값) · 미러만 15건 = **nx.item에 없는 죽은 품목**(무영향) · **살아있는 품목 회귀 0건**(매입/S/E). ⟹ 클린 전환이 오히려 정확. 미배포(재컷오버 시 함께).
 2. **품목 13곳**(PR_M_ITEM→nx.item) — retired_guard 대상. 접미사·중량축 주의(§5). **2순위**.
+   - **✅ 완료(2026-09-08·feat/single-source-price)**: 13곳 전환(autoorder 2·matexpect 3·planrev 1·setin 6·setinstat 1). guard 잔여 **0**. 매핑 = `ITEM_DESC→item_name·IN_CUST_CODE→in_cust·WORK_CODE→work_code·ITEM_CODE→item_code`.
+   - **검증(읽기전용)**: 살아있는 품목(공통 24,154) **in_cust diff0·work_code diff0** · item_name 27건만 차이(표시전용 품명·접미사류) · nx.item⊇PR_M_ITEM(1,249품목 더 완전=유령 감소). setin 431/457은 존재확인 조인(컬럼 미사용). 미배포(재컷오버 시 함께).
 3. **거래처 146곳**(CM_M_CUST→nx.cust) — 규모 큼. 표시명 조인부터 일괄 패턴전환(공통 헬퍼화 검토)·사업자정보 사용처 개별. **3순위**(당장 드리프트 작음).
+   - **✅ 완료(2026-09-08·feat/single-source-price)**: **호환 뷰 방식**. `nx.v_cm_m_cust`(nx.cust 위에 레거시 컬럼명 전체 매핑, DDL=`_migration/create_v_cm_m_cust.py`) 신설 → 코드 **147곳/39파일** 을 `nx.cm_m_cust`→`nx.v_cm_m_cust` 로 일괄교체(테이블명만·컬럼 무변경). `CM_M_CUST_MAGAM`(마감일 26곳)은 별개라 보존.
+   - **backfill**: 미러에만 있던 실거래처 4곳(2370 승호산업·2371 원광산업[6품목 매입처]·2372 Huayi·2373 청송에어팩) nx.cust 적재(nx.cust 361=미러 동수). 원인=클린 마이그 이후 레거시 추가분.
+   - **검증**: 컴파일 OK · 미러 대비 뷰 이름 회귀 **0** · 상관서브쿼리/JOIN/기타컬럼(CUST_TYPE·GC_GUBUN·USE_FLAG) 동작확인. 데이터 소스 = nx.cust 단일. 미러 CM_M_CUST 은퇴(drop) 대상. 미배포(재컷오버 시).
 4. **BOM 25곳** — 대부분 엔진 경유여야 함(§1-10 소요엔진 하드룰). ad-hoc 직독이면 엔진 호출로. 개별 판정.
-5. **nx.bom 3곳**(backflush) — §1-9-2 은퇴계획대로 bom_line 우회(재고 소비량 변동 주의).
+5. **nx.bom 3곳**(backflush)+원가엔진 RAC잔재 — §1-9-2 은퇴대상. ★올바른 이관처 = **`_dong_of`(nx.bom_flat 중량소요)**, bom_line 아님(bom_line엔 원소재/중량 없음). weight_explode/copper_by_spec는 원가 primitive(변형SUB 2배). 정본감사=`WEIGHT_BOM_SOURCE_AUDIT_260908.md`. TestBed 검증 후 교체(재고 변동=교정).
 
 **당장 값이 틀린 건 아니라 시간 여유 있음.** 급한 순서 = 편집이 활성인 단가·품목부터.
 

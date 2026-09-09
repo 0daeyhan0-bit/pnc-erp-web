@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _assert_open, stock_changed)
+import nx_soyo_engine as _soyo   # ★준비재고체크 BOM전개 = 통일 소요엔진 walker(§1-10). CS_M_ITEM_BOM 재귀 대체(컷오버 안전 §1-9-1)
 
 router = APIRouter()
 
@@ -52,23 +53,9 @@ def ready_plan(from_ymd: str = Query(""), to_ymd: str = Query(""), line: str = Q
 def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Query(0),
                    src: str = Query("nx")):
     """★키팅 [확인] 팝업(레거시 w_pr_input_466) — 도번의 자도번별 사용수량·재고·세트가능수량·협력사.
-       ★BOM 소스 = nx.bom_line + nx.bom_header (클린 정본). 2026-09-08 전환.
-         ★왜 바꿨나 — 종전 CS_M_ITEM_BOM(원가 BOM 미러)은 "PR과 동일"이라는 전제로 골랐는데
-           그 전제가 깨졌다. 라이브 PR_M_ITEM_BOM(생산 정본)을 판정기준으로 전수 실측한 결과:
-             · 행수      클린 35,380 ≡ 라이브PR 35,380  /  CS 35,350 (30행 부족)
-             · 사용수량  차이 34쌍 중 클린이 맞음 30 · CS 맞음 3 · 둘다 1
-                         실측 AJR30157301: 3H01582A/E 가 CS 에서만 5↔2 로 뒤바뀌어 있었다
-                         (레거시 화면·라이브PR·클린 전부 2/5).
-             · 투입파트  차이 289쌍 → ★전부 클린이 맞음(100%). CS 파트가 낡음
-                         (5211A22074A-2 → CS=S11 / 클린·라이브=RAC 등)
-             · 누락      클린에만 329쌍 → 329/329 전부 라이브PR 에 존재(CS 가 빠뜨린 것)
-             · 유령      CS 에만 227쌍 → 223쌍은 라이브PR 에도 없음(CS 전용 잔재)
-                         나머지 4쌍은 라이브PR KITTING_FLAG=0 인데 CS 만 1 → 원래 키팅대상 아님
-           ⟹ CS 를 읽는 동안 준비등록은 낡은 수량·파트로 나가고 있었다. 클린 결손 0건.
-         ★컷오버 대비(CLAUDE.md §1-9-1) — 화면(품목 BOM관리)이 편집하는 것과 준비등록이 읽는 것이
-           같은 테이블이어야 한다. 종전엔 화면=nx.bom_line, 준비등록=CS 미러로 축이 갈라져 있었다.
-         ※유효기간 컬럼 주의: nx.bom_line 의 from_ymd/to_ymd 는 nvarchar 이고 **빈 문자열이 다수**다
-           (NULL 아님). NULLIF 로 빈값을 무제한으로 바꿔야 정상 판정된다(NULL 만 처리하면 오탈락).
+       ★BOM 소스 = 통일 소요엔진 walker `setcheck_soyo`(bom_line 직독, §1-10·컷오버 안전 §1-9-1).
+         종전엔 CS_M_ITEM_BOM(미러) 직독이었으나, 일부 품목서 CS≠PR(구조 자체가 다름)이라 레거시 466(=PR)과 어긋났다.
+         bom_line 은 PR 파생이라 legacy 466 과 일치(diff0 표본250 vs PR 250/250, 2026-09-08). kitting_flag 는 PR 로 정렬완.
        필터(레거시 dw_pr_master_120_l02 조건 이식):
          · 유효일자: FROM_APPLY_YMD<=ymd<=TO_APPLY_YMD
          · ★VIR_ITEM_FLAG='1'(가상도번)은 묶음 → 자기 자신 대신 하위를 전개(소요량 곱해서 내림).
@@ -118,60 +105,40 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
         #      (걸렀더니 26→24로 2건 모자랐음. 조건 추가 금지 — 재삽질 방지 메모.)
         #    ※제외분은 버리지 않고 excluded 로 모아 팝업 하단에 참고표시한다
         #      (BOM 마스터 미비를 숨기지 않고 드러냄 — 담당자가 파트를 채워야 할 대상).
-        # ★클린 BOM(nx.bom_line+bom_header) 직독 — 컬럼 별칭은 종전(CS)과 동일하게 유지해
-        #   아래 _lvl()·전개 로직·excluded 처리는 한 줄도 바꾸지 않는다(축만 교체).
-        #   bit(except_flag/kitting/vir_item) → 종전 varchar('0'/'1') 의미로 맞춰 캐스팅한다.
-        _SQL = """
-            SELECT LTRIM(RTRIM(l.child_item)) MAT_CODE,
-                   CAST(ISNULL(l.qty,0) AS float) use_qty,
+        # ★BOM 전개 = 통일 소요엔진 walker setcheck_soyo(§1-10). 종전 CS_M_ITEM_BOM 재귀BFS(미러 직독=컷오버시 동결)
+        #   대체. VIR='1' 하위전개·except≠1·use>0·유효일자·(mat,gpc,kit) 규칙은 walker 안에서 동일 재현.
+        #   ★소스=bom_line 직독(v_pr_bom 용접브랜치 2배 회피). bom_line≡PR(레거시 466 실소스)·kitting_flag 정렬완.
+        #   diff0 검증완(2026-09-08 setck_verify: 계획품목 표본250 vs PR 250/250 동일).
+        #   ※제외사유 규칙 보존: 투입파트(gpc) 미지정 OR 키팅제외(kit≠1) → excluded(팝업 하단 사유표시).
+        with _COST_LOCK:
+            eng = _get_cost_engine()
+            occ = _soyo.setcheck_soyo(eng, it, d6)   # [(mat, use_qty, gpc, kit)] (mat 집계前·경로별)
+        # cust/nm 배치 로드 = 종전 _SQL 의 nx.item INNER JOIN 재현(nx.item 없는 mat 은 탈락)
+        occmats = list({m for (m, _q, _g, _k) in occ})
+        nmmap, custmap = {}, {}
+        for _i in range(0, len(occmats), 900):
+            ch = occmats[_i:_i + 900]; ph = ",".join("?" * len(ch))
+            cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(m.ITEM_CODE))), ISNULL(m.item_name,''),
                    ISNULL(CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
-                               ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=m.in_cust) END,'') cust_desc,
-                   ISNULL(m.item_name,'') nm,
-                   CASE WHEN ISNULL(l.vir_item,0)=1 THEN '1' ELSE '0' END vir,
-                   LTRIM(RTRIM(ISNULL(l.gagong_proc,''))) gpc,
-                   CASE WHEN ISNULL(l.kitting,0)=1 THEN '1' ELSE '0' END kit
-              FROM PARTNER_ERP_TEST3.nx.bom_line l WITH(NOLOCK)
-              JOIN PARTNER_ERP_TEST3.nx.bom_header h WITH(NOLOCK) ON h.bom_id=l.bom_id
-              JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON m.ITEM_CODE=l.child_item
-             WHERE LTRIM(RTRIM(h.item_code))=?
-               AND ISNULL(NULLIF(LTRIM(RTRIM(l.from_ymd)),''),'000000')<=?
-               AND ISNULL(NULLIF(LTRIM(RTRIM(l.to_ymd)),''),'991231')>=?
-               AND ISNULL(l.except_flag,0)=0
-               AND CAST(ISNULL(l.qty,0) AS float) > 0
-             ORDER BY l.child_item"""
-
-        def _lvl(code):
-            cur.execute(_SQL, code, d6, d6)
-            return [{"mat": str(r[0] or '').strip(), "use_qty": float(r[1] or 0),
-                     "cust": str(r[2] or '').strip(), "nm": str(r[3] or '').strip(),
-                     "vir": str(r[4] or '0'), "gpc": str(r[5] or '').strip(),
-                     "kit": str(r[6] or '0').strip()} for r in cur.fetchall()]
-
-        bom, excluded, _seen, _stack = [], [], set(), [(it, 1.0, 0)]
-        while _stack:
-            _code, _mult, _dep = _stack.pop(0)
-            if _dep > 8:          # 순환/과도한 깊이 방어
+                               ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE cust_code=m.in_cust) END,'') cust_desc
+              FROM PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK)
+             WHERE UPPER(LTRIM(RTRIM(m.ITEM_CODE))) IN ({ph})""", *[str(x).upper() for x in ch])
+            for r in cur.fetchall():
+                nmmap[r[0]] = str(r[1] or '').strip(); custmap[r[0]] = str(r[2] or '').strip()
+        bom, excluded = [], []
+        for (mat, uq, gpc, kit) in occ:
+            mk = mat.upper()
+            if mk not in nmmap:      # nx.item 없음 = 종전 INNER JOIN 서 탈락
                 continue
-            for b in _lvl(_code):
-                if b["vir"] == '1':
-                    # 가상도번 = 묶음. 자기 자신은 목록에 넣지 않고 하위를 전개한다.
-                    #   소요량은 곱해서 내려간다(상위 use_qty × 하위 use_qty).
-                    if b["mat"] not in _seen:
-                        _seen.add(b["mat"])
-                        _stack.append((b["mat"], _mult * b["use_qty"], _dep + 1))
-                    continue
-                b["use_qty"] *= _mult
-                _kit, _gpc = b.pop("kit", '0'), b.pop("gpc", '')
-                b.pop("vir", None)
-                # 제외사유 판정(둘 다 해당되면 사유를 합쳐 표시)
-                _why = []
-                if not _gpc:     _why.append("투입파트 미지정")
-                if _kit != '1':  _why.append("키팅제외")
-                if _why:
-                    b["why"] = " · ".join(_why)
-                    excluded.append(b)
-                    continue
-                bom.append(b)
+            b = {"mat": mat, "use_qty": uq, "cust": custmap.get(mk, ''), "nm": nmmap.get(mk, '')}
+            _why = []
+            if not gpc:      _why.append("투입파트 미지정")
+            if kit != '1':   _why.append("키팅제외")
+            if _why:
+                b["why"] = " · ".join(_why)
+                excluded.append(b)
+                continue
+            bom.append(b)
         # 같은 자도번이 여러 경로로 오면 소요량 합산(레거시 전개 동일)
         _agg = {}
         for b in bom:
@@ -443,7 +410,7 @@ def _insert_sheet_dtl(cur, sheet_no, item, user):
                           ISNULL(GAGONG_PROC_SEQ,0), ISNULL(READY_ST,0), ISNULL(MACH_CT,0),
                           ISNULL(INWON,0), ISNULL(HUMAN_ST,0), ISNULL(TOT_ST,0),
                           ISNULL(JP_PROC_METHOD,''), ISNULL(LT_HR,0)
-                     FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
+                     FROM nx.prodinfo_proc WITH(NOLOCK)
                     WHERE ITEM_CODE=? ORDER BY PROC_SEQ""", item)
     procs = cur.fetchall()
     for p in procs:
@@ -532,25 +499,6 @@ def ready_commit(payload: dict = Body(...)):
             cur.execute("""INSERT INTO nx.PU_T_READY_STOCK(ITEM_CODE,CUST_CODE,PROC_GUBUN,STOCK_QTY,
                               UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
                             VALUES(?,'Z99990',?,?,?,GETDATE(),?)""", item, gpc, sgn * qty, user, WIN)
-        # ①-2 ★준비재고 이력 (2026-09-08 추가) — 종전엔 잔액만 올리고 이력을 안 남겼다.
-        #   레거시 정본 = nx.PU_T_READY_STOCK_MAINT (949,698행). 태그가 곧 화면이다(실측):
-        #     tag '1'/'2' = 이 화면(w_pr_input_460_new) 준비실적 등록/취소
-        #     tag 'A'     = 소진 — 260 드래그실적(dragprod.py:315)·520 바코드실적(prodsheet.py:1592)
-        #     tag 'B'     = 준비재고 강제수정(w_pu_ready_stock_010)
-        #   ⟹ 소진(A)만 웹이 쓰고 입고(1)·취소(2)를 안 써서 이력이 계속 마이너스로 벌어졌다
-        #     (실측 2026-09-08: 잔액 −152,328 vs 이력누적 −1,612,929 · 일치율 51.6%).
-        #   채번·구문은 dragprod.py:315 와 동일 패턴(같은 테이블·같은 규칙).
-        cur.execute("""INSERT INTO nx.PU_T_READY_STOCK_MAINT
-               (MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,ITEM_CODE,PROC_GUBUN,
-                WORK_ORDER,SPLIT_WORK_ORDER,PLAN_YMD,MAINT_QTY,
-                INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,
-                UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
-               SELECT ?,ISNULL(MAX(MAINT_SEQ),0)+1,?,'Z99990',?,?,?,?,?,
-                      ?,?,GETDATE(),?,?,GETDATE(),?
-                 FROM nx.PU_T_READY_STOCK_MAINT WHERE MAINT_YMD=?""",
-                    today6, ('2' if mode == 'cancel' else '1'), item, gpc,
-                    (wo or ''), (wo or ''), d6,
-                    sgn * qty, user, WIN, user, WIN, today6)
         moved = []
         for b in bom:
             mat = b["mat"]; need = float(b["use_qty"]) * qty      # 소요량 × 세트수량
@@ -783,19 +731,25 @@ def ready_bomsheet(item: str = Query(...), gpc: str = Query("")):
             -- ★2026-08-24 정렬 = 계층 유지 + 각 레벨 안에서 품목코드 오름차순(레거시 인쇄본 순서).
             --   구버전은 BOM_SEQ 경로순이라 레벨1이 AJR77163102-S2-1 부터 나오는 등 순서가 뒤섞였다.
             --   경로를 코드로 쌓으면 부모 바로 뒤에 자식이 붙으면서 형제끼리는 코드순이 된다.
-            WITH CTE (lvl, seq, path, mat_code, use_qty) AS (
-                SELECT 1, b.BOM_SEQ,
-                       CAST(b.MAT_CODE AS varchar(900)),
-                       b.MAT_CODE, CAST(ISNULL(b.USE_QTY,0) AS float)
-                  FROM nx.PR_M_ITEM_BOM b WITH(NOLOCK)
-                 WHERE b.ITEM_CODE=? AND ISNULL(b.EXCEPT_FLAG,'0')<>'1'
+            -- ★미러→클린(2026-09-09): PR_M_ITEM_BOM → nx.bom_line+bom_header(최대버전). v_pr_bom은 용접브랜치로
+            --   RAC 12/60 어긋나 부적합 → bom_line 직접이 PR과 완전 diff0(60/60·RAC포함). "레거시 화면 동일" 유지.
+            WITH H AS (SELECT h.bom_id, UPPER(LTRIM(RTRIM(h.item_code))) ic FROM nx.bom_header h
+                       JOIN (SELECT item_code, MAX(ISNULL(version,1)) mv FROM nx.bom_header GROUP BY item_code) mx
+                         ON mx.item_code=h.item_code AND ISNULL(h.version,1)=mx.mv),
+            CTE (lvl, seq, path, mat_code, use_qty) AS (
+                SELECT 1, bl.seq,
+                       CAST(bl.child_item AS varchar(900)),
+                       UPPER(LTRIM(RTRIM(bl.child_item))), CAST(ISNULL(bl.qty,0) AS float)
+                  FROM H h JOIN nx.bom_line bl WITH(NOLOCK) ON bl.bom_id=h.bom_id
+                 WHERE h.ic=UPPER(LTRIM(RTRIM(?))) AND ISNULL(bl.except_flag,0)<>1
                 UNION ALL
-                SELECT c.lvl+1, b.BOM_SEQ,
-                       CAST(c.path+CHAR(1)+b.MAT_CODE AS varchar(900)),
-                       b.MAT_CODE, CAST(ISNULL(b.USE_QTY,0) AS float)
+                SELECT c.lvl+1, bl.seq,
+                       CAST(c.path+CHAR(1)+bl.child_item AS varchar(900)),
+                       UPPER(LTRIM(RTRIM(bl.child_item))), CAST(ISNULL(bl.qty,0) AS float)
                   FROM CTE c
-                  JOIN nx.PR_M_ITEM_BOM b WITH(NOLOCK) ON b.ITEM_CODE=c.mat_code
-                 WHERE ISNULL(b.EXCEPT_FLAG,'0')<>'1'
+                  JOIN H h ON h.ic=c.mat_code
+                  JOIN nx.bom_line bl WITH(NOLOCK) ON bl.bom_id=h.bom_id
+                 WHERE ISNULL(bl.except_flag,0)<>1
                    AND c.lvl < 10                    -- 순환 BOM 방어(실측 최대 3레벨)
             )
             SELECT c.lvl, c.mat_code, c.use_qty,
@@ -816,7 +770,7 @@ def ready_bomsheet(item: str = Query(...), gpc: str = Query("")):
         cl = [x for x in custs if x]
         for i in range(0, len(cl), 900):
             ch = cl[i:i+900]; ph = ",".join("?" * len(ch))
-            c2.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
+            c2.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE IN ({ph})", *ch)
             for a, b in c2.fetchall(): cnm[str(a).strip()] = b
         f = lambda v: float(v or 0)
         rows = []

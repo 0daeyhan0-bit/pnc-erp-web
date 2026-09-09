@@ -386,7 +386,7 @@ def readystock_list(q: str = Query(""), proc: str = Query(""), limit: int = Quer
             FROM PARTNER_ERP_TEST3.nx.PU_T_READY_STOCK r
             LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=r.ITEM_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE=r.PROC_GUBUN
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=r.CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=r.CUST_CODE
             WHERE {' AND '.join(w)} ORDER BY r.ITEM_CODE, r.PROC_GUBUN""", *p)
         rows = []
         for r in cur.fetchall():

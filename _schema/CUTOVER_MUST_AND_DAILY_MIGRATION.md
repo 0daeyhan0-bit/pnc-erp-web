@@ -21,6 +21,9 @@
 2-d. **★백데이트 픽업(2026-08-31 신설 — 윈도우 밖 수정분)** — 싱크 후 `_migration/sub_norm/r_backdate_pickup.py --commit`(DRY 기본·멱등·PK 스코프). **`r_delta_sync` 는 최근 30일 윈도우만 재복사하므로 그보다 오래된 전표를 라이브에서 고치면 nx 에 영원히 안 들어온다.** `do_window` 의 자가치유는 **행수만** 비교해서 내용만 바뀐 경우를 못 잡는다(§ 매일유의 2번이 경고한 바로 그 케이스).
      **실측 2026-08-31**: `PU_T_STOCK_MAINT` 2607 구간 **25행** 어긋나 recon RED — 11:26 김미진 님이 `w_pu_sale_010` 에서 7/30 전표를 손봤고 그중 **2건은 단가 정정(2,373.50→2,412.00)**, 나머지 23건은 감사컬럼만. **금액이 걸린 진짜 수정이라 놓치면 안 된다.** 픽업 후 recon GREEN(52/52).
      전 거래테이블 DRY 스캔 = 11개 3,031행이 후보이나 recon RED 는 이 1개뿐이었다(나머지는 이미 일치) → **RED 난 테이블만 `--only` 로 최소침습** 반영. 한계: UPDATE_DATETIME/PK 없는 테이블은 스킵(보고함)·라이브 **삭제**분은 못 잡음(그건 recon 행수가 잡는다) → **최종 판정은 언제나 recon**.
+2-e. **★★bom_line ↔ 레거시 구조 sync(2026-09-08 신설·항구화)** — 싱크 후 `_migration/sub_norm/r_bomline_sync.py --commit`(멱등·백업자동). **delta_sync 는 미러(pr_m_item_bom)만 맞추고 `nx.bom_line`(클린=편성/원가/소요 정본)은 별도라 안 따라간다** → 레거시 BOM 편집이 쌓이면 bom_line 이 다필드 드리프트(gagong_proc·vir_item·except/엣지·sagub_default) → **생산계획 자재소요가 레거시와 어긋남**(일순위 위반). 이 스크립트가 순서대로(reconcile→procmeta_fill→gagong_align→vir_align→sagub_align) PR 정합.
+     **실측 2026-09-08(재컷오버 준비)**: 미적용 상태에서 편성 소요엣지 미러만32/클린만184 드리프트 → sync 후 **미러만0·클린만0·편성수량(USE_QTY_PR) diff0**(잔여6=용접봉RAC=엔진 별도산출 무관). 원가 diff0·prodsheet diff0 동시 확인. **★적용 후 편성 소요 diff0 상시 확인**(생산계획 절대정확이 일순위). 정본 = `BOM_LINE_LEGACY_SYNC_260908.md`.
+     ※컷오버 후엔 BOM 편집이 웹(bom_line)에서 직접 → 이 sync 불요(레거시 소멸). 병행운영 중에만.
 3. **다시 recon → GREEN 확인.** GREEN이면 그날 마이그 끝.
 4. **로그 남김** (recon 결과·타임스탬프).
 
@@ -39,6 +42,8 @@
 
 | 일시 | 결과 | 비고 |
 |---|---|---|
+| 2026-09-09 07:05~07:18 | **★GREEN 52/52** | 6단계 완주. 시작 recon RED 20(야간 트랜잭션 lag)+PR_M_PROC_GAGONG DRIFT_CONTENT. delta_sync 성공96·차이0·실패0(≈188만행) · perf 생성0/이미30/스킵3 · suffix 1974·변경0 · item_sync 불일치0·신규0 · geom 0 · backdate 7테이블 **2,391행**(PU_T_STOCK_MAINT 2166 등) · **bom_line sync**(sagub 4·kitting 1·gagong 잔여4=용접봉RAC 무관). ★**편성 소요 diff0 검증 PASS**(생산계획 일순위): v_pr_bom.**USE_QTY_PR** vs 미러 = 미러만0·클린만0·비RAC 수량다름 **0**·RAC 292(§1-10 엔진별도). 최종 recon **GREEN 52/52**·PR_M_PROC_GAGONG MATCH 해소. ★검증 교훈=편성은 USE_QTY_PR(PR생산값) 읽음, USE_QTY(CS원가값)로 대조하면 CS≠PR 정상차를 오판(FAIL 오경보). |
+| 2026-09-08 07:18~07:21 | **핵심 GREEN·RED 2(무관)** | 컷오버 롤백(2026-09-07) 후 재개 매일마이그. 시작 recon RED 21. delta_sync 21테이블 정합(계획미러 재복사 포함)·perf 생성0/이미30·suffix 1,974·item_sync 정상·geom 0·backdate 7테이블 2,385행. 최종 recon **핵심 미러 전부 MATCH**(PR_M_ITEM_BOM·COST·PLAN_PART_MAT 등), **RED 2개=`PR_T_INDI_CUTTING`·`_PROC_GAGONG`**(UPDATE_DATETIME 없어 백데이트 스킵+07:20 업무개시 신규재단, 드리프트 아님). BOM/계획 작업 목적엔 충분. |
 | 2026-09-01 07:22~07:32 | **부분완료(RED)** | 6단계 전부 실행. delta_sync 성공 96·차이 0·실패 0 · perf 생성 2 · suffix 1,975 · item_sync 정상 · geom_weight 0건 · backdate 2,585행(8테이블 전량). ★마지막 recon 직전 **07:30 업무 개시**(최근 15분 299행 유입) → RED 는 신규 거래 때문이며 드리프트가 아니다. ⟹ 여기서 중단이 맞다(움직이는 데이터를 쫓으면 계속 뒤처진다). ★**결함 1건 수정**: `r_geom_weight.py` 가 갱신대상 0건일 때 executemany 로 크래시(exit=1) — 가드 추가. |
 | 2026-08-31 20:2x (라이브 정지 후 야간) | **GREEN 52/52** | 6단계 완주. delta_sync 성공 96·차이 0·실패 0 · perf_maintain 생성 2/이미28/컬럼없어스킵 3 · sub_desc_suffix 1,975건 재병기(nx.item 변경 0) · r_item_sync 원가필드 32건+신규 1건 · r_geom_weight 11건. ★1차 recon 후 `PU_T_STOCK_MAINT` 만 RED(2607 25행) → **2-d 백데이트 픽업 신설**로 해소. ★부수 발견 = 웹 입력분 소실 위험(매일유의 참조·현재 피해 0). |
 
@@ -46,6 +51,12 @@
 ## B. 컷오버할 때 꼭 해야 하는 것 (하드 전환 필수)
 
 > 트랜잭션 읽기는 병행운영 중 **라이브 유지**(사용자 1:1 대조용), 하드컷오버 시점에 **일괄 nx 미러전환**. 아래는 그 전환 전/시점에 반드시.
+
+### ★B-0. 7~9월 이관·일월마감 완주 + 음수재고 정리 = **컷오버 시점 최우선**(2026-09-09 대표 결정)
+- **현재 이관·마감 = 올해 1~6월(2501~2506)만.** mat_stock_daily 기초=6월말(260630)·7월~현재는 불완전 rollforward → **자재 음수 139품목 −39,597**(67 이관누락 신규+66 7~9월 입고이관누락+6 기초음수). = 요구② 미완주의 증상(게이트/과소비 아님).
+- **대표 결정: 데이터가 아직 움직여(병행운영) 지금 무접촉. 컷오버 시점(레거시 정지 후)에 7~9월 이관·마감 완주하며 정리.** = 매일마이그 타이밍 원칙(데이터 이동 중 금지)과 동일.
+- 절차 = CUTOVER_MUSTDO_260909 **A4 순서 3~4단계**(레거시차단→delta정지→7~9월 이관/마감 완주→음수0→diff0→flip).
+- ★이게 2026-09-07 컷오버 실패("8월 월마감 미수행" 음수)의 연장선 = **실 컷오버 핵심**. 미러직독/SUB/BOM 대부분은 동결무해였고, 진짜 관건은 이관 완주다.
 
 ### B-1. 미러 완결성 (안 하면 컷오버 후 stale)
 1. ~~미러 없는 2테이블 r_delta_sync 대상 편입~~ — ✅ **2026-08-29 확인: 이미 해소됨**.
@@ -127,6 +138,11 @@
     상세 = `CUTOVER_CHECKLIST.md` "16. 롤백 계획".
 
 ---
+
+## ★A0. 전 테이블 이관 구분표 (⑤·2026-09-09 완료)
+- 정본 = **`A0_TABLE_MIGRATION_CLASSIFICATION_260909.md`**(nx 570 테이블 전수·8구분 T1~T8).
+- 요약: 570 중 **227+ 폐기(백업/dev/로그)**. 미러마스터 32·미러트랜잭션 62(delta_sync·동결)·클린정본 subset. **컷오버 blocker 없음**(이관완/동결무해/동결읽기). 남은 판정=T8 6종(라인달력 A/B 등·대표결정 or 후속).
+- 미러 직독 판정 상세 = `CUTOVER_MUSTDO_260909.md` A2. 트랜잭션 recon = `CUTOVER_DELTA_INVENTORY.md`.
 
 ## C. 상태 (2026-08-19)
 - **매일 마이그(A)**: 관행 확립(r_delta_sync+recon). 실측 반전=미러 대체로 최신(트랜잭션 바이트동일 다수), recon으로 drift 감시중.

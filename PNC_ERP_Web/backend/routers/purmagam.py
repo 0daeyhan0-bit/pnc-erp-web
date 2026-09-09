@@ -46,7 +46,7 @@ def purmagam_list(request: Request, ym: str = Query(""), gubun: str = Query(""))
             SUM(S.qty) qty, SUM(S.amt) amt, SUM(S.vat) vat, COUNT(DISTINCT S.mat) items,
             SUM(CASE WHEN S.gubun=N'매입' THEN S.amt ELSE 0 END) amt_purchase,
             SUM(CASE WHEN S.gubun=N'수입' THEN S.amt ELSE 0 END) amt_import
-          FROM ({_pur_src(_win_ovr('PUR', y))}) S JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON S.cc=C.CUST_CODE{gwhere}
+          FROM ({_pur_src(_win_ovr('PUR', y))}) S JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust C ON S.cc=C.CUST_CODE{gwhere}
           GROUP BY S.cc HAVING SUM(S.amt)<>0 ORDER BY SUM(S.amt) DESC""")
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -156,7 +156,7 @@ def purmagam_carryover(ym: str = Query(""), cc: str = Query("")):
         else:
             cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
               SELECT S.cc cc, MAX(C.CUST_DESC) nm, SUM(S.qty) qty, SUM(S.amt) amt, COUNT(DISTINCT S.mat) items
-              FROM ({_pur_src(carry)}) S JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON S.cc=C.CUST_CODE
+              FROM ({_pur_src(carry)}) S JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust C ON S.cc=C.CUST_CODE
               GROUP BY S.cc HAVING SUM(S.amt)<>0 ORDER BY SUM(S.amt) DESC""")
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -265,7 +265,7 @@ def purmagam_lines(request: Request, ym: str = Query(""), basis: str = Query("ma
             MAX(ISNULL(M.item_name,'')) nm, MAX(ISNULL(M.item_spec,'')) spec, MAX(ISNULL(M.unit,'')) unit,
             S.cost cost, S.ymd ymd, SUM(S.qty) q, SUM(S.amt) amt
           FROM ({_pur_src_moda(win)}) S
-            JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON S.cc=C.CUST_CODE
+            JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust C ON S.cc=C.CUST_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.item M ON S.mat=M.item_code
           WHERE {' AND '.join(where)}
           GROUP BY S.cc, S.mat, S.moda, S.cost, S.ymd""", *pf)

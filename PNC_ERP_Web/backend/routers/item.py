@@ -88,7 +88,7 @@ def _item_nature(cur, code, sgroup):
     cur.execute("""SELECT
         (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.proc_weld WHERE parent_item=? AND ISNULL(use_qty,0)>0),
         (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.v_cs_bom WHERE ITEM_CODE=?),
-        (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=?),
+        (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.prodinfo_proc WHERE ITEM_CODE=?),  -- ★R01 클린(미러 직독 은퇴 260909)
         (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.v_cs_bom WHERE MAT_CODE=?)""", code, code, code, code)
     w, bp, g, bc = cur.fetchone()
     if w or bp: return "5.용접·조립품", 1
@@ -128,7 +128,7 @@ def itemmaster_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Q
     try:
         dLG = _kindmap(c2, "PR005"); dSG = _kindmap(c2, "PR006"); dGRP = _kindmap(c2, "PR001")
         dCLS = _kindmap(c2, "PR008"); dPK = _kindmap(c2, "PR021"); dUN = _kindmap(c2, "CM002"); dMT = _kindmap(c2, "PR019")
-        c2.execute("SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST")
+        c2.execute("SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust")
         dCust = {str(r[0]).strip(): r[1] for r in c2.fetchall()}
         w = ["1=1"]; p = []
         if q.strip(): w.append("(i.item_code LIKE ? OR i.item_name LIKE ?)"); p += [f"%{q.strip()}%"] * 2

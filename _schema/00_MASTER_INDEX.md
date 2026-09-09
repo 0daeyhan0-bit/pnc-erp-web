@@ -42,6 +42,14 @@
 
 **유일한 예외**: 레거시 SP를 그대로 EXEC/재현해야 diff0가 되는 경우(pncind RO)만. 이때도 **명시 주석 + 이 §0 하단 표에 등록**(사유·해당 파일). 현재 등록된 예외: `nx_soyo_engine`/`nx_cost_engine` 내부의 `nx.PR_M_ITEM`(중량·in_cust)·`nx.bom_line`(구조) 직독 = diff0용, **엔진 내부에 캡슐화**(외부는 엔진 함수로만 접근).
 
+**★★★이름충돌 주의 3쌍 (2026-09-09·SUB_ARCHITECTURE_REANALYSIS §1 — 착수 전 반드시 구분)**:
+같은/비슷한 이름의 **완전히 다른** 개념이 3쌍 있다. 안 구분하면 엉뚱한 테이블을 잡는다.
+| 쌍 | A | B | 구분 |
+|---|---|---|---|
+| **SUB** | `PR_M_ITEM_SUB` | 구조 SUB(자도번) | A=품목 1:1 **부가정보**(검사·포장·지그·RACK)·구조무관 / B=**하위 조립품**(`bom_line.child_item`·`sub_registry`) |
+| **route** | `nx.route_edges` | `nx.routing_edge` | A=**자재 BOM엣지**(STEP7 전개) / B=**생산처(work-center) 캐시**(조달경로 아님·한대윤 코드)·둘 다 live |
+| **S** | 우리 `품번_S{nn}`(언더스코어) | 레거시 `-S1`(대시) | A=우리 정규형(정본) / B=레거시 접미사(`sub_variant_map`·분석용). BOM_STRUCTURE_CANON §2 "혼동 절대 금지" |
+
 **착수 자문 2문장**:
 ① "내가 지금 미러(PR_M_ITEM/CM_M_CUST/PR_M_ITEM_COST/…)를 직접 SELECT하고 있나? 그렇다면 멈추고 nx.item/nx.partner 또는 엔진 함수로 바꾼다."
 ② "**내가 지금 `nx.bom` 을 읽고 있나? 그렇다면 멈춘다** — 과거 스냅샷이다. BOM 은 `nx.bom_header`+`nx.bom_line`(뷰 `nx.v_pr_bom`), 계산값은 엔진."

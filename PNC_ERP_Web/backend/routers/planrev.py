@@ -181,7 +181,7 @@ def _step6_sql(cur):
     INTO nx.plan_part_gagong FROM nx.plan_part_temp a
     LEFT JOIN nx.plan_route_active pra ON pra.assy_item_code=a.assy_item_code
     JOIN (
-        SELECT item_code, CAST(0 AS INT) route_id, proc_seq, s_work_code, gagong_proc_seq, lt_hr FROM {P}PR_M_ITEM_PROC_GAGONG
+        SELECT item_code, CAST(0 AS INT) route_id, proc_seq, s_work_code, gagong_proc_seq, lt_hr FROM {P}prodinfo_proc
         UNION ALL
         SELECT item_code, route_id, proc_seq, s_work_code, gagong_proc_seq, lt_hr FROM nx.route_proc_gagong
     ) b ON a.mat_code=b.item_code
@@ -283,11 +283,13 @@ def _ensure_bom_snap(cur):
 
 def _routing_edge_sync(cur):
     """routing_edge 생산처(wc) 시드/싱크 — soyo.py:709 복사분(SQL 원문 동일).
+    ★★이름충돌 주의(SUB_ARCHITECTURE_REANALYSIS §1): nx.routing_edge=**생산처(work-center) 캐시**(여기·조달경로 아님)
+      ≠ nx.route_edges=**자재 BOM엣지**(STEP7 전개). 거의 같은 이름·둘 다 live·완전 별개 축.
 
     모델: wc_live = 마스터(work_code || in_cust) 시드 · wc_user = 사용자 편집(NULL=미편집)
           유효 wc = COALESCE(wc_user, wc_live)
     ⟹ 미편집 엣지는 마스터 자동 추종, **편집 엣지는 보존**. 신규 엣지는 마스터 기준 INSERT.
-       그래서 편성마다 호출해도 사용자가 지정한 조달경로는 덮이지 않는다."""
+       그래서 편성마다 호출해도 사용자가 지정한 **생산처(wc)**는 덮이지 않는다(조달경로 아님)."""
     cur.execute("IF COL_LENGTH('nx.routing_edge','wc_live') IS NULL ALTER TABLE nx.routing_edge ADD wc_live varchar(20)")
     cur.execute("IF COL_LENGTH('nx.routing_edge','wc_user') IS NULL ALTER TABLE nx.routing_edge ADD wc_user varchar(20)")
     # ★2026-09-01: 실제 컬럼은 7개(parent_item·child_item·seq·route_id·wc·wc_live·wc_user)다.
@@ -362,7 +364,7 @@ def _step7_sql(cur):
       INTO nx.plan_direct_pull
       FROM nx.plan_dtl d
       {LPJ}
-      JOIN {P}PR_M_LINE_NO L ON RTRIM(L.LINE_NO)=RTRIM(d.LINE_NO) AND ISNULL(L.CUST_MAINT_DAY,0)>0
+      JOIN {P}line_no L ON RTRIM(L.LINE_NO)=RTRIM(d.LINE_NO) AND ISNULL(L.CUST_MAINT_DAY,0)>0
       JOIN #wd w1 ON w1.ymd6={BASE}
       JOIN #wd w2 ON w2.rn=w1.rn-CAST(L.CUST_MAINT_DAY AS int)
      WHERE ISNULL(d.PLAN_YMD,'')<>''""").replace("{P}", P).replace("{LPJ}", _lpj).replace("{BASE}", _base))
@@ -628,8 +630,9 @@ def _step5_item(cur):
     #   그대로 쓰면 유령 ASSY 차단이 풀린다. 실측 2026-09-03 — _known 을 nx.item 으로 바꿨더니
     #   AJR30133610(웹 등록·라이브 미등록·모델/주문정보 없음)이 되살아나
     #   plan_item_dtl 15행 → plan_part_dtl 60행 → plan_part_mat **315키**로 번졌다.
-    #   ⟹ 등록여부는 라이브에서 직접 읽는다(라이브는 읽기전용 §1-1, 조회는 허용).
-    cur.execute("SELECT ITEM_CODE FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM")
+    #   ⟹ 등록여부 = nx.item(클린 정본·단일데이터셋 2026-09-08). 종전 미러 PR_M_ITEM(컷오버후 write-dead)에서 전환.
+    #     nx.item이 미러보다 1,249품목 더 완전(SUB/신규)이라 유령 오판 감소·in_cust diff0.
+    cur.execute("SELECT item_code FROM PARTNER_ERP_TEST3.nx.item")
     _known = set(str(r[0]).strip() for r in cur.fetchall())
     cur.execute("""IF OBJECT_ID('nx.plan_item_dtl') IS NULL CREATE TABLE nx.plan_item_dtl(
         PLAN_YMD varchar(6),WORK_ORDER varchar(20),SPLIT_WORK_ORDER varchar(30),C_ITEM_CODE varchar(20),
@@ -1314,7 +1317,7 @@ def _coop_check(cur):
                      FROM nx.plan_part_mat a
                     WHERE ISNULL(a.mat_work_center_code,'')<>''
                       AND NOT EXISTS(SELECT 1 FROM nx.PR_M_WORK w WHERE w.WORK_CODE=a.mat_work_center_code)
-                      AND NOT EXISTS(SELECT 1 FROM nx.CM_M_CUST c WHERE c.CUST_CODE=a.mat_work_center_code)
+                      AND NOT EXISTS(SELECT 1 FROM nx.v_cm_m_cust c WHERE c.CUST_CODE=a.mat_work_center_code)
                     GROUP BY ISNULL(a.mat_work_center_code,'') ORDER BY 2 DESC""")
     unmapped = [{"wc": r[0], "n": int(r[1])} for r in cur.fetchall()]
     return {"coop_lines": int(n or 0), "coop_wc": int(wc or 0),
@@ -1473,7 +1476,7 @@ def planrev_modelbom_hist(ymd: str = Query(""), model: str = Query(""), item: st
             FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM a WITH(NOLOCK)
             LEFT JOIN PARTNER_ERP_TEST3.nx.item i WITH(NOLOCK) ON i.item_code=a.C_ITEM_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w WITH(NOLOCK) ON w.WORK_CODE=i.WORK_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu WITH(NOLOCK) ON cu.CUST_CODE=i.in_cust
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cu WITH(NOLOCK) ON cu.CUST_CODE=i.in_cust
             {} ORDER BY a.INSERT_DATETIME DESC, a.MODEL_NO, a.C_ITEM_CODE""".format(
             max(1, min(int(limit or 300), 3000)), wh), *p)
         rows = [{"model": r[0], "item": r[1], "make_ymd": r[2], "to_ymd": r[3], "use_qty": float(r[4] or 0),
@@ -1903,7 +1906,7 @@ def _ensure_line_pull(cur):
              ISNULL(l.MAINT_DAY,0), ISNULL(l.MAINT_HHMM,''), RTRIM(ISNULL(d.LINE_NO,''))
         FROM nx.plan_dtl d
         OUTER APPLY (SELECT TOP 1 m.MAINT_DAY, m.MAINT_HHMM
-                       FROM nx.PR_M_LINE_NO m
+                       FROM nx.line_no m   -- ★R01 클린(미러 직독 은퇴 260909·레거시 일치정렬)
                       WHERE RTRIM(m.LINE_NO)=RTRIM(d.LINE_NO)
                         AND m.APPLY_YMD <= ISNULL(NULLIF(d.ORG_PLAN_YMD,''), d.PLAN_YMD)
                       ORDER BY m.APPLY_YMD) l""")

@@ -126,3 +126,43 @@ LG BOM(Assembly Pull) 기준 전개. 소스 = `nx.lg_bom_ver`(point-in-time).
 | 엔진 전개 소스 `nx.bom_line` → 클린 `nx.bom`(§3 (2)) | ☐ 추후 근본(변형SUB 이중계상 근절, 원가 copper_by_spec 2배·LME 잔차 동시 해소) |
 
 > 각 마이그레이션 = 옆에짓고 **전수 diff0 게이트** 통과 후 전환·dev 검증·명시 승인 후 배포. 정확도 검토 상세 = `SOYO_ENGINE_UNIFY_DESIGN.md`(§7)·감사 4종(2026-08-29).
+
+---
+
+## §5-1. 현행 재감사 (2026-09-08) — §5 표(8/29)가 stale, 실코드 기준 정정
+
+> 대표 지시(신규 ERP 존재이유 = 신규 BOM 방식). 전 백엔드 라우터 실코드 전수 재감사로 §5 체크박스를 현행에 맞게 정정. **각 전환은 결과값 diff0 필수(대표 확정).**
+
+**§5(8/29) 대비 이미 완료(A)로 확인 — §5는 대상으로 적었으나 실코드는 엔진화됨:**
+- pri1 `soyo.sales_forecast_sagub_rebuild` → ✅ `sagub_parts_soyo`(L499-502).
+- pri3 `gagong._p2` → ✅ `gagong_matplan070`=엔진(L1021·1071).
+- 중량 `weight_calc._explode` → ✅ `weight_explode`(L133). lgsagub `_explode_parts` → ✅ 제거됨.
+
+**★진짜 남은 마이그 대상(B) — 현행 확정(정산금액·재고 영향 순):**
+| 우선 | 위치(현행 line) | 무엇 | 엔진 대체 | 비고 |
+|---|---|---|---|---|
+| 1 | `weight_calc.py:311/323`(compute_quote)·`:455/467`(compute_quote_lme) · `coopquote2.py:863`(_dong_weight) · `coopquote.py:756`(_coop_soyo v1) | 협력사 견적/무게·LME **정산금액**(v_cs_bom 재귀) | `weight_explode`/`copper_by_spec` | 금액직결·이중계상 위험 최고. ★§5가 놓친 coopquote2/v1 포함 |
+| 2 | `prodsheet.py:712`(_bom_expand) | 생산실적 재고차감 소요 | **`prod_input_soyo`** | ✅**완료(2026-09-08)**: 래퍼 전환(원본=_bom_expand_legacy 보존)·전제=bom_line↔레거시 sync 완료. 검증 new==legacy diff0(AGF/AJR/AEG 등). feat/single-source-price |
+| 3 | `backflush.py:133/163/198/254` | 재고차감축(중량·다단계) | walker 신설(별도축) | nx.bom L169/206 잔존·단순치환 아님 |
+| 4 | `ready.py:106`(setcheck)·`kitting.py:89/296/832` | 키팅 물량/충당 | explode walker | ✅**전부 완료(2026-09-08)**. ①kitting_grid(89) 투입파트 키셋=`kitting_gpcs`·출력 diff0 636/636. ②재고충당 상향롤업(kitting_grid T_SUB_CTE + plan_part410 #tms4)=`stock_flow_rollup`·fixstk diff0 2318/2318. ③**ready_setcheck(106)=`setcheck_soyo`**(VIR하위전개·except≠1·use>0·유효일자·bom_line직독)·**diff0 표본250 vs PR 250/250**. 셋 다 미러 CS/PR_M_ITEM_BOM 재귀 대체(§1-9-1). |
+| 5 | `setin.py:351`(_set_bom_expand)·`procbc.py:74`(_bc_bom) | 세트입고 명세/차감 | **`setin_soyo`(신규 walker)** | ✅**setin 완료(2026-09-08)**: 거래처-path walker `setin_soyo`(순환방지·INT누적·원자재정지·set_except) 신설, 옛 _DW6_SQL과 **diff0 62/62·엔진+cost 50/50**. ★부수: 앞선 세트CTE 앵커 nx.item 전환이 재귀CTE 타입불일치 유발→CAST(varchar50) 수정. procbc는 ★**보류**(아래) |
+| 5-b | `procbc.py:74`(_bc_bom, **가공바코드실적 018·세트입고 아님**) | 가공실적 하위자재 차감 | **`setinput_bc_soyo`(신규 walker)** | ✅**완료(2026-09-08)**: 래퍼 스왑(원본 _bc_bom_legacy 보존). ★**용접봉(RAC) 제외** — 가공은 원소재 절삭만·용접은 다음 공정(대표 확정)이라 가공실적에 용접봉 차감·게이팅은 부정확(레거시 BOM딸림). 자재(비용접봉) diff0 **80/80·60/60**, 용접봉 정상 드롭. bom_line 용접봉 변형SUB 2배 문제도 제외로 자동해소. |
+| 6 | `sourcing.py:2371`(current_order) | 자동발주 소요량 | **`order_soyo`(신규 walker)** | ✅**완료(2026-09-08)**: prod_soyo 재사용 불가 실증(20중8다름) → 전용 walker `order_soyo`(make_type게이트·USE_QTY·sagub·RAC제외) 신설. 옛 CTE와 **diff0 40/40(qty+sagub)** 후 스왑(레거시 CTE=폴백 보존). feat/single-source-price |
+
+**★2026-09-08 재사용 검증 교훈(대표 지적)**: "기존 walker 재사용"도 반드시 옛 로직과 **diff0로 적합성 먼저 증명**해야 한다(추측금지). 실증 결과 setin(거래처-path)·sourcing(make_type게이트) 모두 기존 walker와 계산대상이 달라 **각자 새 walker 필요**. prodsheet만 prod_input_soyo와 정확히 일치(diff0)해 재사용 성공.
+
+**★2026-09-08 재고롤업 교훈 2가지(diff0 못 맞추면 반드시 이 둘 확인)**:
+- **① v_pr_bom 은 용접브랜치를 UNION 한다 → 용접봉(RAC) 2번 방출**. v_pr_bom = bom_line 브랜치 UNION ALL proc_weld 용접브랜치(BOM_SEQ=900·REMARKS='[weld]'). 용접봉을 제외 안 하는 walker(재고롤업 등)가 v_pr_bom 을 읽으면 RAC 엣지를 2배 센다(미러 pr_m_item_bom 은 용접브랜치 없음=1번). ⟹ 용접봉 포함 계산은 **bom_line 직독**(`_stk_lines`)해야 미러와 diff0. (RAC 제외 walker=prod_soyo/order_soyo 는 v_pr_bom 써도 무관.)
+- **② SQL `CONVERT(int, DECIMAL)` = 버림(truncate), `CONVERT(int, FLOAT)` = 반올림**. USE_QTY·재고가 DECIMAL 컬럼이라 `CONVERT(int, 214*USE_QTY)`=`CONVERT(int,1.5408)`=**1**(반올림 아님!). Python `int(x+0.5)`(반올림)로 재현하면 off-by-1 이 난다. 엔진 `_sqlint`=버림(`int(x+1e-9)`). 이 둘 고치니 fixstk 23불일치→10→**0**(2318/2318).
+
+**★2026-09-08 stock_flow_rollup 음수재고 교훈**: 상향롤업 walker 는 seed·중간값이 **음수재고(-)** 여도 전파해야 미러 CTE 와 diff0(가공 롤업은 음수재고 존재). 초기판은 `val<=0: return` 으로 음수를 버려 gagong 214 에서 7건 불일치(미러 -8124 vs 엔진 +956=양수경로만) → `val==0: return` 으로 교정(0 만 정지=0×use=0). `_sqlint` 은 음수도 0쪽 버림(SQL CONVERT(int,DECIMAL) 동일). kitting/재고롤업은 당시 음수 seed 가 없어 우연히 diff0였을 뿐 — 교정 후 kitting 2318/2318 유지·gagong 2325/2325.
+
+**★2026-09-08 setcheck 교훈 — "CS≡PR" 가정 검증·오라클은 레거시 실소스로**: ready_setcheck 는 CS_M_ITEM_BOM 을 읽으며 "CS≡PR" 이라 주석했으나, 일부 품목서 **CS≠PR 구조가 다름**(CS 만 있는 VIR sub·다른 자식셋). 레거시 466 은 실제 **PR** 을 쓰고 bom_line 은 PR 파생이라, 엔진(bom_line)은 CS 와 어긋나도 **PR/legacy 와는 일치**. ⟹ 이관 diff0 오라클은 "웹이 지금 읽는 테이블"이 아니라 **레거시가 실제 쓰는 소스(PR)** 로 잡아야 한다. 그리고 bom_line 의 **kitting_flag 810 엣지가 PR 과 어긋나**(bl=0/PR=1) 분류가 틀렸다 → `r_bomline_kitting_align.py` 로 PR 정렬(kitting_flag 는 소요/원가 미참조=무회귀). 정렬 후 250/250 diff0.
+
+**★2026-09-08 kitting 교훈 — "키셋 diff0"가 아니라 "출력 diff0"로 판정하라**: kitting 투입파트 필터에서 walker 키셋(747)과 미러CTE 키셋(1187)의 **원차이가 컸다**(자식 어셈블리 엣지의 gagong_proc, 예: `RAC30599301-1`의 Q1000). 근본 = `nx.v_pr_bom`(클린 bom_line 파생)이 일부 엣지의 GAGONG_PROC/WH_GAGONG를 미러와 다르게 합성/공백처리(bom_line에 그 엣지 자체가 없고 UNION 합성 브랜치에서 blank로 나옴, ~5246 edge). **그러나 그 차이 키는 실제 표시행(GAGONG_PROC_SEQ=1)에 전혀 안 걸려** 출력은 완전 동일(636/636). ⟹ 필터·키셋류 이관의 판정 기준은 **중간 산출물(키셋)이 아니라 최종 출력(§1-10 "결과값 동일")**. 중간 산출물 차이에 놀라 bom_line 데이터를 건드리려 하지 말 것(생산계획·원가 diff0 위험). 판정 도구 = `kit_out_verify.py`(출력레벨 대칭차).
+| 7 | `gagong.py:214/545/622` | 가공진척 재고충당 롤업·P2전개 | `stock_flow_rollup`·`gagong_p2_parts` | ✅**전부 완료(2026-09-08)**. ①214·622 재고충당 상향롤업 → `stock_flow_rollup`(214 fixm **2325/2325**·음수전파 포함, 622 kitting캐시+폴백). ②**545(CTE_BOM) → `gagong_p2_parts`**: P2 멤버십 top-down 전개(work_code=wcp·in_cust=''·mwc 경로첫등장 charindex·mat∉pr_m_mat) 전용 walker·**diff0 표본350 vs 미러 423/423·p2set 대칭차0**. 셋 다 미러 pr_m_item_bom 재귀 대체(§1-9-1)·bom_line 직독. |
+| 존치 | `planrev.py:125/311`(_step6/_step7_sql) | 생산계획 자재소요 정본 | plan_explode(대조가능·STEP7 존치) | §5·엔진도크 "plan결합 존치" |
+
+**DEAD(라이브 아님·정리만, 마이그 아님)**: `soyo._step6/_step7_sql`(L538 raise), `_sp_4wk.py:SQL_4WK`(import 0건), `partplan._compose_assy`(deprecated no-op), `weight_calc._explode_legacy`(롤백보존), `lgsagub._explode_parts`(제거됨).
+
+**진행**: #2 prodsheet부터 착수(엔진 재현본 존재로 diff0 확실). 각 건 옆에짓고 diff0 검증 후 교체·기록.

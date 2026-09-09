@@ -6,6 +6,8 @@ from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
 from common import (_prod_stock_map, _latest_stock_map, _conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, _stock_short_msg, stock_changed)
 
+import nx_soyo_engine as _soyo   # ★키팅 투입파트 키셋 = 통일 소요엔진 walker(§1-10). 미러 pr_m_item_bom 재귀CTE 대체(컷오버 안전 §1-9-1)
+
 router = APIRouter()
 
 
@@ -83,19 +85,20 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
         whp = (wh_part.strip() or 'IS0001')
         # ★성능: SP #TEMP_CTE(투입파트 재귀BOM)를 메인쿼리 JOIN에서 분리 → KEYS set 선(先)조회 후 파이썬 필터
         #   (재귀CTE를 메인 GROUP 조인에 인라인하면 재구체화로 ~5초. 분리 시 ~1.5초. 값·색 로직 불변)
+        # ★투입파트 키셋 = 통일 소요엔진 walker(§1-10). 계획품목의 VIR-트리에서 WH_GAGONG=whp 인 엣지의
+        #   (item, gagong_proc) 집합. 종전 pr_m_item_bom 재귀CTE(미러 직독=컷오버시 동결) 대체.
+        #   ★출력 diff0 검증완(2026-09-08 kit_out_verify): 표시행 636쌍 유지 동일(미러만/walker만=0/0).
         keys = set()
         try:
-            cur.execute(f"""
-                ;WITH CTE (ITEM_CODE, MAT_CODE, GAGONG_PROC_CODE, WH_GAGONG_PROC_CODE, VIR_ITEM_FLAG) AS (
-                     SELECT a.ITEM_CODE, B.MAT_CODE, B.GAGONG_PROC_CODE, B.WH_GAGONG_PROC_CODE, B.VIR_ITEM_FLAG
-                       FROM {PLAN_T} a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.pr_m_item_bom B WITH(NOLOCK) ON A.ITEM_CODE=B.ITEM_CODE
-                      WHERE a.part_plan_ymd BETWEEN '' AND ? AND a.GC_GUBUN='P'
-                     UNION ALL
-                     SELECT a.ITEM_CODE, B.MAT_CODE, B.GAGONG_PROC_CODE, B.WH_GAGONG_PROC_CODE, B.VIR_ITEM_FLAG
-                       FROM CTE a JOIN PARTNER_ERP_TEST3.nx.pr_m_item_bom B WITH(NOLOCK) ON A.MAT_CODE=B.ITEM_CODE WHERE A.VIR_ITEM_FLAG='1'
-                )
-                SELECT DISTINCT ITEM_CODE, GAGONG_PROC_CODE FROM CTE WHERE WH_GAGONG_PROC_CODE=? OPTION(MAXRECURSION 0)""", d6b, whp)
-            for rr in cur.fetchall(): keys.add((rr[0], rr[1]))
+            cur.execute(f"""SELECT DISTINCT UPPER(LTRIM(RTRIM(a.ITEM_CODE)))
+                             FROM {PLAN_T} a WITH(NOLOCK)
+                            WHERE a.part_plan_ymd BETWEEN '' AND ? AND a.GC_GUBUN='P'""", d6b)
+            _pitems = [r[0] for r in cur.fetchall()]
+            with _COST_LOCK:
+                _eng = _get_cost_engine()
+                for _it in _pitems:
+                    for _gpc in _soyo.kitting_gpcs(_eng, _it, whp):
+                        keys.add((_it, _gpc))
         except Exception: pass
         w = ["a.part_plan_ymd<=?", "a.GC_GUBUN='P'", "a.GAGONG_PROC_SEQ=1"]; p = [d6b]
         if wc.strip():     w.append("a.WORK_CODE=?"); p.append(wc.strip())
@@ -119,8 +122,8 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             JOIN PARTNER_ERP_TEST3.nx.item ib WITH(NOLOCK) ON a.ITEM_CODE=ib.ITEM_CODE
             JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg WITH(NOLOCK) ON a.GAGONG_PROC_CODE=pg.GAGONG_PROC_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK wk WITH(NOLOCK) ON wk.WORK_CODE=a.WORK_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu WITH(NOLOCK) ON cu.CUST_CODE=pg.IN_CUST_CODE
-            LEFT JOIN (SELECT ITEM_CODE, SUM(CAST(ISNULL(TOT_ST,0) AS float)) st FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG GROUP BY ITEM_CODE) st ON st.ITEM_CODE=a.ITEM_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cu WITH(NOLOCK) ON cu.CUST_CODE=pg.IN_CUST_CODE
+            LEFT JOIN (SELECT ITEM_CODE, SUM(CAST(ISNULL(TOT_ST,0) AS float)) st FROM PARTNER_ERP_TEST3.nx.prodinfo_proc GROUP BY ITEM_CODE) st ON st.ITEM_CODE=a.ITEM_CODE
             LEFT JOIN (SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,'') swo, MIN(ORG_PLAN_YMD + ORG_OUTPUT_HM) lgh FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_DTL GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,'')) lg ON lg.WORK_ORDER=a.WORK_ORDER AND lg.swo=ISNULL(a.SPLIT_WORK_ORDER,'')
             WHERE {' AND '.join(w)}
             GROUP BY a.GAGONG_PROC_CODE, COALESCE(pg.GAGONG_PROC_DESC, a.GAGONG_PROC_CODE), ISNULL(pg.PART_GROUP_CODE,''),
@@ -128,7 +131,8 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
               a.ASSY_ITEM_CODE, a.UPPER_ITEM_CODE, a.ITEM_CODE, a.PART_PLAN_YMD, ISNULL(ib.item_name,''),
               ISNULL(pg.PROD_RATE,100), ISNULL(st.st,0)""", *p)
         cols = [d[0] for d in cur.description]
-        raw = [d for d in (dict(zip(cols, r)) for r in cur.fetchall()) if (d["item"], d["gpc"]) in keys]   # ★투입파트 KEYS 필터
+        raw = [d for d in (dict(zip(cols, r)) for r in cur.fetchall())
+               if ((d["item"] or "").strip().upper(), (d["gpc"] or "").strip()) in keys]   # ★투입파트 KEYS 필터(walker 키셋과 정규화 일치)
         # ── 본행 grain = (gpc,wo,swo,assy,upper,item), 일자셀 = 달력일 피벗 ──
         keyed = {}
         for r in raw:
@@ -291,43 +295,35 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             matwh = _cache["mwh"]; prwh = _cache["pwh"]   # ★생산재고 컬럼용도 캐시에 포함(빠지면 전 행 0)
         else:
             try:
-                cur.execute("IF OBJECT_ID('tempdb..#tms') IS NOT NULL DROP TABLE #tms")   # 풀링 재사용 대비 선정리(#temp만, 가드 통과=IF 시작)
+                # ★창고재고 집계(자재/파트/사급/스태커) — 앵커부만 SQL. 재고롤업(fix)의 재귀BOM(T_SUB_CTE 재귀부,
+                #   종전 pr_m_item_bom 미러 직독=컷오버시 동결)은 통일 소요엔진 walker stock_flow_rollup 로 분리(§1-10·§1-9-1).
+                #   ★diff0 검증완(2026-09-08 stkroll_verify: fixstk 2318/2318 완전일치). bom_line 직독(v_pr_bom 용접브랜치 2배 회피)·CONVERT(int,DECIMAL)=버림.
                 cur.execute("""
-                    ;WITH T_SUB_CTE (item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty) AS (
-                        SELECT s.mat_code, s.mat_code, s.mat_code,
-                               CONVERT(int, ISNULL(SUM(s.stock_qty),0)), CONVERT(int, ISNULL(SUM(s.pr_stock_qty),0)), 0
-                          -- ★파트창고(pr_t_mat_stock_wh)·자재창고(pu_t_mat_stock_wh) = 라이브 + 웹실적(2026-08-20).
-                          --   웹 준비등록/바코드실적이 nx 쪽 창고를 움직이므로 그 분이 반영돼야 함.
-                          --   라이브 + max(nx-라이브,0) 를 SQL 로 구현(FULL JOIN). 사급/스태커는 웹 미사용 → 라이브만.
-                          FROM ( SELECT ISNULL(l.mat_code,n.mat_code) mat_code, 0 stock_qty,
-                                        ISNULL(l.q,0) + CASE WHEN ISNULL(n.q,0) > ISNULL(l.q,0) THEN ISNULL(n.q,0)-ISNULL(l.q,0) ELSE 0 END pr_stock_qty
-                                   FROM (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) l
-                                   FULL JOIN (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) n
-                                          ON l.mat_code=n.mat_code
-                                 UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
-                                 UNION ALL SELECT ISNULL(l.mat_code,n.mat_code),
-                                        ISNULL(l.q,0) + CASE WHEN ISNULL(n.q,0) > ISNULL(l.q,0) THEN ISNULL(n.q,0)-ISNULL(l.q,0) ELSE 0 END, 0
-                                   FROM (SELECT mat_code, SUM(stock_qty) q FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2') GROUP BY mat_code) l
-                                   FULL JOIN (SELECT mat_code, SUM(stock_qty) q FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2') GROUP BY mat_code) n
-                                          ON l.mat_code=n.mat_code
-                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP_TEST3.nx.PU_T_STACKER_STOCK WITH(NOLOCK) ) s
-                         GROUP BY s.mat_code HAVING SUM(s.stock_qty)<>0 OR SUM(s.pr_stock_qty)<>0
-                        UNION ALL
-                        SELECT cb.item_code, b.item_code, b.mat_code, 0, 0,
-                               CONVERT(int, (CASE WHEN cb.fix_pr_stock_qty<>0 THEN cb.fix_pr_stock_qty ELSE (cb.pr_stock_qty+cb.stock_qty) END) * b.use_qty)
-                          FROM T_SUB_CTE cb JOIN PARTNER_ERP_TEST3.nx.pr_m_item_bom b WITH(NOLOCK) ON cb.mat_code=b.item_code WHERE ISNULL(b.except_flag,'0')<>'1'
-                    )
-                    SELECT item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty INTO #tms FROM T_SUB_CTE OPTION(MAXRECURSION 0)""")
-                cur.execute("SELECT mat_code, SUM(stock_qty), SUM(pr_stock_qty) FROM #tms GROUP BY mat_code")   # 자재+생산재고(item)
+                    SELECT s.mat_code, CONVERT(int, ISNULL(SUM(s.stock_qty),0)), CONVERT(int, ISNULL(SUM(s.pr_stock_qty),0))
+                      FROM ( SELECT ISNULL(l.mat_code,n.mat_code) mat_code, 0 stock_qty,
+                                    ISNULL(l.q,0) + CASE WHEN ISNULL(n.q,0) > ISNULL(l.q,0) THEN ISNULL(n.q,0)-ISNULL(l.q,0) ELSE 0 END pr_stock_qty
+                               FROM (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) l
+                               FULL JOIN (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) n
+                                      ON l.mat_code=n.mat_code
+                             UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
+                             UNION ALL SELECT ISNULL(l.mat_code,n.mat_code),
+                                    ISNULL(l.q,0) + CASE WHEN ISNULL(n.q,0) > ISNULL(l.q,0) THEN ISNULL(n.q,0)-ISNULL(l.q,0) ELSE 0 END, 0
+                               FROM (SELECT mat_code, SUM(stock_qty) q FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2') GROUP BY mat_code) l
+                               FULL JOIN (SELECT mat_code, SUM(stock_qty) q FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2') GROUP BY mat_code) n
+                                      ON l.mat_code=n.mat_code
+                             UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP_TEST3.nx.PU_T_STACKER_STOCK WITH(NOLOCK) ) s
+                     GROUP BY s.mat_code HAVING SUM(s.stock_qty)<>0 OR SUM(s.pr_stock_qty)<>0""")
+                seed = {}
                 for rr in cur.fetchall():
-                    midstk[rr[0]] = float(rr[1] or 0) + float(rr[2] or 0)
-                    # ★2026-08-23 생산재고 컬럼용 = 자재창고(PU_T_MAT_STOCK_WH) + 파트창고(PR_T_MAT_STOCK_WH).
-                    #   기존엔 assystk(=SA_T_ITEM_STOCK)를 그대로 써서 ASSY재고와 늘 같은 값이었고,
-                    #   레거시가 자재창고 1 을 보여주는 건에서 웹만 0 이 나왔다(AJR73803003 IS0001=1).
-                    matwh[rr[0]] = float(rr[1] or 0)     # stock_qty = 자재창고분
-                    prwh[rr[0]] = float(rr[2] or 0)      # pr_stock_qty = 파트창고+사급분
-                cur.execute("SELECT upper_item_code, mat_code, SUM(fix_pr_stock_qty) FROM #tms GROUP BY upper_item_code, mat_code")  # 도번고정(upper,item)
-                for rr in cur.fetchall(): fixstk[(rr[0], rr[1])] = float(rr[2] or 0)
+                    st = float(rr[1] or 0); pr = float(rr[2] or 0)
+                    midstk[rr[0]] = st + pr           # 자재+생산재고(item)
+                    matwh[rr[0]] = st                 # 자재창고분(PU_T_MAT_STOCK_WH)
+                    prwh[rr[0]] = pr                  # 파트창고+사급분(PR_T_MAT_STOCK_WH)
+                    seed[rr[0]] = int(rr[1] or 0) + int(rr[2] or 0)   # 상향롤업 시드(=CONVERT(int,stock)+CONVERT(int,pr))
+                # 도번고정재고(upper,item) = 재고품목 상향 BOM 롤업 → 엔진 walker(미러 재귀CTE 대체)
+                with _COST_LOCK:
+                    _eng = _get_cost_engine()
+                    fixstk = {k: float(v) for k, v in _soyo.stock_flow_rollup(_eng, seed).items()}
                 kitting_grid._rollup_cache = {"ts": _now, "mid": midstk, "fix": fixstk, "mwh": matwh, "pwh": prwh}
             except Exception: pass
         try:  # 출하: sa_t_sale_dtl (wo, split, item=assy, finish_flag='0') — ★결과 WORK_ORDER로 제한(전체 GROUP BY 3.7s→회피)
@@ -674,7 +670,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             JOIN {SCH}.PR_M_PROC_GAGONG pg WITH(NOLOCK) ON a.GAGONG_PROC_CODE=pg.GAGONG_PROC_CODE
             LEFT JOIN {SCH}.PR_M_WORK wk WITH(NOLOCK) ON wk.WORK_CODE=a.WORK_CODE
             LEFT JOIN {SCH}.CM_M_CUST cu WITH(NOLOCK) ON cu.CUST_CODE=pg.IN_CUST_CODE
-            LEFT JOIN (SELECT ITEM_CODE, GAGONG_PROC_CODE, SUM(CAST(ISNULL(TOT_ST,0) AS float)) st FROM {SCH}.PR_M_ITEM_PROC_GAGONG GROUP BY ITEM_CODE, GAGONG_PROC_CODE) st ON st.ITEM_CODE=a.ITEM_CODE AND st.GAGONG_PROC_CODE=a.GAGONG_PROC_CODE
+            LEFT JOIN (SELECT ITEM_CODE, GAGONG_PROC_CODE, SUM(CAST(ISNULL(TOT_ST,0) AS float)) st FROM {SCH}.prodinfo_proc GROUP BY ITEM_CODE, GAGONG_PROC_CODE) st ON st.ITEM_CODE=a.ITEM_CODE AND st.GAGONG_PROC_CODE=a.GAGONG_PROC_CODE
             LEFT JOIN (SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,'') swo, MIN(ORG_PLAN_YMD + ORG_OUTPUT_HM) lgh FROM {SCH}.PR_T_PLAN_DTL GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,'')) lg ON lg.WORK_ORDER=a.WORK_ORDER AND lg.swo=ISNULL(a.SPLIT_WORK_ORDER,'')
             WHERE {' AND '.join(w)}
             GROUP BY a.GAGONG_PROC_CODE, COALESCE(pg.GAGONG_PROC_DESC, a.GAGONG_PROC_CODE), ISNULL(pg.PART_GROUP_CODE,''),
@@ -827,35 +823,31 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             # ★재귀 BOM 롤업(~2초)만 캐시 대상 — 히트면 위에서 복원했으므로 건너뛴다.
             try:
                 if _hit: raise _RollupCached
-                cur.execute("IF OBJECT_ID('tempdb..#tms4') IS NOT NULL DROP TABLE #tms4")
-                cur.execute(f"""
-                    ;WITH T_SUB_CTE (item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty) AS (
-                        SELECT s.mat_code, s.mat_code, s.mat_code,
-                               CONVERT(int, ISNULL(SUM(s.stock_qty),0)), CONVERT(int, ISNULL(SUM(s.pr_stock_qty),0)), 0
-                          -- ★파트/자재창고 = 라이브 + 웹실적(2026-08-20, 키팅 롤업과 동일 규칙)
-                          FROM ( SELECT ISNULL(l.mat_code,n.mat_code) mat_code, 0 stock_qty,
-                                        ISNULL(l.q,0) + CASE WHEN ISNULL(n.q,0) > ISNULL(l.q,0) THEN ISNULL(n.q,0)-ISNULL(l.q,0) ELSE 0 END pr_stock_qty
-                                   FROM (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) l
-                                   FULL JOIN (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) n
-                                          ON l.mat_code=n.mat_code
-                                 UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
-                                 UNION ALL SELECT ISNULL(l.mat_code,n.mat_code),
-                                        ISNULL(l.q,0) + CASE WHEN ISNULL(n.q,0) > ISNULL(l.q,0) THEN ISNULL(n.q,0)-ISNULL(l.q,0) ELSE 0 END, 0
-                                   FROM (SELECT mat_code, SUM(stock_qty) q FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2') GROUP BY mat_code) l
-                                   FULL JOIN (SELECT mat_code, SUM(stock_qty) q FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2') GROUP BY mat_code) n
-                                          ON l.mat_code=n.mat_code
-                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP_TEST3.nx.PU_T_STACKER_STOCK WITH(NOLOCK) ) s
-                         GROUP BY s.mat_code HAVING SUM(s.stock_qty)<>0 OR SUM(s.pr_stock_qty)<>0
-                        UNION ALL
-                        SELECT cb.item_code, b.item_code, b.mat_code, 0, 0,
-                               CONVERT(int, (CASE WHEN cb.fix_pr_stock_qty<>0 THEN cb.fix_pr_stock_qty ELSE (cb.pr_stock_qty+cb.stock_qty) END) * b.use_qty)
-                          FROM T_SUB_CTE cb JOIN {SCH}.pr_m_item_bom b WITH(NOLOCK) ON cb.mat_code=b.item_code WHERE ISNULL(b.except_flag,'0')<>'1'
-                    )
-                    SELECT item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty INTO #tms4 FROM T_SUB_CTE OPTION(MAXRECURSION 0)""")
-                cur.execute("SELECT mat_code, SUM(stock_qty), SUM(pr_stock_qty) FROM #tms4 GROUP BY mat_code")
-                for rr in cur.fetchall(): midstk[rr[0]] = float(rr[1] or 0) + float(rr[2] or 0)
-                cur.execute("SELECT upper_item_code, mat_code, SUM(fix_pr_stock_qty) FROM #tms4 GROUP BY upper_item_code, mat_code")
-                for rr in cur.fetchall(): fixstk[(rr[0], rr[1])] = float(rr[2] or 0)
+                # ★창고재고 앵커집계(SQL) + 상향 BOM 롤업(엔진 walker) — kitting_grid 와 동일 이관(§1-10·§1-9-1).
+                #   종전 T_SUB_CTE 재귀부(pr_m_item_bom 미러 직독)를 stock_flow_rollup 로 대체. diff0 검증완(fixstk 2318/2318).
+                cur.execute("""
+                    SELECT s.mat_code, CONVERT(int, ISNULL(SUM(s.stock_qty),0)), CONVERT(int, ISNULL(SUM(s.pr_stock_qty),0))
+                      FROM ( SELECT ISNULL(l.mat_code,n.mat_code) mat_code, 0 stock_qty,
+                                    ISNULL(l.q,0) + CASE WHEN ISNULL(n.q,0) > ISNULL(l.q,0) THEN ISNULL(n.q,0)-ISNULL(l.q,0) ELSE 0 END pr_stock_qty
+                               FROM (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) l
+                               FULL JOIN (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) n
+                                      ON l.mat_code=n.mat_code
+                             UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
+                             UNION ALL SELECT ISNULL(l.mat_code,n.mat_code),
+                                    ISNULL(l.q,0) + CASE WHEN ISNULL(n.q,0) > ISNULL(l.q,0) THEN ISNULL(n.q,0)-ISNULL(l.q,0) ELSE 0 END, 0
+                               FROM (SELECT mat_code, SUM(stock_qty) q FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2') GROUP BY mat_code) l
+                               FULL JOIN (SELECT mat_code, SUM(stock_qty) q FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2') GROUP BY mat_code) n
+                                      ON l.mat_code=n.mat_code
+                             UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP_TEST3.nx.PU_T_STACKER_STOCK WITH(NOLOCK) ) s
+                     GROUP BY s.mat_code HAVING SUM(s.stock_qty)<>0 OR SUM(s.pr_stock_qty)<>0""")
+                seed = {}
+                for rr in cur.fetchall():
+                    midstk[rr[0]] = float(rr[1] or 0) + float(rr[2] or 0)
+                    seed[rr[0]] = int(rr[1] or 0) + int(rr[2] or 0)
+                with _COST_LOCK:
+                    _eng = _get_cost_engine()
+                    fixstk = {k: float(v) for k, v in _soyo.stock_flow_rollup(_eng, seed).items()}
+            except _RollupCached: pass
             except Exception: pass
             # ★캐시는 무거운 재귀 롤업(midstk·fixstk)만. 나머지는 매요청 재조회하므로
             #   여기 담아두면 낡은 값이 되살아날 여지만 생긴다(실적 반영 지연의 원인).
