@@ -320,7 +320,8 @@ def matexpect(axis: str = Query("prod"), frm: str = Query(""), to: str = Query("
         # ── ③-c 상시보유·필요수량·적정성 (자재×업체 세분 유지·재고는 소요비율 배분→Σ=자재레벨 일치) ──
         cur.execute("SELECT cust_code, ISNULL(lead_time_days,0) FROM nx.cust")
         lead_cust = {str(r[0]).strip(): (r[1] or 0) for r in cur.fetchall()}
-        cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(pur_lead_time,0) FROM nx.item_sub")
+        # ★2026-09-09 ITEM_SUB 레거시 통일: clean nx.item_sub(stale·2378품목 lead_time 결측)→미러 PR_M_ITEM_SUB(레거시 현행·값다름0·SUB_ARCHITECTURE_REANALYSIS). 생산/협력사 14곳과 동일 소스.
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(PUR_LEAD_TIME,0) FROM nx.PR_M_ITEM_SUB")
         lead_item = {r[0]: (r[1] or 0) for r in cur.fetchall()}
         # days(기간일수) = 상단에서 계산(일평균소요 분모)
         tot_mat = {}
