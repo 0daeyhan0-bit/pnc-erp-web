@@ -97,13 +97,8 @@ def _pi_proc_rows(cur, item, use_nx=True, route_id=0):
         _ensure_route_proc(cur)
         src = "nx.route_proc_gagong a"
     else:
-<<<<<<< HEAD
         src = "nx.prodinfo_proc a"   # ★R01 클린 단일(미러 PR_M_ITEM_PROC_GAGONG 폴백 은퇴 260909·§1-9-1·클린⊇미러)
-        C = (lambda c: c.lower())
-=======
-        src = "nx.prodinfo_proc a"
     C = (lambda c: c.lower())   # 클린은 소문자 컬럼(route_proc_gagong·prodinfo_proc 동일)
->>>>>>> zt/main
     cur.execute(f"""
         SELECT a.{C('PROC_SEQ')}, ISNULL(a.{C('WORK_CODE')},'') , ISNULL(a.{C('GAGONG_PROC_CODE')},''),
                ISNULL(a.{C('S_WORK_CODE')},0), ISNULL(a.{C('MACH_CODE')},''), ISNULL(a.{C('WORK_QTY')},0),
