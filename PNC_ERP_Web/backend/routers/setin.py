@@ -1254,11 +1254,13 @@ def setinsp_list(request: Request, frm: str = Query(""), to: str = Query(""),
     f6, t6 = _d6(frm), _d6(to)
     w, p = ["m.in_tag='1'"], []
     _iv = str(insp or "").strip().upper()
-    _INSP_SRC = """COALESCE(
+    # ★2026-09-09 미러 폴백 제거 — 클린 단독(§1-9-1).
+    #   종전 COALESCE(클린, 미러, 'N') 은 "품목마스터 이관이 FK 로 막혀 있다"는 전제로 둔 한시 조치였으나
+    #   실측하니 nx.item_sub 에 FK 가 없고, 미러에만 있던 3,141건은 품목마스터에 없는 폐기품이었다
+    #   (생산실적·출하 최근 1년 0종 · 스티커 최근일자 2023-09-06).
+    _INSP_SRC = """ISNULL(
         (SELECT TOP 1 RTRIM(ISNULL(cs.insp_flag,'N')) FROM PARTNER_ERP_TEST3.nx.item_sub cs WITH(NOLOCK)
           WHERE RTRIM(cs.item_code)=RTRIM(m.item_code)),
-        (SELECT TOP 1 RTRIM(ISNULL(ms.INSP_FLAG,'N')) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB ms WITH(NOLOCK)
-          WHERE RTRIM(ms.ITEM_CODE)=RTRIM(m.item_code)),
         'N')"""
     if _iv == "Y":
         w.append(f"{_INSP_SRC} IN ('F','S')")
