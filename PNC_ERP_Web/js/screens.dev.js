@@ -2909,6 +2909,29 @@ SCREEN.subvariant=(c)=>{
     // ★구분(제작/매입/사급) selector — 이 화면에서 부품/SUB별 결정(업체는 조달프로파일). 색: 제작초록·매입파랑·사급주황.
     const _GBC={'제작':'#1c7c3a','외주':'#c2410c','구매':'#1c47a0','사급':'#b8860b','외주직납':'#0891b2'};
     const gubunSel=l=>`<select class="sp-gb" data-lid="${l.line_id}" title="구분(=레거시 생산구분): 제작(사내)/외주/구매/사급(LG사급)/외주직납" style="font-size:10px;padding:0 2px;border:1px solid ${_GBC[l.gubun]||'#c9d3e0'};border-radius:4px;color:${_GBC[l.gubun]||'#33507d'};font-weight:600">${['제작','외주','구매','사급','외주직납'].map(g=>`<option value="${g}" ${(l.gubun||'')===g?'selected':''}>${g}</option>`).join('')}</select>`;
+    // ★★최상위 ASSY(레벨0) 구분·업체 — 2026-09-09 신설.
+    //   종전엔 구분 드롭다운이 SUB·부품에만 있어 "이 완제품 자체를 업체가 만들어 직납한다"를
+    //   표현할 자리가 없었다. 레거시 견적원가조회(w_cs_esti_010)는 최상위 행에
+    //   생산구분(2:외주)·구매업체명(대원산업)을 갖고 있는데 신규는 보여주지도 못했다.
+    //   · 값 = 경로헤더(sourcing_route.gubun/vendor_code) 우선, 비었으면 품목마스터 seed(레거시 지정)
+    //   · seed 를 그대로 쓰는 동안은 회색 '레거시' 배지로 "아직 내가 지정한 게 아님"을 드러낸다
+    const _hd=rd.header||{};
+    // ★이 컬럼엔 라벨이 두 벌 섞여 있다(실측: 기존 7행이 전부 '자체').
+    //   조달프로파일 라벨 → 드롭다운 5종으로 맞춰 보여준다. 안 맞추면 '자체'가
+    //   어느 옵션과도 안 맞아 첫 항목(제작)이 선택된 것처럼 보인다(오표시).
+    const _G5={'자체':'제작','외주가공':'외주','매입':'구매','유상사급':'사급','외주완성':'외주직납'};
+    const assyGubunCell=()=>{
+      const cur=_G5[(_hd.gubun||'').trim()]||(_hd.gubun||'').trim(), seed=(_hd.gubun_seed||'').trim(), val=cur||seed;
+      const vcur=(_hd.vendor_code||'').trim(), vseed=(_hd.vendor_seed||'').trim();
+      const vnm=vcur?(_hd.vendor_name||vcur):(_hd.vendor_seed_name||vseed);
+      const fromSeed=!cur;
+      return `<span style="color:#8a94a6;font-size:10px;margin-left:4px">구분</span>`
+        +`<select class="sp-agb" title="최상위 ASSY 의 생산구분(=레거시 생산구분). 외주직납 = 업체가 완성해 직납." style="font-size:10px;padding:0 2px;border:1px solid ${_GBC[val]||'#c9d3e0'};border-radius:4px;color:${_GBC[val]||'#33507d'};font-weight:600">`
+        +['제작','외주','구매','사급','외주직납'].map(g=>`<option value="${g}" ${val===g?'selected':''}>${g}</option>`).join('')
+        +`</select>`
+        +(vnm?`<span style="color:#8a94a6;font-size:10px;margin-left:6px">업체</span><b style="font-size:11px;color:#1c47a0">${esc(vnm)}</b>`:'')
+        +(fromSeed?`<span title="아직 이 경로에 지정하지 않았습니다 — 품목마스터(레거시 견적원가조회와 같은 값)를 보여주는 중입니다. 고르면 이 경로에 지정됩니다." style="font-size:9px;color:#8a94a6;border:1px solid #d9dee7;border-radius:8px;padding:0 4px;margin-left:5px">레거시</span>`:'');
+    };
     let cutSum=0;Object.values(partCut).forEach(arr=>arr.forEach(x=>cutSum+=+x.wq||0));cutSum=Math.round(cutSum*100)/100;
     let procSum=0;(rd.procs||[]).forEach(p=>procSum+=+p.work_qty||0);procSum=Math.round(procSum*100)/100;
     const total=Math.round((cutSum+procSum)*100)/100, base=rd.base_gongsu||0, ok=Math.abs(total-base)<0.5;
@@ -2920,7 +2943,7 @@ SCREEN.subvariant=(c)=>{
     const nodeBox=(node,label,color,dsub,np2,depth)=>{const ng=Math.round((cutOfNode(np2)+(procByNode[node]||0))*100)/100;
       const kids=subs.filter(s=>dsub>0?s.parent_line===dsub:!s.parent_line);   // ★이 노드의 자식 SUB(중첩=서브안의서브)
       return `<div class="sp-drop" data-sub="${dsub}" style="border:1px dashed ${color}66;border-radius:7px;padding:5px 7px;margin:0 0 6px ${(depth||0)*16}px;background:#fff">
-        <div style="display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap"><b style="color:${color};white-space:nowrap">${esc(label)}</b><span style="color:#8a94a6;font-size:10px;white-space:nowrap">노드공수 ${nfq(ng)}</span>${dsub>0?`<span style="color:#8a94a6;font-size:10px;margin-left:4px">SUB 구분</span>${gubunSel(subs.find(s=>s.line_id===dsub)||{line_id:dsub,gubun:''})}`:''}<div style="flex:1"></div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap"><b style="color:${color};white-space:nowrap">${esc(label)}</b><span style="color:#8a94a6;font-size:10px;white-space:nowrap">노드공수 ${nfq(ng)}</span>${dsub>0?`<span style="color:#8a94a6;font-size:10px;margin-left:4px">SUB 구분</span>${gubunSel(subs.find(s=>s.line_id===dsub)||{line_id:dsub,gubun:''})}`:assyGubunCell()}<div style="flex:1"></div>
           ${dsub>0?`<button class="btn sp-ndissolve" data-sub="${dsub}" title="이 SUB 해체 — 하위부품 ASSY(레벨0) 복귀 · 비종속 공정/용접은 ASSY 이관(공수합 보존)" style="padding:0 8px;font-size:10px;background:#c0392b;color:#fff;white-space:nowrap;flex-shrink:0">해체</button>`:''}
           <button class="btn sp-nedit" data-node="${esc(node)}" data-sub="${dsub}" title="${dsub>0?'SUB':'ASSY'} 노드 원가 공정편집 — 관경별 용접 + 공정별 작업ST 팝업(노드 스코프·개발 원가축 sourcing_route_proc)" style="padding:1px 9px;font-size:10px;background:${color};color:#fff;white-space:nowrap;flex-shrink:0">원가 공정</button>
           <button class="btn sp-nprod" data-node="${esc(node)}" title="${dsub>0?'SUB':'ASSY'} 노드 생산정보 편집 — 생산공정순서·ST(생산 ST축 route_proc_gagong · 생산계획 편성이 소비). R02 필수 게이트." style="padding:1px 9px;font-size:10px;background:#0f766e;color:#fff;white-space:nowrap;flex-shrink:0">생산정보</button></div>
@@ -3207,6 +3230,13 @@ SCREEN.subvariant=(c)=>{
       el.onchange=async e=>{e.stopPropagation();const lid=+el.dataset.lid,gb=el.value;
       try{const r=await fetch(`${API}/api/sourcing/line/gubun`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,line_id:lid,gubun:gb})});
         const j=await r.json();if(j.ok){st.msg=`구분 → ${gb}`;await reloadPanel();}else alert('구분 저장 실패: '+(j.detail||''));}catch(err){alert('구분 저장 오류: '+err.message);}};});
+    // ★최상위 ASSY 구분 변경 → 경로헤더 저장(승인 리셋). 2026-09-09 신설.
+    //   업체는 함께 보내지 않는다 — 지금 화면에 보이는 업체는 품목마스터 seed 이고,
+    //   그것을 경로에 못박는 것은 별개 동작(다음 단계)이라 여기서 임의로 확정하지 않는다.
+    c.querySelectorAll('.sp-agb').forEach(el=>{el.onmousedown=e=>e.stopPropagation();el.onclick=e=>e.stopPropagation();
+      el.onchange=async e=>{e.stopPropagation();const gb=el.value;
+      try{const r=await fetch(`${API}/api/sourcing/route/gubun`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,gubun:gb})});
+        const j=await r.json();if(j.ok){st.msg=`ASSY 구분 → ${gb}`;await reloadPanel();}else alert('ASSY 구분 저장 실패: '+(j.detail||''));}catch(err){alert('ASSY 구분 저장 오류: '+err.message);}};});
     // [해체] SUB 노드 → 하위부품 ASSY 복귀 · 비종속 공정/용접 ASSY 이관(공수합 보존, 백엔드 sub/dissolve). 해체 후 패널 갱신.
     c.querySelectorAll('.sp-ndissolve').forEach(b=>b.onclick=async e=>{e.stopPropagation();
       if(!confirm('이 SUB를 해체합니다.\n하위부품은 ASSY(레벨0)로 복귀하고, SUB의 비종속 공정/용접은 ASSY로 이관되어 공수합이 보존됩니다. 계속?'))return;

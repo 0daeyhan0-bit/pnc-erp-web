@@ -1482,6 +1482,29 @@ def sourcing_route_detail(route_id: int = Query(...)):
                "gubun": h[4], "vendor_code": str(h[5]).strip(), "vendor_name": vmap.get(str(h[5]).strip(), str(h[5]).strip()),
                "approve_flag": bool(h[6]), "reject_flag": bool(h[7]), "reject_reason": h[8], "apply_from": h[9],
                "note": h[10], "ins_user": h[11]}
+        # ★★최상위 ASSY 의 **레거시 지정**(2026-09-09 대표 지시 ①"레거시에 지정된 업체를 보여준다").
+        #   레거시 견적원가조회 `w_cs_esti_010` 이 최상위 행에 보여주는 두 값이다 —
+        #     생산구분 `2:외주` · 구매업체명 `대원산업`  (실측 AJJ30041801)
+        #   출처는 품목마스터다: make_type · in_cust. 신규에도 **이미 같은 값이 들어와 있다**
+        #     (nx.item make_type=2 · in_cust=2148 — 레거시 PR_M_ITEM 과 일치 확인).
+        #   지금까지 화면이 이 둘을 안 그려서 "레거시엔 지정이 있는데 여기선 보이지도 않는다" 였다.
+        #   ⟹ seed 로 함께 내려보내고, 화면은 헤더값(사용자 지정)이 비었을 때 이 seed 를 보여준다.
+        #   ※경로 헤더(sourcing_route.gubun/vendor_code)가 채워지면 그것이 우선한다(=사용자 수정분).
+        _MK5 = {'1': '제작', '2': '외주', '3': '구매', '4': '사급', '5': '외주직납'}
+        try:
+            cur.execute("SELECT ISNULL(make_type,''), ISNULL(in_cust,'') FROM nx.item WHERE item_code=?",
+                        str(h[1]).strip())
+            _r = cur.fetchone()
+            _mk = str(_r[0]).strip() if _r else ''
+            _ic = str(_r[1]).strip() if _r else ''
+            _icnm = _custnm_map(cur, {_ic}).get(_ic, _ic) if _ic else ''
+            hdr["gubun_seed"] = _MK5.get(_mk, '')          # 레거시 생산구분
+            hdr["make_type"] = _mk
+            hdr["vendor_seed"] = _ic                        # 레거시 구매업체(품목마스터 매입처)
+            hdr["vendor_seed_name"] = _icnm
+        except Exception:
+            hdr["gubun_seed"] = ''; hdr["make_type"] = ''
+            hdr["vendor_seed"] = ''; hdr["vendor_seed_name"] = ''
         base_g = None; base_procs = []
         try:
             with _COST_LOCK:
@@ -1667,6 +1690,57 @@ def sourcing_part_assign(payload: dict = Body(...)):
         nx.rollback(); raise
     finally:
         nx.close()
+
+@router.post("/api/sourcing/route/gubun")
+def sourcing_route_gubun(payload: dict = Body(...)):
+    """★최상위 ASSY(경로 헤더)의 구분·업체 지정 — 조달후보 상세편집 레벨0 행 (2026-09-09 신설).
+
+       왜 필요한가 —
+         종전엔 구분 드롭다운이 **SUB·부품 라인에만** 있었다(`/api/sourcing/line/gubun`).
+         그래서 "이 완제품 자체를 대원산업이 만들어 직납한다"를 **표현할 자리가 없었다.**
+         레거시 견적원가조회(w_cs_esti_010)는 최상위 행에 생산구분(2:외주)·구매업체명(대원산업)을
+         분명히 갖고 있는데, 신규는 그것을 보여주지도 고치지도 못했다(대표 지적 2026-09-09).
+
+       저장 위치 = `nx.sourcing_route.gubun` · `vendor_code` — **이미 있는 컬럼**이다(신설 아님).
+       payload {route_id, gubun, vendor_code?}. 편집이므로 승인 리셋(라인 구분과 동일 규약).
+       ※업체를 빈 문자열로 주면 지정 해제 = 품목마스터 매입처(seed)로 되돌아간다.
+    """
+    rid = int(payload.get("route_id") or 0)
+    gubun = str(payload.get("gubun", "")).strip()[:20]
+    has_v = "vendor_code" in payload
+    ven = str(payload.get("vendor_code", "")).strip()[:20]
+    if rid <= 0:
+        raise HTTPException(400, "route_id 필요")
+    # ★허용값 — 이 컬럼에는 **두 벌의 라벨**이 섞여 있다(2026-09-09 실측: 기존 7행이 전부 '자체').
+    #     조달후보 라인 라벨 : 제작 / 외주 / 구매 / 사급 / 외주직납   (make_type 5종 · 화면 드롭다운)
+    #     조달프로파일 라벨   : 자체 / 외주가공 / 매입 / 유상사급 / 외주완성  (planrev `_MKMAP`)
+    #   화면에서 새로 고르는 것은 앞의 5종이지만, **기존 값을 되돌려 쓸 수 있어야** 하므로
+    #   뒤의 라벨도 막지 않는다(검증 중 '자체' 를 못 넣어 원복이 실패한 실측이 있었다).
+    _OK_GUBUN = ("제작", "외주", "구매", "사급", "외주직납", "매입",
+                 "자체", "외주가공", "유상사급", "외주완성")
+    if gubun and gubun not in _OK_GUBUN:
+        raise HTTPException(400, "구분은 제작/외주/구매/사급/외주직납 중 하나")
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        if has_v:
+            cur.execute("UPDATE nx.sourcing_route SET gubun=?, vendor_code=?, approve_flag=0, upd_dt=getdate() "
+                        "WHERE route_id=?", gubun, ven, rid)
+        else:
+            cur.execute("UPDATE nx.sourcing_route SET gubun=?, approve_flag=0, upd_dt=getdate() "
+                        "WHERE route_id=?", gubun, rid)
+        n = cur.rowcount
+        if n == 0:
+            raise HTTPException(404, f"대상 없음(route_id={rid})")
+        nx.commit()
+        return {"ok": True, "updated": n, "gubun": gubun, "vendor_code": (ven if has_v else None)}
+    except HTTPException:
+        nx.rollback(); raise
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
+
 
 @router.post("/api/sourcing/line/gubun")
 def sourcing_line_gubun(payload: dict = Body(...)):
