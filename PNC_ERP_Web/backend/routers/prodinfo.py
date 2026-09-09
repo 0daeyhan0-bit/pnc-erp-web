@@ -148,7 +148,7 @@ def prodinfo_get(item: str = Query(...), assyall: int = Query(0), route_id: int 
                    ISNULL(a.WELDING_GUBUN,0), ISNULL(a.SORT_SEQ,0),
                    ISNULL(nx.work_qty, rt.WORK_QTY) AS work_qty,
                    CASE WHEN nx.item_code IS NOT NULL THEN 1 ELSE 0 END nx_flag
-            FROM PARTNER_ERP_TEST3.nx.PR_M_WORK_ASSY a
+            FROM PARTNER_ERP_TEST3.nx.v_work_assy a
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM_ASSY_RT rt ON rt.A_WORK_CODE=a.A_WORK_CODE AND rt.ITEM_CODE=?
             LEFT JOIN nx.prodinfo_assy nx ON nx.a_work_code=a.A_WORK_CODE AND nx.item_code=?
             {flt}
@@ -160,7 +160,7 @@ def prodinfo_get(item: str = Query(...), assyall: int = Query(0), route_id: int 
                          "proc_gubun": pg, "proc_gubun_nm": _PROC_GUBUN_ASSY.get(pg, pg), "welding_gubun": int(r[4] or 0),
                          "sort_seq": int(r[5] or 0), "work_qty": (None if r[6] is None else float(r[6])),
                          "nx_flag": int(r[7])})
-        cur.execute("SELECT COUNT(*) FROM PARTNER_ERP_TEST3.nx.PR_M_WORK_ASSY")
+        cur.execute("SELECT COUNT(*) FROM PARTNER_ERP_TEST3.nx.v_work_assy")
         assy_master_cnt = cur.fetchone()[0]
 
         # ── 패널② 단품(공정수) = 외경별 표준ST 매트릭스(전사 마스터, nx우선) ──
