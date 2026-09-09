@@ -441,8 +441,11 @@ def qc_spec_save(payload: dict = Body(...)):
         return d if len(d) == 8 else (("20"+d) if len(d) == 6 else d)
     ymd = d8(p.get("rev_ymd"))
     item = str(p.get("item_code", "")).strip()[:40]
-    if not ymd or not item:
-        raise HTTPException(400, "시방변경일자·품번은 필수입니다.")
+    # ★품번(PART NO)은 선택입력(2026-09-08 사용자 확정) — 품번이 아직 안 정해진 시방변경도 접수한다.
+    #   종전엔 필수라 저장이 막혔다. 적용대상(우측 그리드)에서 나중에 붙이면 된다.
+    #   ※일자는 (rev_ymd, rev_no) 가 조회·첨부 업로드 키라 여전히 필수다.
+    if not ymd:
+        raise HTTPException(400, "시방변경일자는 필수입니다.")
     def s(k, n): return str(p.get(k, "")).strip()[:n]
     try: rev_no = int(float(p.get("rev_no") or 0))
     except Exception: rev_no = 0

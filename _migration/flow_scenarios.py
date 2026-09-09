@@ -165,10 +165,20 @@ def fixture():
 
 
 def run_flow(c, ctx):
-    b = probe()
-    st, res = call(c["method"], path_of(c, ctx), body_of(c, ctx), token=tok_of(c))
-    a = probe()
-    d = delta(b, a)
+    # ★scope_ymd — 프로브는 관측일자(_SCOPE.ymd, 기본 오늘)에 묶여 있다. **과거 일자에 쓰는**
+    #   케이스는 그 날짜를 관측해야 델타가 보인다(안 그러면 멀쩡한 쓰기가 "델타 +0" 거짓 FAIL).
+    #   2026-09-08 "잠정 일마감 일자는 열려 있다" 케이스에서 실제로 겪었다. 끝나면 원복한다.
+    sc = c.get("scope_ymd")
+    if sc:
+        call("POST", "/api/_flow/scope", {"ymd": (sc(ctx) if callable(sc) else sc), "mat": ctx["mat"]})
+    try:
+        b = probe()
+        st, res = call(c["method"], path_of(c, ctx), body_of(c, ctx), token=tok_of(c))
+        a = probe()
+        d = delta(b, a)
+    finally:
+        if sc:
+            call("POST", "/api/_flow/scope", {"ymd": FC.YMD, "mat": ctx["mat"]})
     if st == 404:
         rec("F", c["name"], "SKIP", "엔드포인트 없음 — 이 브랜치에 해당 기능이 아직 없다(404)"); return
     if st != 200 or (isinstance(res, dict) and res.get("ok") is False):

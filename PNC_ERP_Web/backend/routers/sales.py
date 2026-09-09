@@ -851,6 +851,25 @@ def saleout_list(fr: str = Query(""), to: str = Query(""), sheet: str = Query(""
 # ★Phase4: 유상사급 출고 = 매출out → stock_ledger −MAT(tag '5') 재고 완전제거. 링크 MAINT_GROUP_SEQ=saleout id.
 #   매출 amt/vat 정본=nx.saleout_maint(유지), 재고 −정본=stock_ledger(단일). 이중계상 방지=재고 posting은 여기 1곳뿐.
 def _saleout_led_del(cur, sid):
+    # ★★2026-09-08 — 원장만 지우면 **잔액이 안 돌아온다**(등록이 3층에 쓰므로 삭제도 3층).
+    #   지우기 전에 그 행들을 읽어 _WH 를 되돌리고 미러이력에 역행을 남긴다(근거키 = MAINT_GROUP_SEQ).
+    #   ※수정 시에도 이 함수가 먼저 불린 뒤 재게시되므로(재게시 패턴) 중복가산이 생기지 않는다.
+    try:
+        cur.execute("""SELECT RTRIM(MAT_CODE), ISNULL(SUM(MAINT_QTY),0), MIN(MAINT_YMD),
+                              MAX(RTRIM(ISNULL(CUST_CODE,'')))
+                         FROM nx.stock_ledger WITH(NOLOCK)
+                        WHERE STOCK_POINT='MAT' AND MAINT_TAG='5' AND MAINT_GROUP_SEQ=?
+                        GROUP BY RTRIM(MAT_CODE)""", int(sid))
+        for _m, _q, _ym, _cc in [(str(x[0]).strip(), float(x[1] or 0),
+                                  str(x[2] or '').strip(), str(x[3] or '').strip())
+                                 for x in cur.fetchall()]:
+            if not _m or not _q:
+                continue
+            _so_upd_wh(cur, _m, -_q)                                  # 잔액 원복(+)
+            _so_mirror(cur, _ym, _m, -_q, cust=(_cc or None),
+                       remarks="유상사급 매출출고 취소")               # 미러이력 역행
+    except Exception:
+        pass
     cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='MAT' AND MAINT_TAG='5' AND MAINT_GROUP_SEQ=?", int(sid))
 
 # ★사급재고(업체 보유분) 원장 — 2026-08-28 신설.
@@ -885,16 +904,61 @@ def _sagub_led_post(cur, sid, ymd, cust, item, qty, cost, amt, vat, sheet):
         (sheet or None), f"saleout:{int(sid)}")
 
 
+def _so_upd_wh(cur, mat, dq, cc="Z99990", gp="IS0001"):
+    """자재창고 잔액 증감 — nx.PU_T_MAT_STOCK_WH. (setin.py:_upd_mat_wh 와 같은 규약)
+       ★버킷키 = 창고 소유주 'Z99990' + 입고창고 'IS0001'. 매입처를 키에 쓰면 유령 버킷이 생긴다."""
+    try:
+        cur.execute("""UPDATE nx.PU_T_MAT_STOCK_WH SET STOCK_QTY=ISNULL(STOCK_QTY,0)+?,
+                          UPDATE_USER_ID='web', UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW='w_pu_output_010'
+                        WHERE RTRIM(MAT_CODE)=? AND CUST_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')=?""",
+                    float(dq), mat, cc, gp)
+        if cur.rowcount == 0:
+            cur.execute("""INSERT INTO nx.PU_T_MAT_STOCK_WH(MAT_CODE,CUST_CODE,GAGONG_PROC_CODE,STOCK_QTY,
+                              UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                            VALUES(?,?,?,?, 'web', GETDATE(), 'w_pu_output_010')""", mat, cc, gp, float(dq))
+    except Exception:
+        pass          # 잔액 실패해도 원장은 남긴다(이력 우선, stock.py:427 동일)
+
+
+def _so_mirror(cur, ymd, mat, qty, cust=None, remarks=None):
+    """수불이력 미러(nx.PU_T_STOCK_MAINT) 기입 — ★자재 입출고현황·수불장이 읽는 테이블.
+       ★SEQ 대역 20000+ = 웹 입력분(common WEB_SEQ_BASE 규약). MAINT_TAG 는 CHAR(1)."""
+    try:
+        cur.execute("""SELECT ISNULL(MAX(MAINT_SEQ),19999)+1 FROM nx.PU_T_STOCK_MAINT
+                        WHERE MAINT_YMD=? AND MAINT_SEQ>=20000""", ymd)
+        sq = int(cur.fetchone()[0] or 20000)
+        cur.execute("""INSERT INTO nx.PU_T_STOCK_MAINT
+                (MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,MAT_CODE,MAINT_QTY,REMARKS,
+                 WH_CUST_CODE,GAGONG_PROC_CODE,
+                 INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,
+                 UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                VALUES(?,?,'5',?,?,?,?, 'Z99990','IS0001',
+                       'web',GETDATE(),'w_pu_output_010','web',GETDATE(),'w_pu_output_010')""",
+            ymd, sq, (str(cust).strip() if cust else None), mat, float(qty), remarks)
+        return sq
+    except Exception:
+        return 0
+
+
 def _saleout_led_post(cur, sid, ymd, cust, item, qty, cost, amt, vat, sheet, wo):
     _saleout_led_del(cur, sid)   # 재게시(수정/복사 시 기존 링크행 제거 후 1행 재생성)
     cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd)
     seq = cur.fetchone()[0]
+    _q = -abs(float(qty))
     cur.execute("""INSERT INTO nx.stock_ledger
         (STOCK_POINT,MAINT_YMD,MAINT_SEQ,MAINT_GROUP_SEQ,MAINT_TAG,CUST_CODE,MAT_CODE,MAINT_QTY,
          MAINT_COST,MAINT_AMT,MAINT_VAT,SHEET_NO,WORK_ORDER,REMARKS,INSERT_USER_ID,INSERT_DATETIME)
         VALUES('MAT',?,?,?, '5', ?,?,?, ?,?,?, ?,?, ?, 'web', GETDATE())""",
-        ymd, seq, int(sid), cust, item, -abs(float(qty)), float(cost), float(amt), float(vat),
+        ymd, seq, int(sid), cust, item, _q, float(cost), float(amt), float(vat),
         (sheet or None), (wo or None), "유상사급 매출출고")
+    # ★★2026-09-08 — 원장만 쓰면 **자재재고가 안 깎인다**(실사고).
+    #   웹 재고 쓰기는 3군데를 채워야 화면까지 이어진다:
+    #     ① nx.stock_ledger(위) ② nx.PU_T_MAT_STOCK_WH(잔액=실시간 현재고) ③ nx.PU_T_STOCK_MAINT(수불이력)
+    #   실측 2026-09-08 AJR30027702-12-1 판매출고 100:
+    #     원장 −100 O / 미러이력 0건 / _WH 123 그대로 → 화면에서 재고가 안 줄었다.
+    #   세트입고(setin.py:637)·자재입고(stock.py:656)와 같은 규약으로 맞춘다.
+    _so_upd_wh(cur, str(item).strip(), _q)
+    _so_mirror(cur, ymd, str(item).strip(), _q, cust=cust, remarks="유상사급 매출출고")
 
 @router.post("/api/saleout/save")
 def saleout_save(payload: dict = Body(...)):

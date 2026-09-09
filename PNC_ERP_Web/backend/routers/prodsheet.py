@@ -229,17 +229,26 @@ def prodsheet_parts():
 
 @router.get("/api/prodsheet/packinfo")
 def prodsheet_packinfo(item: str = Query(...)):
-    """포장정보(가간판/스티커 팝업 기본값) = nx.PR_M_ITEM_SUB (레거시 dw_pr_master_080).
-       PACK_KIND=포장BOX · PACK_QTY=표준포장수 · PROD_WORKER=생산자(용접사) · INSP_WORKER=검사자."""
+    """포장정보(가간판/스티커 팝업 기본값) — 레거시 dw_pr_master_080.
+       PACK_KIND=포장BOX · PACK_QTY=표준포장수 · PROD_WORKER=생산자(용접사) · INSP_WORKER=검사자.
+
+       ★2026-09-08 소스 분리 — 편집하는 4종은 **클린 nx.item_sub**(생산정보등록·재발행 팝업이 저장하는 곳),
+         아직 웹에 편집화면이 없는 2종(CUST_PACK_QTY·STICKER_COLOR)만 미러에서 읽는다.
+         폴백이 아니라 **항목별 단일소스**다 — 같은 항목을 두 곳에서 찾지 않는다(§1-9-1).
+         ※미러 전용 2종도 편집화면이 생기면 클린으로 옮겨야 컷오버에 안 죽는다(잔여 부채)."""
     ic = str(item or "").strip()
     if not ic:
         return {"ok": False, "detail": "품번 필수"}
     nx = _nx(); cur = nx.cursor()
     try:
-        cur.execute("""SELECT ISNULL(s.PACK_KIND,''), ISNULL(s.PACK_QTY,0), ISNULL(s.CUST_PACK_QTY,0),
-                          ISNULL(s.PROD_WORKER,''), ISNULL(s.INSP_WORKER,''), ISNULL(s.STICKER_COLOR,''),
+        cur.execute("""SELECT COALESCE(NULLIF(RTRIM(c.pack_kind),''), RTRIM(s.PACK_KIND), ''),
+                          COALESCE(NULLIF(c.pack_qty,0), s.PACK_QTY, 0), ISNULL(s.CUST_PACK_QTY,0),
+                          COALESCE(NULLIF(RTRIM(c.prod_worker),''), RTRIM(s.PROD_WORKER), ''),
+                          COALESCE(NULLIF(RTRIM(c.insp_worker),''), RTRIM(s.INSP_WORKER), ''),
+                          ISNULL(s.STICKER_COLOR,''),
                           ISNULL(i.item_name,''), ISNULL(i.item_spec,'')
                         FROM nx.item i WITH(NOLOCK)
+                        LEFT JOIN nx.item_sub c WITH(NOLOCK) ON c.item_code=i.ITEM_CODE
                         LEFT JOIN nx.PR_M_ITEM_SUB s WITH(NOLOCK) ON s.ITEM_CODE=i.ITEM_CODE
                        WHERE i.ITEM_CODE=?""", ic)
         r = cur.fetchone()
@@ -281,11 +290,15 @@ def prodsheet_kanban_preview(sheet_no: str = Query(...), pack_qty: int = Query(0
     try:
         cur.execute("""SELECT h.ITEM_CODE, h.PLAN_YMD, h.PLAN_QTY, ISNULL(h.LINE_NO,''),
                           ISNULL(h.STOCK_GAGONG_PROC_CODE,''), ISNULL(i.item_name,''),
-                          ISNULL(s.PACK_KIND,''), ISNULL(s.PACK_QTY,0),
-                          ISNULL(s.PROD_WORKER,''), ISNULL(s.INSP_WORKER,''),
+                          COALESCE(NULLIF(RTRIM(c.pack_kind),''), RTRIM(s.PACK_KIND), ''),
+                          COALESCE(NULLIF(c.pack_qty,0), s.PACK_QTY, 0),
+                          COALESCE(NULLIF(RTRIM(c.prod_worker),''), RTRIM(s.PROD_WORKER), ''),
+                          COALESCE(NULLIF(RTRIM(c.insp_worker),''), RTRIM(s.INSP_WORKER), ''),
                           ISNULL(h.PROD_FIN_FLAG,'0')
                         FROM nx.PR_T_INDI_WELD_SHEET h WITH(NOLOCK)
                         LEFT JOIN nx.item i WITH(NOLOCK) ON i.ITEM_CODE=h.ITEM_CODE
+                        -- ★클린 우선·미러 폴백(한시적) — prodsheet_label_print 주석 참조
+                        LEFT JOIN nx.item_sub c WITH(NOLOCK) ON c.item_code=h.ITEM_CODE
                         LEFT JOIN nx.PR_M_ITEM_SUB s WITH(NOLOCK) ON s.ITEM_CODE=h.ITEM_CODE
                        WHERE h.SHEET_NO=?""", sn)
         r = cur.fetchone()
@@ -449,10 +462,15 @@ def prodsheet_kanban_print(box_no: str = Query(...)):
     try:
         cur.execute("""SELECT b.BOX_NO, b.ITEM_CODE, b.PLAN_YMD, ISNULL(b.LINE_NO,''), b.PLAN_QTY,
                           b.ORG_PLAN_QTY, b.SHEET_NO, ISNULL(b.PRINT_USER_ID,''), b.PRINT_DATETIME,
-                          ISNULL(i.item_name,''), ISNULL(s.PACK_KIND,''), ISNULL(s.PACK_QTY,0),
-                          ISNULL(s.PROD_WORKER,''), ISNULL(s.INSP_WORKER,'')
+                          ISNULL(i.item_name,''),
+                          COALESCE(NULLIF(RTRIM(c.pack_kind),''), RTRIM(s.PACK_KIND), ''),
+                          COALESCE(NULLIF(c.pack_qty,0), s.PACK_QTY, 0),
+                          COALESCE(NULLIF(RTRIM(c.prod_worker),''), RTRIM(s.PROD_WORKER), ''),
+                          COALESCE(NULLIF(RTRIM(c.insp_worker),''), RTRIM(s.INSP_WORKER), '')
                         FROM nx.PR_T_INDI_SHEET2 b WITH(NOLOCK)
                         LEFT JOIN nx.item i WITH(NOLOCK) ON i.ITEM_CODE=b.ITEM_CODE
+                        -- ★클린 우선·미러 폴백(한시적) — prodsheet_label_print 주석 참조
+                        LEFT JOIN nx.item_sub c WITH(NOLOCK) ON c.item_code=b.ITEM_CODE
                         LEFT JOIN nx.PR_M_ITEM_SUB s WITH(NOLOCK) ON s.ITEM_CODE=b.ITEM_CODE
                        WHERE b.BOX_NO=?""", int(bn))
         r = cur.fetchone()
@@ -517,10 +535,14 @@ def prodsheet_label_preview(sheet_no: str = Query(...), qty: float = Query(0)):
     nx = _nx(); cur = nx.cursor()
     try:
         cur.execute("""SELECT h.ITEM_CODE, h.PLAN_QTY, h.PLAN_YMD, ISNULL(h.LINE_NO,''),
-                          ISNULL(i.item_name,''), ISNULL(s.PROD_WORKER,''), ISNULL(s.INSP_WORKER,''),
+                          ISNULL(i.item_name,''),
+                          COALESCE(NULLIF(RTRIM(c.prod_worker),''), RTRIM(s.PROD_WORKER), ''),
+                          COALESCE(NULLIF(RTRIM(c.insp_worker),''), RTRIM(s.INSP_WORKER), ''),
                           ISNULL(s.STICKER_COLOR,'')
                         FROM nx.PR_T_INDI_WELD_SHEET h WITH(NOLOCK)
                         LEFT JOIN nx.item i WITH(NOLOCK) ON i.ITEM_CODE=h.ITEM_CODE
+                        -- ★클린 우선·미러 폴백(한시적) — prodsheet_label_print 주석 참조
+                        LEFT JOIN nx.item_sub c WITH(NOLOCK) ON c.item_code=h.ITEM_CODE
                         LEFT JOIN nx.PR_M_ITEM_SUB s WITH(NOLOCK) ON s.ITEM_CODE=h.ITEM_CODE
                        WHERE h.SHEET_NO=?""", sn)
         r = cur.fetchone()
@@ -602,12 +624,16 @@ def prodsheet_label_issue(payload: dict = Body(...)):
 
 @router.get("/api/prodsheet/label-print")
 def prodsheet_label_print(print_seq: str = Query(...), start_no: int = Query(0), end_no: int = Query(0),
-                          worker: str = Query(""), inspector: str = Query("")):
+                          worker: str = Query(""), inspector: str = Query(""),
+                          save: int = Query(0, description="1이면 입력한 용접사/검사자를 품목마스터(nx.item_sub)에 저장")):
     """라벨 인쇄 데이터 — 낱장 목록.
-       양식(QR3 실측, 40×20mm): 좌측 QR / PNC Industry / {출력일자} {PRINT_SEQ}-{일련4}
+       양식(QR3 실측, 40×25mm): 좌측 QR / PNC Industry / {출력일자} {PRINT_SEQ}-{일련4}
                                 / n / 전체 / 도번 / 용접사(생산자)/검사자
        ★재발행: start_no~end_no 로 범위 지정(레거시 w_pr_input_469 재발행 팝업).
-         미지정이면 발행 당시 전체 범위. worker/inspector 를 주면 그 값으로 덮어씀."""
+         미지정이면 발행 당시 전체 범위. worker/inspector 를 주면 그 값으로 덮어씀.
+       ★save=1 (2026-09-08 대표 요청) — 팝업에서 고친 용접사/검사자를 **품목마스터에 반영**한다.
+         종전엔 이번 출력에만 쓰고 버려서, 다음에 뽑으면 옛 이름이 다시 나왔다.
+         저장 위치는 클린 nx.item_sub (생산정보등록과 같은 곳 = 한 개념 한 소스, §1-9-1)."""
     ps = ''.join(c for c in str(print_seq or '') if c.isdigit())
     if not ps:
         return {"ok": False, "detail": "라벨번호 필수"}
@@ -617,9 +643,20 @@ def prodsheet_label_print(print_seq: str = Query(...), start_no: int = Query(0),
                           ISNULL(s.QR_BARCODE_FROM,''), ISNULL(s.QR_BARCODE_TO,''),
                           ISNULL(s.WORK_CODE,''), ISNULL(s.WORKER_CODE,''),
                           s.SHEET_NO, ISNULL(s.PRINT_USER_ID,''), s.PRINT_DATETIME,
-                          ISNULL(i.item_name,''), ISNULL(m.PROD_WORKER,''), ISNULL(m.INSP_WORKER,'')
+                          ISNULL(i.item_name,''),
+                          -- ★용접사/검사자 — 웹에서 고친 값(클린)이 있으면 그것, 없으면 미러.
+                          --   ⚠이건 §1-9-1 이 금지하는 폴백이다. **한시적**으로만 둔다:
+                          --     클린 nx.item(14,466) 이 미러(71,043)를 다 담지 못해
+                          --     nx.item_sub 의 FK(fk_item_sub_item) 때문에 이관이 막혔다
+                          --     (실측 2026-09-08: 적재대상 3,144 중 3,141 이 FK 충돌,
+                          --      라벨 품목 202 중 176 이 클린 item 에 없음).
+                          --   지금 클린 단독으로 바꾸면 그 176 품목의 이름이 **빈칸으로 인쇄**된다.
+                          --   ⟹ 품목마스터 이관이 끝나면 이 COALESCE 를 지우고 클린 단독으로 되돌린다.
+                          COALESCE(NULLIF(RTRIM(c.prod_worker),''), RTRIM(m.PROD_WORKER), ''),
+                          COALESCE(NULLIF(RTRIM(c.insp_worker),''), RTRIM(m.INSP_WORKER), '')
                         FROM nx.PR_T_PRINT_STICKER s WITH(NOLOCK)
                         LEFT JOIN nx.item i WITH(NOLOCK) ON i.ITEM_CODE=s.ITEM_CODE
+                        LEFT JOIN nx.item_sub c WITH(NOLOCK) ON c.item_code=s.ITEM_CODE
                         LEFT JOIN nx.PR_M_ITEM_SUB m WITH(NOLOCK) ON m.ITEM_CODE=s.ITEM_CODE
                        WHERE s.PRINT_SEQ=?""", int(ps))
         r = cur.fetchone()
@@ -642,6 +679,23 @@ def prodsheet_label_print(print_seq: str = Query(...), start_no: int = Query(0),
         e2 = start + n2 - 1          # 절대 QR 종료번호
         w2 = str(worker or '').strip() or str(r[6] or '').strip() or str(r[12] or '').strip()
         i2 = str(inspector or '').strip() or str(r[7] or '').strip() or str(r[13] or '').strip()
+        # ★팝업에서 고친 이름을 품목마스터(클린 nx.item_sub)에 반영 — save=1 일 때만.
+        #   사용자가 **직접 입력한 값**(worker/inspector 파라미터)만 저장한다.
+        #   마스터에서 읽어온 기본값을 되쓰면 의미 없는 UPDATE 가 매 출력마다 돈다.
+        if int(save or 0) == 1 and item:
+            _w = str(worker or '').strip()
+            _i = str(inspector or '').strip()
+            if _w or _i:
+                try:
+                    from routers.prodinfo import save_item_pack
+                    save_item_pack(cur, item,
+                                   prod_worker=(_w or None),
+                                   insp_worker=(_i or None))
+                    nx.commit()
+                except Exception:
+                    # 저장에 실패해도 **인쇄는 계속한다** — 현장이 멈추면 안 된다.
+                    try: nx.rollback()
+                    except Exception: pass
         n_out = n2 - n1 + 1
         # ★n(현재)/tot(전체)는 발행 전체 기준. 부분 재발행해도 원래 번호를 유지해야
         #   현장에서 몇 번째 라벨인지 알 수 있음(예 4~6 재출력 → 4/6, 5/6, 6/6).

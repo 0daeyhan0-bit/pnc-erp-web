@@ -17,6 +17,10 @@ router = APIRouter()
 #   캐시=완제품별 per-unit 자재소요(BOM 안정→BOM 변경시만 무효). 완성수량·재고·매입은 라이브.
 #   ★sync 비종속(nx.bom_line 소스 종속)→컷오버 후에도 유효. 서명가드로 stale 원천차단(무접촉).
 _ENG = None
+# ★소요캐시 구간 직렬화 락 — `nx.item_mat_soyo` 를 읽고 쓰는 구간을 한 번에 하나만 통과시킨다.
+#   FastAPI 는 sync 엔드포인트를 스레드풀에서 돌리므로 동시 조회가 실제로 겹친다.
+import threading as _threading
+_SOYO_LOCK = _threading.Lock()
 
 
 def _eng():
@@ -246,25 +250,33 @@ def matexpect(axis: str = Query("prod"), frm: str = Query(""), to: str = Query("
                 lv.close()
         # 완제품 완성수량 × per-unit 소요(사전계산 캐시) → 자재소요. 실적 vendor 귀속 = PR_M_ITEM.in_cust_code(설계 §4)
         if driver:
-            _ensure_soyo_cache(cur)   # ★BOM 서명 가드: 변경(sync/bom_save)시 캐시·엔진 무효→재빌드
-            items = [it for it, dq in driver.items() if dq]
-            smap = {}; cached = set()
-            for i in range(0, len(items), 1000):     # 배치 캐시읽기(IN, 파라미터 청크)
-                chunk = items[i:i + 1000]
-                ph = ",".join("?" * len(chunk))
-                cur.execute("SELECT item_code, mat_code, per_unit FROM nx.item_mat_soyo WHERE item_code IN (%s)" % ph, *chunk)
-                for it, mc, per in cur.fetchall():
-                    cached.add(it)
-                    if mc:
-                        smap.setdefault(it, {})[mc] = per
-            for it in items:                          # miss(prewarm 밖)만 lazy 계산+저장
-                if it not in cached:
-                    try:
-                        so = _soyo_of(cur, it)
-                        if so:
-                            smap[it] = so
-                    except Exception:
-                        pass
+            # ★동시 조회 직렬화(2026-09-09) — 이 구간은 공유 캐시테이블 `nx.item_mat_soyo` 를
+            #   **읽고 쓴다**. FastAPI 는 sync 엔드포인트를 스레드풀에서 돌리므로
+            #   두 사람이 동시에 열면 같은 구간이 겹쳐 든다:
+            #     · `_ensure_soyo_cache` 의 TRUNCATE 가 상대의 적재를 지우고
+            #     · `_soyo_of` 의 INSERT 가 같은 키로 부딪혀(PK) 헛일이 된다
+            #   실측(2026-09-09): 서버 3대를 동시에 물렸더니 19초짜리가 300초를 넘겼다.
+            #   락으로 묶으면 뒤에 온 요청은 앞사람이 채워 둔 캐시를 그대로 읽어 오히려 빨라진다.
+            with _SOYO_LOCK:
+                _ensure_soyo_cache(cur)   # ★BOM 서명 가드: 변경(sync/bom_save)시 캐시·엔진 무효→재빌드
+                items = [it for it, dq in driver.items() if dq]
+                smap = {}; cached = set()
+                for i in range(0, len(items), 1000):     # 배치 캐시읽기(IN, 파라미터 청크)
+                    chunk = items[i:i + 1000]
+                    ph = ",".join("?" * len(chunk))
+                    cur.execute("SELECT item_code, mat_code, per_unit FROM nx.item_mat_soyo WHERE item_code IN (%s)" % ph, *chunk)
+                    for it, mc, per in cur.fetchall():
+                        cached.add(it)
+                        if mc:
+                            smap.setdefault(it, {})[mc] = per
+                for it in items:                          # miss(prewarm 밖)만 lazy 계산+저장
+                    if it not in cached:
+                        try:
+                            so = _soyo_of(cur, it)
+                            if so:
+                                smap[it] = so
+                        except Exception:
+                            pass
             for it, dq in driver.items():             # 집계
                 if not dq:
                     continue

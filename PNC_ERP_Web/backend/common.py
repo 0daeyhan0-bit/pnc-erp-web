@@ -105,10 +105,26 @@ class _ROConn:
     def __getattr__(self, n): return getattr(self._cn, n)
 
 def _conn():
-    # ★컷오버(2026-09-07): 레거시 PARTNER_ERP 은퇴 → nx(PARTNER_ERP_TEST3) 접속. RO 가드 유지.
-    #   레거시 대조가 필요한 소수 쿼리(총평균 등)는 3부분명 PARTNER_ERP_ORG.dbo.X 로 개별 지정.
+    # ★★★컷오버 때 되돌릴 것 = 이 한 줄 (DATABASE=PARTNER_ERP → PARTNER_ERP_TEST3)
+    #
+    #   2026-09-07 컷오버로 TEST3 접속으로 바꿨다가(#186 d015d21),
+    #   같은 날 밤 롤백에서 **DB만 원복하고 코드는 그대로 둬** 운영 장애가 났다.
+    #     증상 : 영업예상매출현황이 9/8~9/30 전 기간 0원·0도번(오류표시 없이 HTTP200 rows:[])
+    #     원인 : 로그인 ilshin 의 **기본스키마가 dbo** 라서, 스키마를 안 쓴 쿼리
+    #            (`FROM sa_t_plan_item_dtl` 등 31곳/11파일)가
+    #            `PARTNER_ERP_TEST3.dbo` = **아무도 안 채우는 죽은 미러**(7/16~8/19 정지)로 갔다.
+    #            미지정 참조 테이블 21종 중 19종이 낡은 값이었다.
+    #            (nx 스키마는 sync 가 살아 있어 무사했다 — dbo 만 죽은 것)
+    #     실측 : sa_t_plan_item_dtl max 260819(라이브 261008) → 9월 계획 0행
+    #            pu_t_stock_maint −75,429 · pr_t_plan_part_mat −46,450 · pr_t_plan_item_dtl −32,343
+    #   ⟹ 2026-09-09 라이브로 되돌렸다. 기록 = `_schema/CUTOVER_EXECUTION_LOG_260907.md §7`
+    #
+    #   ★재컷오버 때 할 일 = **이 줄을 다시 PARTNER_ERP_TEST3 로 바꾼다.**
+    #     그때는 스키마 미지정 31곳도 함께 처리해야 같은 사고가 안 난다 —
+    #     `nx.` 를 명시하거나 로그인 기본스키마를 nx 로 두거나 둘 중 하나.
+    #     (명시 참조 `PARTNER_ERP_TEST3.nx.X` 는 이미 전부 nx 라 손댈 것이 없다)
     cs = (f'DRIVER={{SQL Server}};SERVER={db_client.DB_SERVER},{db_client.DB_PORT};'
-          f'DATABASE=PARTNER_ERP_TEST3;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD};ApplicationIntent=ReadOnly')
+          f'DATABASE=PARTNER_ERP;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD};ApplicationIntent=ReadOnly')
     return _ROConn(pyodbc.connect(cs, autocommit=True))
 
 def _num(x):
@@ -208,24 +224,28 @@ def _lock_msg(cur, ymd, domain="MAT"):
        (비발생형 — 호출측이 return/raise 결정)
 
        판정 순서 (정본 = nx.period_close, 마감관리 화면이 기록):
-         ① 일마감  nx.period_close(domain, 'D', YYMMDD)   ← 그 날이 잠겼는가
-         ② 월마감  nx.period_close(domain, 'M', YYMM)     ← 일마감 ⊂ 월마감
-         ③ 하위호환 nx.stock_close(ym)                     ← 구 전역 월잠금(기존 동작 보존)
+         ① 월마감  nx.period_close(domain, 'M', YYMM)     ← ★유일한 확정·잠금
+         ② 하위호환 nx.stock_close(ym)                     ← 구 전역 월잠금(기존 동작 보존)
+
+       ★2026-09-08 재설계 — **일마감은 잠그지 않는다**(CLOSE_REDESIGN §3·§5).
+         전월(M) 마감은 익월 10일에 확정하는데, 그때까지 단가협상·이월정리·반품이 계속 M월로
+         들어온다. 일마감이 날짜를 잠그면 그 조정을 넣을 **열린 날이 없어진다**(실제 업무와 충돌).
+         ⟹ 일마감 = 잠정 스냅샷(참고·언제든 refresh) · 월마감 = 유일한 확정·잠금.
+         nx.period_close 의 ptype='D' close_flag=1 은 이제 **"그날 스냅샷이 있다"** 는 뜻이지
+         잠금이 아니다(수불장·마감 엔진 _mv_base 가 기초로 쓴다 — 그 용도는 그대로).
+         ★이미 월마감된 과거 달은 여전히 잠긴다(규칙B 불변).
        domain = MAT 자재 / PRD 생산 / SAL 영업. 미지정이면 MAT.
-       정본 = _schema/STOCK_GATING_CLOSE_LOCK_RULES.md 규칙B · nextgen-erp-close-settlement(일마감⊂월마감)."""
+       정본 = _schema/CLOSE_REDESIGN.md · _schema/STOCK_GATING_CLOSE_LOCK_RULES.md 규칙B."""
     ymd = str(ymd or "").strip()
     if len(ymd) < 6:
         return None
     d = str(domain or "MAT").strip().upper() or "MAT"
     ym = _ym(ymd)
     try:
-        cur.execute("""SELECT ptype FROM nx.period_close
-                       WHERE domain=? AND close_flag=1 AND ((ptype='D' AND period=?) OR (ptype='M' AND period=?))
-                       ORDER BY ptype""", d, ymd[:6], ym)
-        r = cur.fetchone()
-        if r:
-            return (f"{ymd[:6]} 일마감된 일자입니다 — 생성/수정/삭제 불가" if r[0] == "D"
-                    else f"{ym} 마감된 월입니다 — 생성/수정/삭제 불가")
+        cur.execute("""SELECT period FROM nx.period_close
+                       WHERE domain=? AND close_flag=1 AND ptype='M' AND period=?""", d, ym)
+        if cur.fetchone():
+            return f"{ym} 마감된 월입니다 — 생성/수정/삭제 불가"
     except Exception:
         pass          # period_close 미생성 환경(구 배포본) → 하위호환 경로로
     # ③ 하위호환 = 구 전역 월잠금. ★_closed() 를 부르면 안 된다 —
@@ -258,11 +278,27 @@ _AVAIL_TTL = 60.0    # 초
 
 
 def _mat_avail_map(cur, force=False):
-    """자재 현재고 맵 {품번: 수량} — 확정 스냅샷 기초 + 그 이후 전표(오늘까지).
-       ★프로세스 캐시(산출 약 1.2초). 두 겹으로 낡지 않게 지킨다:
+    """자재 현재고 맵 {품번: 수량} — ★정본 = nx.PU_T_MAT_STOCK_WH(실시간 잔액), 대표 확정 2026-09-08.
+
+       ★왜 바꿨나 (실측 경위)
+         종전 = '확정 스냅샷(일마감) 기초 + 그 이후 전표' 재계산.
+         그런데 **기초 스냅샷 자체가 음수**인 품목이 있어, 이후 전표가 0건이면
+         그 음수가 그대로 가용으로 나왔다. 그러면 화면엔 재고가 보이는데 출고가 막힌다.
+           실측 3H00627L : 화면 _WH 127.10 인데 게이트 −72.50(260831 일마감 기초가 −72.50)
+           같은 증상 46종 — 두 축이 갈린 자재는 429종/7,768종(5.5%).
+         기초 스냅샷은 과거 한 시점의 계산결과라 **오차를 영구히 이월**한다.
+         반면 _WH 는 입·출고가 일어날 때마다 갱신되는 **실시간 잔액**이고,
+         자재입출고현황·자재입고관리 등 화면이 오늘 재고로 보여주는 바로 그 값이다.
+       ⟹ **화면이 보여주는 재고와 게이트가 판정하는 재고는 같아야 한다.**
+          그래야 "재고 있는데 출고가 안 된다"가 사라진다.
+
+       ★버킷 = 자재창고(CUST_CODE='Z99990' · GAGONG_PROC_CODE='IS0001').
+         자재입출고현황(live_api)이 오늘 기준으로 읽는 버킷과 동일하게 맞춘다.
+       ★폴백 없음(하드룰 §1-9-1) — _WH 에 없으면 0. 다른 데서 몰래 끌어오지 않는다.
+
+       ★프로세스 캐시. 두 겹으로 낡지 않게 지킨다:
          ① 웹에서 재고를 바꾸는 쓰기 → stock_changed() 가 즉시 버린다.
          ② 웹 밖에서 DB 가 바뀌는 경우(매일 7:30 마이그 r_delta_sync 등) → TTL 60초.
-            ①만 두면 마이그가 직접 쓴 뒤 게이트가 **하루 종일 낡은 값**을 본다.
        ★워커 1개 전제(uvicorn app:app, --workers 없음). 다중 워커로 가면 이 캐시는 못 쓴다
          — 한 워커의 무효화가 다른 워커에 가지 않기 때문. 그때는 공용 캐시로 옮길 것."""
     import datetime as _dt, time as _t
@@ -271,25 +307,21 @@ def _mat_avail_map(cur, force=False):
             and (_t.time() - _AVAIL_MAP["at"]) < _AVAIL_TTL):
         return _AVAIL_MAP["map"]
     try:
-        from routers.close import _mv_base, _mv_moves, _mv_step, _mv_scope, _next_ymd
+        cur.execute("""SELECT UPPER(RTRIM(MAT_CODE)) mat, SUM(STOCK_QTY) q
+                         FROM PARTNER_ERP_TEST3.nx.PU_T_MAT_STOCK_WH WITH(NOLOCK)
+                        WHERE CUST_CODE='Z99990' AND ISNULL(GAGONG_PROC_CODE,'')='IS0001'
+                        GROUP BY UPPER(RTRIM(MAT_CODE))""")
+        m = {str(r[0]).strip(): float(r[1] or 0) for r in cur.fetchall()}
     except Exception:
         return _AVAIL_MAP["map"] or {}
-    state, base_ymd, _src = _mv_base(cur, today)
-    scope = _mv_scope(cur)
-    start = _next_ymd(base_ymd)
-    if start <= today:
-        moves = _mv_moves(cur, start, today)
-        for y in sorted(moves):
-            _mv_step(state, moves[y], scope)
-    m = {k: float(v[0]) for k, v in state.items()}
     import time as _t2
     _AVAIL_MAP["key"], _AVAIL_MAP["map"], _AVAIL_MAP["at"] = today, m, _t2.time()
     return m
 
 
 def _mat_avail(cur, item):
-    """자재 현재고(가용) — 실시간 정본. 없으면 0.
-       ★음수재고 차단(§0-★)의 판정 기준. 정본 = STOCK_GATING_CLOSE_LOCK_RULES §0-★★★."""
+    """자재 현재고(가용) — ★정본 = nx.PU_T_MAT_STOCK_WH 실시간 잔액(자재창고 버킷). 없으면 0.
+       ★음수재고 차단(§0-★)의 판정 기준이자 **화면이 보여주는 재고와 같은 값**(2026-09-08)."""
     item = str(item or "").strip().upper()
     if not item:
         return 0.0

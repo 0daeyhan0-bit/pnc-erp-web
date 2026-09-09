@@ -374,7 +374,7 @@ def _warmup_heavy_queries():
                  from PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH_DAILY t
                  join PARTNER_ERP_TEST3.nx.item m on t.mat_code=m.item_code
                  join PARTNER_ERP_TEST3.nx.pr_m_proc_gagong g on t.gagong_proc_code=g.gagong_proc_code
-                 left join PARTNER_ERP_TEST3.nx.v_cm_m_cust c on m.in_cust=c.cust_code
+                 left join PARTNER_ERP_TEST3.nx.cm_m_cust c on m.in_cust=c.cust_code
                  where t.cust_code='Z99990' and t.STOCK_YMD=(SELECT MAX(STOCK_YMD) FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH_DAILY WHERE cust_code='Z99990')
                  group by t.mat_code""",
             """select t.mat_code, max(m.item_name), sum(t.stock_qty)
@@ -403,6 +403,49 @@ def _warmup_heavy_queries():
                 for _wi in ("AJR75563402",):
                     try: eng.naewon_nodes(_wi, "260630")
                     except Exception: pass
+        except Exception: pass
+        # ★무게정산(중량조정) 예열 — 재시작 후 **첫 조회만** 통째로 느렸다.
+        #     실측(2026-09-09) : 1회차 53~64초 → 2회차 2.7초  (컷오버 전 코드도 동일 = 컷오버 무관)
+        #   내역(ym=2609) : 맵적재 6.9s · 쿼리 3개 2.7s · **소요엔진 전개 루프 56.9s**
+        #     전개는 입고품목 1,492종을 엔진에 묻는다(1건당 33ms). 엔진이 그 답을 캐시하므로
+        #     **두 번째부터는 0.0초** — 즉 이건 프로세스당 1회 비용이지 매번 드는 비용이 아니다.
+        #     (품번이 거의 안 겹쳐 memo 로는 못 줄인다 — 1,494행 중 중복 2건뿐)
+        #   ⟹ 그 1회를 여기 백그라운드에서 미리 치른다. 첫 사용자도 2~3초로 연다.
+        try:
+            import weight_calc as _wc
+            from common import _cur_ym as _cym
+            _wc._load_maps(); _wc._load_weld(); _wc._load_copper_master()
+            try: _wc.compute(_cym())          # 엔진 전개 캐시 채우기(읽기전용)
+            except Exception: pass
+        except Exception: pass
+        # ★생산/영업 수불장 예열 — 생산재고조회가 이 캐시를 그대로 쓴다(close.ledger_cached).
+        #   계측(2026-09-09 · ym=2609) : _prodstock 1회차 32.0초
+        #     = 메인SQL 2.0 + **수불장단가 29.9** + BOM보강 0.0
+        #     2회차 1.9초 — 즉 29.9초는 (도메인,기간) 캐시를 처음 채우는 값이다.
+        #   당월분을 미리 채워 두면 생산재고조회·수불장 둘 다 첫 조회가 즉시 열린다.
+        #   (기간을 바꿔 조회하면 그 기간은 다시 한 번 채운다 — 구조상 어쩔 수 없다.)
+        try:
+            from routers.close import ledger_cached as _lc
+            from common import _nx as _nxw, _cur_ym as _cym2
+            _y = _cym2()
+            _cn = _nxw(); _cu = _cn.cursor()
+            try:
+                for _dm in ("PRD", "SAL"):
+                    try: _lc(_cu, _dm, _y + "01", _y + "99")
+                    except Exception: pass
+            finally:
+                _cn.close()
+        except Exception: pass
+        # ★자재예상매입 소요캐시 예열 — `nx.item_mat_soyo`(완제품별 per-unit 자재소요).
+        #   이 캐시는 **BOM 이 바뀌면 서명가드가 통째로 비운다**(정확성 우선·stale 차단).
+        #   비면 다음 조회가 완제품 565종을 엔진에 물어 다시 채운다.
+        #     실측(2026-09-09) : 캐시 비었을 때 197초 · 채워져 있으면 2.5초
+        #   기동 때 미리 채워 재시작 직후 첫 사용자를 보호한다.
+        #   ※낮에 BOM 을 고치면 그 뒤 첫 조회는 여전히 재빌드를 문다(캐시 무효가 정확성 조건).
+        #     다만 _SOYO_LOCK 이 있어 **한 사람만** 물고 나머지는 그 결과를 받는다.
+        try:
+            from routers.matexpect import matexpect as _mx
+            _mx()
         except Exception: pass
     # ★TestBed(FLOW_TESTBED=1)는 예열을 **동기로** 한다 — 하네스는 커넥션이 하나라
     #   예열 스레드가 본 스레드와 다투면 HY000 이 나고, 그렇다고 끄면 엔진이 차가워

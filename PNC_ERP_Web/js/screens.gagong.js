@@ -27,7 +27,8 @@ SCREEN.partplanproc=(c)=>{
     const gpThickOpts=[...gpThick].sort((a,b)=>a-b).map(v=>`<option value="${esc(v)}"></option>`).join('');
     c.innerHTML=`
      <div class="page-title">⚙️ 가공공정 파트별계획 <span style="font-size:12px;color:var(--muted);font-weight:400">동파이프(지름·두께) 가공 파트 일자계획</span></div>
-     <div class="page-sub">협력사계획(<code>PR_T_PLAN_PART_MAT</code>)을 가공 파트(동파이프) 단위로 지름·두께 포함 일자별 전개. 🔴 라이브</div>
+     <!-- ★배지 정정(2026-09-08) — 실제 소스는 nx(coopplan.py:37 PARTNER_ERP_TEST3.nx). 라이브 직독 아님. -->
+     <div class="page-sub">협력사계획(<code>nx.PR_T_PLAN_PART_MAT</code>)을 가공 파트(동파이프) 단위로 지름·두께 포함 일자별 전개. 소스 nx</div>
      <div class="toolbar">
        <label class="tl">계획기간</label><input class="inp" type="date" id="gp-from" value="${F.from}"> ~ <input class="inp" type="date" id="gp-to" value="${F.to}">
        <label class="tl">자도번작업처</label><select class="inp" id="gp-wc" style="max-width:170px"><option value="">전체</option>${wcs.map(w=>`<option value="${esc(w.cc)}"${F.wc===w.cc?' selected':''}>${esc(w.nm||w.cc)} (${w.n})</option>`).join('')}</select>
@@ -134,7 +135,11 @@ SCREEN.gagongplan4w=(c)=>{
       return `<td class="num" style="white-space:nowrap${bg?';background:'+bg+';'+fgOn4(bg):''}">${nf(dn)}/${nf(pl)}</td>`;};   // 날짜셀 색=완료상태(서버)
     c.innerHTML=`
      <div class="page-title">📋 4주간 가공계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">도번×라인×작업처 · 자도번LIST 묶음</span></div>
-     <div class="page-sub">레거시 4주간 원천(<code>PR_T_PLAN_PART_DTL_FOR_CUST</code>·당일생성 스냅샷) 직독. <b>도번=부품</b>·<b>자도번LIST=이 부품을 쓰는 부모 자도번들</b>. 첫 일자컬럼=당일이전 누적. 🔴 라이브
+     <!-- ★배지 정정(2026-09-08) — 종전 '🔴 라이브' 는 사실이 아니었다.
+          컷오버 커밋(5a9941d·03b06c0)이 백엔드를 nx 로 바꿨는데 부제만 그대로 남아
+          "레거시 원본이라 믿을 수 있다" 는 오판을 부를 수 있었다.
+          실제 소스 = PARTNER_ERP_TEST3.nx (gagong.py:523). 라이브 직독 아님. -->
+     <div class="page-sub">계획원천 <code>nx.PR_T_PLAN_PART_DTL_FOR_CUST</code>(레거시 배치가 만드는 당일생성 스냅샷의 nx 사본). <b>도번=부품</b>·<b>자도번LIST=이 부품을 쓰는 부모 자도번들</b>. 첫 일자컬럼=당일이전 누적. 소스 nx
        <span style="margin-left:8px;font-size:11px">날짜셀 색(완료≥계획): <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료</span> <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span> <span style="background:#669900;color:#fff;padding:0 5px;border-radius:3px">키팅완료</span></span></div>
      <div class="toolbar">
        <label class="tl">기준일자</label><input class="inp" type="date" id="p4-from" value="${st.from}">
@@ -242,14 +247,18 @@ SCREEN.gagongplan4w=(c)=>{
       const done=()=>{const el=c.querySelector('#p4-cnt');
         if(el){const o=el.innerHTML;el.innerHTML=`<b style="color:#1c7c3a">${what} 복사됨</b>`;
                setTimeout(()=>{el.innerHTML=o;},1400);}};
-      if(navigator.clipboard&&navigator.clipboard.writeText)
+      // ★비보안(http 운영 184)은 clipboard API 가 막히고 그 거부는 **비동기** —
+      //   제스처(Ctrl+C) 밖에서 fb 가 돌면 execCommand 도 막혀 조용히 실패한다.
+      //   ⟹ isSecureContext 가 아니면 처음부터 동기 fb()(2026-09-08).
+      if(window.isSecureContext&&navigator.clipboard&&navigator.clipboard.writeText)
         navigator.clipboard.writeText(txt).then(done,()=>fb()); else fb();
       function fb(){   // 비보안 컨텍스트(http)는 clipboard API 가 막힌다
         const ta=document.createElement('textarea'); ta.value=txt;
         ta.style.cssText='position:fixed;left:-9999px;top:0';
-        document.body.appendChild(ta); ta.select();
-        try{document.execCommand('copy');done();}catch(_){alert('복사에 실패했습니다.');}
-        ta.remove();}
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        let ok=false; try{ok=document.execCommand('copy');}catch(_){}
+        ta.remove();
+        if(ok)done(); else alert('복사에 실패했습니다.');}
     };
     const copySel=()=>toClip(selText(),'선택영역');
     const copyAll=()=>{
@@ -260,13 +269,19 @@ SCREEN.gagongplan4w=(c)=>{
         out.push([...tr.cells].map(td=>(td.innerText||'').trim()).join('\t'));});
       toClip(out.join('\n'),`전체 ${nf(out.length-1)}행`);
     };
+    // ★Ctrl+C 는 document 에서 받는다 — 범위선택 mousedown 의 preventDefault 때문에
+    //   c 에 포커스가 오지 않아 c.onkeydown 은 아예 안 불린다(2026-09-08, 420 과 동일 수정).
+    c._p4CopySel=copySel;
     if(!c.dataset.cpkey){
       c.dataset.cpkey='1';
-      c.addEventListener('keydown',ev=>{
-        if((ev.ctrlKey||ev.metaKey)&&(ev.key==='c'||ev.key==='C')){
-          if(!c.querySelector('td.p4cp'))return;
-          ev.preventDefault(); copySel();}});
       c.setAttribute('tabindex','-1'); c.style.outline='none';
+      document.addEventListener('keydown',ev=>{
+        if(!((ev.ctrlKey||ev.metaKey)&&(ev.key==='c'||ev.key==='C')))return;
+        if(!c.isConnected||!c.offsetParent)return;
+        const t=ev.target;
+        if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'||t.isContentEditable))return;
+        if(!c.querySelector('td.p4cp'))return;
+        ev.preventDefault(); if(c._p4CopySel)c._p4CopySel();});
     }
     /* 우클릭 메뉴 — ★실행도 mousedown 에서(410·420·580 과 같은 함정 회피:
        바깥클릭 닫기가 mousedown 이라 click 은 죽은 노드에 떨어진다). */
@@ -625,7 +640,7 @@ SCREEN.gagongprog420=(c)=>{
        .g4tbl th.g4sun{color:#c0392b}
        .g4tbl td.g4wk{background:#f4f6f9}</style>
      <div class="page-title">🏭 가공생산진척관리(전표발행) <span style="font-size:12px;color:var(--muted);font-weight:400">Assy도번·자도번별 생산진척</span></div>
-     <div class="page-sub">${st.src==='sp'?'레거시 암호화SP 직접실행(대사용)':(st.src==='new'?'<b>nx 재현</b> + <b>계획=웹편성</b>(nx.plan_part_dtl)':'<b>nx 재현</b>(암호화SP 탈피)')} · 그레인=(도번,가공컴포넌트) · 셀색 90주황출하/70·30노랑재고/20민트가공창고/10녹전표 · 당일이전=기준일 이전 · ${st.src==='sp'?'🔴 라이브':(st.src==='new'?'🟣 신규DB(웹계획)':'🟢 nx')}</div>
+     <div class="page-sub"><b>nx 재현</b> + <b>계획=웹편성</b>(nx.plan_part_dtl) · 그레인=(도번,가공컴포넌트) · 셀색 90주황출하/70·30노랑재고/20민트가공창고/10녹전표 · 당일이전=기준일 이전</div>
      <div class="toolbar">
       <label class="tl">기준일자</label><input class="inp" type="date" id="g4-from" value="${st.from}">
       <!-- ★자도번작업처 = P2 가공 고정이므로 숨김(2026-08-20). st.wc 값·핸들러는 그대로 유지 -->
@@ -634,7 +649,10 @@ SCREEN.gagongprog420=(c)=>{
       <label class="tl">미생산</label>
       <label class="rl"><input type="radio" name="g4-uf" value="전체"${st.unfin==='전체'?' checked':''}> 전체</label>
       <label class="rl"><input type="radio" name="g4-uf" value="미생산"${st.unfin==='미생산'?' checked':''}> 미생산</label>
-      <label class="tl">소스</label><select class="inp src-new" id="g4-src" data-src="${esc(st.src)}" style="width:auto;min-width:150px" title="신규DB(웹계획)=계획을 웹 자체편성(nx.plan_part_dtl)으로 갈아끼움 / 우리(nx)=레거시 편성 미러 · nx재현 / 레거시 대사=암호화SP 직접실행"><option value="new"${st.src==='new'?' selected':''}>🟣 신규DB(웹계획)</option><option value="nx"${st.src==='nx'?' selected':''}>🟢 우리(nx)</option><option value="sp"${st.src==='sp'?' selected':''}>🔴 레거시 대사</option></select>
+      <!-- ★소스 드롭다운 제거(2026-09-08 사용자 확정) — 신규DB(웹계획) 고정.
+           웹 기준(웹편성 계획)으로 운영하므로, 대사용이던 '우리(nx)'·'레거시 대사'를
+           실무 화면에 노출할 필요가 없다(410 파트별계획·460 준비실적처리와 동일 조치).
+           st.src 는 'new' 로 고정(초기값). API 는 plansrc 를 그대로 받으므로 백엔드 변경 없음. -->
       <button class="btn" id="g4-search">🔍 조회</button>
       <div class="spacer"></div>
       <span class="rowcount" id="g4-selinfo" style="margin-right:8px"></span>
@@ -653,7 +671,7 @@ SCREEN.gagongprog420=(c)=>{
       <label class="rl"><input type="radio" name="g4-vw" value="집계"${st.view==='집계'?' checked':''}> 집계</label>
       <label class="rl"><input type="radio" name="g4-vw" value="제번"${st.view==='제번'?' checked':''}> 제번</label>
       <label class="tl">기간</label><select class="inp" id="g4-gigan" style="max-width:70px">${[1,2,3,4,5,6,7,8].map(d=>`<option value="${d}"${st.gigan===d?' selected':''}>${d}일</option>`).join('')}</select>
-      <div class="spacer"></div><span class="rowcount">행 <b>${nf(disp.length)}</b> · 생산계획합 <b>${nf(tPlan)}</b> · 완료합 <b>${nf(tFin)}</b> · ${st.src==='sp'?'🔴 라이브':(st.src==='new'?'🟣 신규DB(웹계획)':'🟢 nx')}</span>
+      <div class="spacer"></div><span class="rowcount">행 <b>${nf(disp.length)}</b> · 생산계획합 <b>${nf(tPlan)}</b> · 완료합 <b>${nf(tFin)}</b></span>
     </div>
      ${st.note?`<div class="page-sub" style="color:#c0392b">${esc(st.note)}</div>`:''}
      ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
@@ -686,8 +704,7 @@ SCREEN.gagongprog420=(c)=>{
     g('#g4-gigan').onchange=()=>{st.gigan=+g('#g4-gigan').value;st.to=iso(new Date(new Date(st.from).getTime()+(st.gigan-1)*864e5));g('#g4-search').click();};
     c.querySelectorAll('input[name=g4-uf]').forEach(rd=>rd.onchange=()=>{st.unfin=rd.value;draw();});  // ★캐시 즉시필터(재조회 없음)
     c.querySelectorAll('input[name=g4-vw]').forEach(rd=>rd.onchange=()=>{st.view=rd.value;draw();});  // 구분: 상세/집계/제번 즉시전환
-    g('#g4-src').onchange=(e)=>{e.target.dataset.src=e.target.value;   // 고르는 즉시 색 반영
-      st.src=g('#g4-src').value;load();};
+    // ★소스는 'new'(신규DB=웹계획) 고정 — 드롭다운 제거(2026-09-08)
     g('#g4-part').onchange=()=>{st.part=g('#g4-part').value;draw();};   // 출고처 = 캐시 즉시필터
     g('#g4-wc').onchange=()=>g('#g4-search').click();
     g('#g4-part').onkeyup=e=>{if(e.key==='Enter')g('#g4-search').click();};   // 도번·자도번은 즉시필터(위)
@@ -822,15 +839,22 @@ SCREEN.gagongprog420=(c)=>{
       const done=()=>{const el=c.querySelector('#g4-selinfo');
         if(el){const o=el.innerHTML;el.innerHTML=`<b style="color:#1c7c3a">${what} 복사됨</b>`;
                setTimeout(()=>{el.innerHTML=o;},1400);}};
-      if(navigator.clipboard&&navigator.clipboard.writeText){
+      /* ★보안컨텍스트일 때만 clipboard API 를 쓴다(2026-09-08).
+           운영 184 는 http://200.200.200.184:8010 = **비보안** 이라 navigator.clipboard 가
+           막힌다. 종전엔 그래도 writeText 를 먼저 부르고 실패하면 fb() 로 넘어갔는데,
+           그 거부(reject)는 **비동기**라 사용자 제스처(Ctrl+C) 밖에서 fb 가 돈다
+           → execCommand('copy') 가 브라우저에 막혀 조용히 아무것도 복사가 안 된다.
+           ⟹ isSecureContext 가 아니면 처음부터 동기 fb() 로 간다(제스처 안에서 실행). */
+      if(window.isSecureContext&&navigator.clipboard&&navigator.clipboard.writeText){
         navigator.clipboard.writeText(txt).then(done,()=>fb());
       }else fb();
       function fb(){   // 비보안 컨텍스트(http)는 clipboard API 가 막힌다
         const ta=document.createElement('textarea'); ta.value=txt;
         ta.style.cssText='position:fixed;left:-9999px;top:0';
-        document.body.appendChild(ta); ta.select();
-        try{document.execCommand('copy');done();}catch(_){alert('복사에 실패했습니다.');}
-        ta.remove();}
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        let ok=false; try{ok=document.execCommand('copy');}catch(_){}
+        ta.remove();
+        if(ok)done(); else alert('복사에 실패했습니다.');}
     };
     const _copySel=()=>_toClip(_selText(),'선택영역');
     const _copyAll=()=>{
@@ -842,16 +866,30 @@ SCREEN.gagongprog420=(c)=>{
         for(let i=0;i<rs.length;i++)out.push([...rs[i].cells].map(td=>(td.innerText||'').trim()).join('\t'));});
       _toClip(out.join('\n'),`전체 ${nf(out.length-1)}행`);
     };
-    // Ctrl+C — 선택영역이 있을 때만 가로챈다(없으면 브라우저 기본 동작).
+    /* Ctrl+C — 선택영역이 있을 때만 가로챈다(없으면 브라우저 기본 동작).
+       ★2026-09-08 document 로 옮김(사용자 "컨트롤+C 하면 복사를 하게 해줘, 왜 안되지").
+         종전엔 c(tabindex=-1)에 keydown 을 걸었는데, 복사드래그 mousedown 이
+         e.preventDefault() 를 부른다 → **포커스가 표로 오지 않는다**. 그래서 칸을
+         칠해놓고("복사선택 N칸" 까지 떠도) Ctrl+C 를 누르면 c 는 keydown 을 아예
+         못 받았다 — 무반응의 정체. 460 키팅에서 2026-09-04 에 같은 증상·같은 원인으로
+         이미 고쳤던 것(screens.prod.js §kt cpkey)을 여기에도 똑같이 적용한다.
+       ⟹ document 에서 받고, ①이 화면이 화면에 붙어있고 ②칠해진 칸이 있고
+          ③입력칸에서 누른 게 아닐 때만 가로챈다(입력칸 텍스트 복사는 그대로 살린다).
+       ★최신 핸들러는 c._g4CopySel 로 부른다 — 이 리스너는 화면당 1회만 달리므로
+         옛 클로저를 붙잡고 있으면 다시 그린 뒤 옛 표를 복사한다. */
+    c._g4CopySel=_copySel;
     if(!c.dataset.cpkey){
       c.dataset.cpkey='1';
-      c.addEventListener('keydown',ev=>{
-        if((ev.ctrlKey||ev.metaKey)&&(ev.key==='c'||ev.key==='C')){
-          if(!c.querySelector('td.g4cp,td.g4sel'))return;
-          ev.preventDefault(); _copySel();}
-      });
-      c.setAttribute('tabindex','-1');    // keydown 을 받으려면 포커스 가능해야 한다
-      c.style.outline='none';
+      c.setAttribute('tabindex','-1'); c.style.outline='none';
+      const onKey=ev=>{
+        if(!((ev.ctrlKey||ev.metaKey)&&(ev.key==='c'||ev.key==='C')))return;
+        if(!c.isConnected||!c.offsetParent)return;          // 다른 탭이 떠 있으면 무시
+        const t=ev.target;
+        if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'||t.isContentEditable))return;
+        if(!c.querySelector('td.g4cp,td.g4sel'))return;     // 칠해진 범위가 없으면 기본 동작
+        ev.preventDefault(); if(c._g4CopySel)c._g4CopySel();};
+      // document 하나만 — c 에도 걸면 keydown 이 버블링돼 두 번 복사된다.
+      document.addEventListener('keydown',onKey);
     }
 
 
@@ -1356,7 +1394,8 @@ SCREEN.gagongmove580=(c)=>{
   // ★조회엔진 = 레거시 SP(SP_PR_가공창고_이동계획_260213) 직접호출. 기본 인자도 레거시와 동일(P2/IS0001/%).
   // puPart(레거시 as_pu_part_code) = 입고 자재창고. 항상 IS0001 이라 조건칸에서 뺐다(2026-08-23) — SP 인자로만 사용.
   // ★2026-08-24 기간 드롭다운 1~14일 선택 가능. 기본 2일(기준일 포함) → to = from + 1일.
-  // ★기본 소스 = 신규DB(웹계획). 레거시 대조는 소스를 nx 로 바꿔서 본다(2026-08-26).
+  // ★소스 = 신규DB(웹계획) **고정**(2026-09-08 사용자 확정, 드롭다운 제거).
+  //   종전 '우리(nx)' 옵션은 이름과 달리 레거시 dbo SP 직접호출이라 컷오버에 죽는 경로였다.
   // ★기준일 = 마지막 계획업로드의 일자축 첫날(planBaseIso, 2026-08-28 사용자 확정)
   const _mb0=planBaseIso(), _mbT=new Date(_mb0+'T00:00:00');
   const st={from:_mb0,to:iso(new Date(_mbT.getTime()+1*864e5)),wc:'P2',dest:'',puPart:'IS0001',item:'',part:'',mv:'이동필요',gigan:2,src:'new',
@@ -1727,9 +1766,7 @@ SCREEN.gagongmove580=(c)=>{
                        box-shadow:inset 0 0 0 999px rgba(255,236,179,.38)}
      </style>
      <div class="page-title">🚚 가공창고 이동계획 <span style="font-size:12px;color:var(--muted);font-weight:400">가공창고→자재창고 이동필요 · 자도번LIST 묶음</span></div>
-     <div class="page-sub">${st.src==='new'
-       ?'조회엔진 = <b>복제 SP</b> <code>SP_PR_가공창고_이동계획_WEBPLAN</code> — <b>계획원천만 웹편성</b>(<code>nx.plan_part_dtl</code>)으로 치환, 색상·자도번LIST·재고충당 로직은 레거시 그대로.'
-       :'조회엔진 = <b>레거시 SP</b> <code>SP_PR_가공창고_이동계획_260213</code> 직접호출 → 값·색상·자도번LIST 모두 레거시와 동일.'} 셀 <b>드래그 선택</b>(<b>Ctrl+클릭/드래그</b>=여러 곳 추가선택 · 도번칸 클릭=그 행 전체) 후 "가공자재 이동처리"로 이동전표 발행. 선택하면 <b>계획·미이동 수량</b>이 우측에 합산됩니다. ${st.src==='new'?'🟣 신규DB(웹계획)':'🔴 라이브 조회'} / 🟢 발행은 nx</div>
+     <div class="page-sub">조회엔진 = <b>복제 SP</b> <code>SP_PR_가공창고_이동계획_WEBPLAN</code> — <b>계획원천만 웹편성</b>(<code>nx.plan_part_dtl</code>)으로 치환, 색상·자도번LIST·재고충당 로직은 레거시 그대로. 셀 <b>드래그 선택</b>(<b>Ctrl+클릭/드래그</b>=여러 곳 추가선택 · 도번칸 클릭=그 행 전체) 후 "가공자재 이동처리"로 이동전표 발행. 선택하면 <b>계획·미이동 수량</b>이 우측에 합산됩니다. 재고(ASSY·자재·생산)는 실시간 잔액. 발행은 nx</div>
      <div class="toolbar" style="flex-wrap:wrap;gap:6px;align-items:center">
        <label class="tl">기준일자</label><input class="inp" type="date" id="mv-from" value="${st.from}"> ~ <input class="inp" type="date" id="mv-to" value="${st.to}">
        <label class="tl">가공창고</label><select class="inp" id="mv-wc" style="width:100px"${isSheet?' disabled':''}><option value="">% 전체</option><option value="P1"${st.wc==='P1'?' selected':''}>P1 가공</option><option value="P2"${st.wc==='P2'?' selected':''}>P2 가공</option></select>
@@ -1754,7 +1791,11 @@ SCREEN.gagongmove580=(c)=>{
        <label class="tl">구분</label>
        <label class="rl"><input type="radio" name="mv-gubun" value="이동계획"${st.gubun==='이동계획'?' checked':''}> 이동계획</label>
        <label class="rl"><input type="radio" name="mv-gubun" value="이동전표"${st.gubun==='이동전표'?' checked':''}> 이동전표</label>
-       <label class="tl">소스</label><select class="inp src-new" id="mv-src" data-src="${esc(st.src)}" style="width:auto;min-width:150px" title="신규DB(웹계획)=복제 SP(계획원천만 웹편성 nx.plan_part_dtl, 나머지 로직은 레거시 그대로) / 우리(nx)=레거시 SP 직접호출"><option value="new"${st.src==='new'?' selected':''}>🟣 신규DB(웹계획)</option><option value="nx"${st.src!=='new'?' selected':''}>🟢 우리(nx)</option></select>
+       <!-- ★소스 드롭다운 제거(2026-09-08 사용자 확정) — 신규DB(웹계획) 고정.
+            웹 기준(웹편성 계획 nx.plan_part_dtl)으로 운영하므로, 대사용이던 '우리(nx)'를
+            실무 화면에 노출할 필요가 없다(410 파트별계획·420 가공진척과 동일 조치).
+            ※'우리(nx)' 는 이름과 달리 **레거시 dbo SP 직접호출**이라 컷오버에 죽는 경로였다.
+            st.src 는 'new' 로 고정(초기값). API 는 src 를 그대로 받으므로 백엔드 변경 없음. -->
        <button class="btn" id="mv-search">🔍 조회</button>
        ${isSheet?'':'<button class="btn" id="mv-col" title="컬럼 숨김·순서 (헤더 우클릭으로도 열림)">항목보기</button>'}
        ${isSheet?'':'<button class="btn xls" id="mv-xls" title="조회 결과를 화면과 같은 색상으로 엑셀 저장">엑셀</button>'}
@@ -1767,11 +1808,8 @@ SCREEN.gagongmove580=(c)=>{
     // 서버 재조회 = 기간·가공창고·생산파트·사급업체 변경 시에만. 그 외(도번/자도번/이동필요/입고확인)는 즉시 클라이언트 필터.
     const refilter=()=>{isSheet?applySheetFilter():applyFilter();draw();};
     g('#mv-search').onclick=()=>{st.from=g('#mv-from').value;st.to=g('#mv-to').value;
-      if(!isSheet){st.wc=g('#mv-wc').value.trim();st.dest=g('#mv-dest').value.trim();
-        const sv=g('#mv-src');if(sv)st.src=sv.value;}
+      if(!isSheet){st.wc=g('#mv-wc').value.trim();st.dest=g('#mv-dest').value.trim();}
       st.item=g('#mv-item').value.trim();st.part=g('#mv-part').value.trim();load();};
-    // 소스는 고르는 즉시 색을 바꾼다(실제 반영은 [조회]).
-    {const sv=g('#mv-src');if(sv)sv.onchange=e=>{e.target.dataset.src=e.target.value;};}
     {const xb=g('#mv-xls');if(xb)xb.onclick=exportXls;}   // ★엑셀(색상 유지)
     /* ★항목보기 버튼 — 실패를 삼키지 않는다(420 과 같은 이유:
          예외가 나면 창이 조용히 안 떠서 원인을 알 수 없다). */
@@ -1940,13 +1978,16 @@ SCREEN.gagongmove580=(c)=>{
         const done=()=>{const el=c.querySelector('#mv-cnt');
           if(el){const o=el.innerHTML;el.innerHTML=`<b style="color:#1c7c3a">${what} 복사됨</b>`;
                  setTimeout(()=>{el.innerHTML=o;},1400);}};
-        if(navigator.clipboard&&navigator.clipboard.writeText)
+        // ★비보안(http 운영 184)은 clipboard API 가 막히고 그 거부는 비동기 —
+        //   제스처 밖에서 fb 가 돌면 execCommand 도 막힌다. 처음부터 동기 fb(2026-09-08).
+        if(window.isSecureContext&&navigator.clipboard&&navigator.clipboard.writeText)
           navigator.clipboard.writeText(txt).then(done,()=>fb()); else fb();
         function fb(){const ta=document.createElement('textarea'); ta.value=txt;
           ta.style.cssText='position:fixed;left:-9999px;top:0';
-          document.body.appendChild(ta); ta.select();
-          try{document.execCommand('copy');done();}catch(_){alert('복사에 실패했습니다.');}
-          ta.remove();}
+          document.body.appendChild(ta); ta.focus(); ta.select();
+          let ok=false; try{ok=document.execCommand('copy');}catch(_){}
+          ta.remove();
+          if(ok)done(); else alert('복사에 실패했습니다.');}
       };
       const copySel=()=>toClip(selText(),'선택영역');
       const copyAll=()=>{
@@ -1957,13 +1998,19 @@ SCREEN.gagongmove580=(c)=>{
           out.push([...tr.cells].map(td=>(td.innerText||'').trim()).join('\t'));});
         toClip(out.join('\n'),`전체 ${out.length-1}행`);
       };
+      // ★Ctrl+C 는 document 에서 받는다 — 범위선택 mousedown 의 preventDefault 때문에
+      //   c 에 포커스가 오지 않아 c.onkeydown 은 아예 안 불린다(2026-09-08, 420 과 동일 수정).
+      c._mvCopySel=copySel;
       if(!c.dataset.cpkey){
         c.dataset.cpkey='1';
-        c.addEventListener('keydown',ev=>{
-          if((ev.ctrlKey||ev.metaKey)&&(ev.key==='c'||ev.key==='C')){
-            if(!c.querySelector('td.mvcp,td.mv-cell.sel'))return;
-            ev.preventDefault(); copySel();}});
         c.setAttribute('tabindex','-1'); c.style.outline='none';
+        document.addEventListener('keydown',ev=>{
+          if(!((ev.ctrlKey||ev.metaKey)&&(ev.key==='c'||ev.key==='C')))return;
+          if(!c.isConnected||!c.offsetParent)return;
+          const t=ev.target;
+          if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'||t.isContentEditable))return;
+          if(!c.querySelector('td.mvcp,td.mv-cell.sel'))return;
+          ev.preventDefault(); if(c._mvCopySel)c._mvCopySel();});
       }
       /* 우클릭 메뉴 — ★실행도 mousedown 에서(410·420 과 같은 함정 회피:
          바깥클릭 닫기가 mousedown 이라 click 은 죽은 노드에 떨어진다). */
@@ -2522,7 +2569,8 @@ SCREEN.gagongset280=(c)=>{
     c.innerHTML=`
      <style>.gs-tbl th,.gs-tbl td{text-align:center!important}</style>
      <div class="page-title">📦 가공세트재고관리 <span style="font-size:12px;color:var(--muted);font-weight:400">거래처별 세트재고 현황 · 조정</span></div>
-     <div class="page-sub">현재고 <code>PU_T_SET_GAGONG_STOCK</code>(레거시 <code>dw_pu_stock_280</code> 동일) + 웹 조정분 합산 · 조정이력 <code>PU_T_SET_STOCK_MAINT_GAGONG</code>. 🔴 라이브 조회 / 🟢 조정등록은 nx</div>
+     <!-- ★배지 정정(2026-09-08) — 조회도 nx 다(백엔드 라이브 직독 0곳). 종전 '🔴 라이브 조회' 는 오표기. -->
+     <div class="page-sub">현재고 <code>nx.PU_T_SET_GAGONG_STOCK</code>(레거시 <code>dw_pu_stock_280</code> 동일) + 웹 조정분 합산 · 조정이력 <code>nx.PU_T_SET_STOCK_MAINT_GAGONG</code>. 조회·조정등록 모두 nx</div>
      <div class="toolbar" style="flex-wrap:wrap;gap:6px;align-items:center">
        <label class="tl">세트거래처</label><select class="inp" id="gs-cust" style="width:200px"><option value="">전체 거래처</option>${st.optCusts.map(o=>`<option value="${esc(o.code)}"${st.cust===o.code?' selected':''}>${esc(o.nm)}(${esc(o.code)})</option>`).join('')}</select>
        <label class="tl">도번</label><input class="inp" id="gs-item" list="gs-iteml" value="${esc(st.item)}" style="width:150px" placeholder="도번" autocomplete="off"><datalist id="gs-iteml">${itOpts}</datalist>
@@ -2931,14 +2979,18 @@ SCREEN.gagongmatplan070=(c)=>{
         if(el){const o=el.innerHTML;el.dataset.busy='1';
                el.innerHTML=`<b style="color:#1c7c3a">${what} 복사됨</b>`;
                setTimeout(()=>{el.innerHTML=o;delete el.dataset.busy;},1400);}};
-      if(navigator.clipboard&&navigator.clipboard.writeText)
+      // ★비보안(http 운영 184)은 clipboard API 가 막히고 그 거부는 **비동기** —
+      //   제스처(Ctrl+C) 밖에서 fb 가 돌면 execCommand 도 막혀 조용히 실패한다.
+      //   ⟹ isSecureContext 가 아니면 처음부터 동기 fb()(2026-09-08).
+      if(window.isSecureContext&&navigator.clipboard&&navigator.clipboard.writeText)
         navigator.clipboard.writeText(txt).then(done,()=>fb()); else fb();
       function fb(){   // 비보안 컨텍스트(http)는 clipboard API 가 막힌다
         const ta=document.createElement('textarea'); ta.value=txt;
         ta.style.cssText='position:fixed;left:-9999px;top:0';
-        document.body.appendChild(ta); ta.select();
-        try{document.execCommand('copy');done();}catch(_){alert('복사에 실패했습니다.');}
-        ta.remove();}
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        let ok=false; try{ok=document.execCommand('copy');}catch(_){}
+        ta.remove();
+        if(ok)done(); else alert('복사에 실패했습니다.');}
     };
     const copySel=()=>toClip(selText(),'선택영역');
     /* ★전체 복사는 DOM 이 아니라 st.rows 에서 만든다 — 점진 렌더 때문에 화면에는
@@ -2953,13 +3005,19 @@ SCREEN.gagongmatplan070=(c)=>{
         out.push(line.join('\t'));});
       toClip(out.join('\n'),`전체 ${nf(st.rows.length)}행`);
     };
+    // ★Ctrl+C 는 document 에서 받는다 — 범위선택 mousedown 의 preventDefault 때문에
+    //   c 에 포커스가 오지 않아 c.onkeydown 은 아예 안 불린다(2026-09-08, 420 과 동일 수정).
+    c._m7CopySel=copySel;
     if(!c.dataset.cpkey){
       c.dataset.cpkey='1';
-      c.addEventListener('keydown',ev=>{
-        if((ev.ctrlKey||ev.metaKey)&&(ev.key==='c'||ev.key==='C')){
-          if(!c.querySelector('td.m7cp'))return;
-          ev.preventDefault(); copySel();}});
       c.setAttribute('tabindex','-1'); c.style.outline='none';
+      document.addEventListener('keydown',ev=>{
+        if(!((ev.ctrlKey||ev.metaKey)&&(ev.key==='c'||ev.key==='C')))return;
+        if(!c.isConnected||!c.offsetParent)return;
+        const t=ev.target;
+        if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'||t.isContentEditable))return;
+        if(!c.querySelector('td.m7cp'))return;
+        ev.preventDefault(); if(c._m7CopySel)c._m7CopySel();});
     }
     /* 우클릭 메뉴 — ★실행도 mousedown 에서(410·420·580 과 같은 함정 회피:
        바깥클릭 닫기가 mousedown 이라 click 은 죽은 노드에 떨어진다). */

@@ -479,9 +479,23 @@ def dailypurissue(date: str = Query(""), frm: str = Query(""), nocache: str = Qu
             WHERE domain=? AND ptype='M' AND period=(SELECT MAX(period) FROM nx.stock_snapshot WHERE domain=? AND ptype='M' AND period<?)""", dom, dom, ym)
         b = float(_lcur.fetchone()[0] or 0)
         # 기말 = 조회일 이하 최신 일마감(D, period<=d6). 없으면 기초(변동0).
-        _lcur.execute("""SELECT ISNULL(SUM(stock_amt),0) FROM nx.stock_snapshot
-            WHERE domain=? AND ptype='D' AND period=(SELECT MAX(period) FROM nx.stock_snapshot WHERE domain=? AND ptype='D' AND period<=?)""", dom, dom, d6)
-        e = float(_lcur.fetchone()[0] or 0)
+        # ★stale 스킵 — 여기는 성능 때문에 스냅샷을 **직독**한다(수불장 ledger 는 월 전체 재생이라 30초).
+        #   그래서 기초 해석기(_mv_base/_prd_base/_sal_base)를 안 거치는 **유일한 우회 경로**다.
+        #   잠정 일마감이 낡았는데 그대로 SUM 하면 **조용히 틀린 금액**이 화면에 뜬다.
+        #   ⟹ 마감 엔진과 **같은 공용 판정**(close._fp_stale)을 써서 낡은 일마감은 건너뛰고
+        #      그 다음 최신 일마감으로 내려간다. 다 낡았으면 기초(월마감)를 쓴다.
+        #   (판정을 여기서 따로 짜면 또 갈린다 — §0-★★ "같은 규칙은 한 곳에서")
+        from routers.close import _fp_stale
+        _lcur.execute("""SELECT TOP 5 period FROM nx.period_close
+            WHERE domain=? AND ptype='D' AND close_flag=1 AND period<=? ORDER BY period DESC""", dom, d6)
+        e = 0.0
+        for (_p,) in _lcur.fetchall():
+            if _fp_stale(_lcur, dom, 'D', _p):
+                continue
+            _lcur.execute("""SELECT ISNULL(SUM(stock_amt),0) FROM nx.stock_snapshot
+                WHERE domain=? AND ptype='D' AND period=?""", dom, _p)
+            e = float(_lcur.fetchone()[0] or 0)
+            break
         return round(b), round(e if e else b)
     try: base_m, cur_m = _snapsum('MAT')
     except Exception: pass
@@ -746,6 +760,26 @@ def _prev_ym(ym):
     yy, mm = int(ym[:2]), int(ym[2:4])
     return f"{(yy-1):02d}12" if mm == 1 else f"{yy:02d}{(mm-1):02d}"
 
+
+def _anchor_ym(ym, sc, pw):
+    """★기초 앵커월 = **직전월이 없으면 그 이전의 '가장 최근 있는 월'** 로 내려간다(롤포워드).
+
+       왜: 월마감이 밀리면 직전월 스냅샷이 없고, 그러면 bf=0 이 되어 그 달 출고만 쌓여
+       화면이 통째로 음수가 된다(실측 2026-09-08: 2608 없음 → 9월 조회 음수 903품목·합계 −184,724).
+       CUTOVER_RETRY_REQUIREMENTS §④ "마감 미완이어도 이전 시점으로 롤포워드" 의 구현.
+
+       반환 = (앵커월 YYMM, 무브 시작 하한 YYMMDD 배타)  — 앵커월 다음날부터 조회일까지 누적한다.
+       앵커가 아예 없으면 (None, '000000') → 기초 0(현행과 동일, 데이터 자체가 없는 경우)."""
+    want = _prev_ym(ym[:4])
+    try:
+        got = _scalar(f"""SELECT MAX(stock_yymm) FROM PARTNER_ERP_TEST3.nx.pu_t_month_stock_wh WITH(NOLOCK)
+                           WHERE cust_code='{sc}' AND ISNULL(gagong_proc_code,'')='{pw}'
+                             AND stock_yymm<='{want}'""")
+    except Exception:
+        got = None
+    a = str(got or "").strip()
+    return (a or None), ((a + "99") if a else "000000")
+
 # ※2026-09-01 시도했다가 되돌림 — 웹원장(nx.stock_ledger)을 이 화면에 UNION 하려 했으나
 #   **중복계상**이 확인되어 중단했다. 같은 물량이 양쪽 원장에 모두 있다:
 #     실측 8월 이후 웹원장 957행 중 693행이 미러에도 동일 (자재·일자·TAG·수량 일치)
@@ -761,7 +795,11 @@ def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q="", src="nx")
     sc = "".join(ch for ch in str(stock_cust or "Z99990") if ch.isalnum()) or "Z99990"
     pw = "".join(ch for ch in str(part_wh or "IS0001") if ch.isalnum()) or "IS0001"
     y01, y99 = from6, to6
-    pv = _prev_ym(from6[:4]); pv99 = pv + "99"
+    # ★2026-09-08 롤포워드 — 직전월 스냅샷이 없으면 **있는 가장 최근 월**로 내려가 그 다음날부터 누적한다.
+    #   종전엔 pv=_prev_ym() 고정이라 그 달이 없으면 bf=0 이 되어 화면이 통째로 음수였다.
+    pv, pv99 = _anchor_ym(from6, sc, pw)
+    if not pv:                       # 앵커 자체가 없으면 종전과 동일(기초 0)
+        pv = _prev_ym(from6[:4]); pv99 = pv + "99"
     INSP = "NOT(ISNULL(a.insp_flag,'N') IN ('S','F') AND ISNULL(a.insp_proc_flag,'0')<>'1')"
     W = f"ISNULL(a.wh_cust_code,'Z99990')='{sc}' AND ISNULL(a.gagong_proc_code,'')='{pw}'"
     CUST = "ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust m WHERE m.cust_code=a.cust_code),'')"
@@ -793,10 +831,10 @@ def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q="", src="nx")
  UNION ALL SELECT UPPER(a.item_code), a.move_ymd, 0,0,0, CASE WHEN a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}' THEN a.move_qty ELSE 0 END,'창고재고입고',ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust m WHERE m.cust_code=CASE WHEN a.to_cust_code='{sc}' THEN a.fr_cust_code ELSE a.to_cust_code END),''),'','',CONVERT(varchar(19),a.insert_datetime,120) FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MOVE a WHERE a.move_ymd>='{y01}' AND a.move_ymd<='{y99}' AND a.move_qty<>0 AND a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}'{MFitem}
  UNION ALL SELECT UPPER(a.item_code), a.move_ymd, 0,0,0, CASE WHEN a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}' THEN a.move_qty*-1 ELSE 0 END,'창고재고출고',ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust m WHERE m.cust_code=CASE WHEN a.to_cust_code='{sc}' THEN a.fr_cust_code ELSE a.to_cust_code END),''),'','',CONVERT(varchar(19),a.insert_datetime,120) FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MOVE a WHERE a.move_ymd>='{y01}' AND a.move_ymd<='{y99}' AND a.move_qty<>0 AND a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}'{MFitem}
  UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty*-1,0,0,
-   CASE a.maint_tag WHEN '1' THEN '불량' WHEN '4' THEN '생산사용'+IIF(a.maint_qty>0,'취소','') WHEN '5' THEN '협력업체판매' WHEN '6' THEN '일반간판출하' WHEN '8' THEN '라인무상공급' WHEN 'A' THEN '개발불출' WHEN 'B' THEN IIF(a.out_wh_gubun='1','생산창고출고','영업창고출고') WHEN 'J' THEN '출하'+IIF(a.maint_qty>0,'취소','') ELSE '' END,
+   CASE a.maint_tag WHEN '1' THEN '불량' WHEN '4' THEN '생산사용'+IIF(a.maint_qty>0,'취소','') WHEN '5' THEN '협력업체판매' WHEN '6' THEN '일반간판출하' WHEN '8' THEN '라인무상공급' WHEN 'A' THEN '개발불출' WHEN 'B' THEN IIF(a.out_wh_gubun='1','생산창고출고','영업창고출고') WHEN 'J' THEN '출하'+IIF(a.maint_qty>0,'취소','') WHEN 'U' THEN '자재반품' ELSE '' END,
    ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust m WHERE m.cust_code=a.cust_code AND a.cust_code<>'{sc}'),''), a.work_order,
    ISNULL(a.item_code,''), CONVERT(varchar(19),a.insert_datetime,120)
-  FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag IN ('1','4','5','6','8','A','B','J') AND a.maint_qty<>0 AND {W}{MFmat}
+  FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag IN ('1','4','5','6','8','A','B','J','U') AND a.maint_qty<>0 AND {W}{MFmat}
  UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty,0,0,'도입-판매',{CUST},a.work_order,ISNULL(a.item_code,''),CONVERT(varchar(19),a.insert_datetime,120) FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint_c a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_qty<>0 AND a.wh_cust_code='{sc}' AND a.part_code='{pw}' AND a.division='Q'{MFmat}
 """
     BF = f"""
@@ -807,7 +845,7 @@ def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q="", src="nx")
  UNION ALL SELECT UPPER(a.mat_code), a.cut_qty FROM (SELECT * FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS)) a WHERE a.cut_ymd>'{pv99}' AND a.cut_ymd<'{y01}' AND {W}{MFmat}
  UNION ALL SELECT UPPER(a.mat_code), a.maint_qty FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag='2' AND {W}{MFmat}
  UNION ALL SELECT UPPER(a.item_code), (CASE WHEN a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}' THEN a.move_qty*-1 ELSE 0 END)+(CASE WHEN a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}' THEN a.move_qty ELSE 0 END) FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MOVE a WHERE a.move_ymd>'{pv99}' AND a.move_ymd<'{y01}' AND ('{sc}' IN (a.fr_cust_code,a.to_cust_code)) AND ('{pw}' IN (a.fr_gagong_proc_code,a.to_gagong_proc_code)){MFitem}
- UNION ALL SELECT UPPER(a.mat_code), a.maint_qty FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag IN ('1','4','5','6','8','A','B','J') AND {W}{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), a.maint_qty FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag IN ('1','4','5','6','8','A','B','J','U') AND {W}{MFmat}
 """
     _c1, moves = _rows(f"SELECT mat, ymd, inq i, outq o, etc e, mv, div, cust, ISNULL(wo,'') wo, ISNULL(itm,'') itm, ISNULL(wt,'') wt FROM ({LINES}) x")
     _c2, bfrows = _rows(f"SELECT mat, SUM(sq) bf FROM ({BF}) b GROUP BY mat")
@@ -824,12 +862,32 @@ def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q="", src="nx")
             lastin[m] = y
         if float(r["o"] or 0) > 0 and y > lastout.get(m, ""):   # 최종출고일(출고>0 최대일)
             lastout[m] = y
-    mats = set(bfm) | set(net)
+    # ★★2026-09-08 — 재고 기준을 레거시(w_pu_stock_060_wh)와 동일하게 맞춘다(대표 확정).
+    #   레거시: 조회 종료일이 **오늘이면 실시간 현재재고(잔액)**, **과거면 그날까지의 이력합계**.
+    #   웹은 종전에 기간과 무관하게 늘 이력누적(bf+net)이라 화면이 실재고와 갈렸다.
+    #     실측 2026-09-08: 2608 월스냅샷이 없어 bf=0 → 9월 출고만 쌓여 화면 합계 −184,724,
+    #     음수 903품목. 그런데 잔액은 +8,836,965 이고 음수는 1품목뿐이었다(= 표시 문제).
+    #     시료 4A00742A: 화면 −1,970 / 잔액 487 (= 2607기초 1,565 + 무브 −1,078, 정확히 일치).
+    #   ★MAINT_QTY 는 출고가 **이미 음수로 저장**된다 — 부호를 또 뒤집으면 안 된다.
+    #     저장부호 그대로 + 직전월말 기초로 롤포워드 = 잔액과 96.0% 일치(실측).
+    #   ⟹ 종료일이 오늘이면 잔액(PU_T_MAT_STOCK_WH)을 정본으로 쓴다. 좌측 '재고' 컬럼만 바뀌고
+    #     우측 이력·입출고 집계는 그대로다(레거시도 동일 — 우측은 기간 이력, 좌측은 기준일 재고).
+    _today6 = _scalar("SELECT FORMAT(GETDATE(),'yyMMdd')") or ""
+    _live_basis = bool(_today6) and (str(to6) >= _today6)
+    balm = {}
+    if _live_basis:
+        _cb, brows = _rows(f"""SELECT UPPER(RTRIM(MAT_CODE)) mat, SUM(STOCK_QTY) q
+                                 FROM PARTNER_ERP_TEST3.nx.PU_T_MAT_STOCK_WH WITH(NOLOCK)
+                                WHERE CUST_CODE='{sc}' AND ISNULL(GAGONG_PROC_CODE,'')='{pw}'
+                                GROUP BY UPPER(RTRIM(MAT_CODE))""")
+        balm = {r["mat"]: float(r["q"] or 0) for r in brows}
+    mats = set(bfm) | set(net) | set(balm)
     stock = []
     for m in sorted(mats):
-        bf = bfm.get(m, 0); st = bf + net.get(m, 0)
+        bf = bfm.get(m, 0)
+        st = balm.get(m, 0) if _live_basis else (bf + net.get(m, 0))
         stock.append({"mat": m, "nm": nm.get(m, ""), "cust": vend.get(m, ""), "stock": round(st, 4), "bf": round(bf, 4), "lastin": lastin.get(m, ""), "lastout": lastout.get(m, ""), "part": pw})
-    return stock, moves
+    return stock, moves, {"basis": ("live" if _live_basis else "hist"), "asof": (_today6 if _live_basis else to6)}
 
 @live_router.get("/matinout")
 def matinout(from_ymd: str = Query(""), to_ymd: str = Query(""), stock_cust: str = Query("Z99990"), part_wh: str = Query("IS0001"), q: str = Query(""), source: str = Query("live")):
@@ -843,8 +901,10 @@ def matinout(from_ymd: str = Query(""), to_ymd: str = Query(""), stock_cust: str
     #   nx(기본) = 라이브 수불 + 웹실적 / live = 라이브만 / ledger = 웹 자체원장(진단용)
     if source == "ledger":
         return _nx_screen("MAT", from6, to6)
-    stock, moves = _matinout(from6, to6, stock_cust, part_wh, q, src=source)
-    return {"from_ymd": from6, "to_ymd": to6, "stock": stock, "moves": moves, "stock_cust": stock_cust, "part_wh": part_wh, "q": q}
+    stock, moves, basis = _matinout(from6, to6, stock_cust, part_wh, q, src=source)
+    # basis.basis = 'live'(오늘 = 실시간 잔액) / 'hist'(과거 = 그날까지 이력합계) · asof = 재고기준일
+    return {"from_ymd": from6, "to_ymd": to6, "stock": stock, "moves": moves, "stock_cust": stock_cust,
+            "part_wh": part_wh, "q": q, "basis": basis["basis"], "asof": basis["asof"]}
 
 # ================= 자재출고관리 (구매/자재, w_pu_stock_150 / dw_pu_stock_150) — 자재개별출고 조회 =================
 # ★레거시 정본(dw_pu_stock_150): PU_T_STOCK_MAINT WHERE MAINT_TAG IN('4','B') + 기간. 4=생산사용(축관)·B=자재개별출고(파트출고).
@@ -880,7 +940,11 @@ def stockissue_view(from_ymd: str = Query(""), to_ymd: str = Query(""), pn: str 
         CASE ISNULL(a.out_wh_gubun,'') WHEN '1' THEN '생산창고' WHEN '2' THEN '영업창고' ELSE '' END out_wh_nm,
         ISNULL((SELECT gagong_proc_desc FROM PARTNER_ERP_TEST3.nx.pr_m_proc_gagong g WHERE g.gagong_proc_code=a.to_gagong_proc_code),a.to_gagong_proc_code) to_wh,
         a.mat_code mat, (a.maint_qty*-1) qty, ISNULL(a.maint_cost,0) cost, ISNULL(a.maint_amt,0) amt, ISNULL(a.remarks,'') remarks,
-        ISNULL((SELECT user_name FROM cm_m_users_info u WHERE u.user_id=a.update_user_id),a.update_user_id) usr, a.update_datetime dt
+        -- ★작성자명 = nx.app_user (2026-09-07 컷오버). 종전엔 스키마 없이 cm_m_users_info 라
+        --   기본 스키마(컷오버 후 TEST3.dbo)를 봤는데, 그 복사본은 낡았다.
+        --   계정 정본은 이제 nx.app_user 다 — user_id 가 곧 사번/이름이라 그대로 조인된다.
+        ISNULL((SELECT TOP 1 name FROM PARTNER_ERP_TEST3.nx.app_user u
+                 WHERE RTRIM(u.user_id)=RTRIM(a.update_user_id)),a.update_user_id) usr, a.update_datetime dt
       FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE {WH}
       ORDER BY a.maint_ymd DESC, a.maint_seq ASC
       OFFSET {off} ROWS FETCH NEXT {sz} ROWS ONLY"""
@@ -982,7 +1046,11 @@ def _prodinout(ym, frm=None, to=None, src="nx", inc_zero=False):
     _c1, uni = _rows(_UNI)
     _c2, bfrows = _rows(f"SELECT part, mat, SUM(sq) bf FROM ({BF}) b GROUP BY part, mat")
     _c3, moves = _rows(f"SELECT part, mat, ymd, inq, outq, etc, div, tag FROM ({CUR}) x")
-    _c4, itrows = _rows("SELECT UPPER(item_code) mat, item_desc AS item_name, item_spec, item_sgroup FROM cm_m_item")
+    # ★품명·규격 = nx.item (2026-09-07 컷오버). 종전엔 스키마 없이 cm_m_item 이라
+    #   기본 스키마(컷오버 후 TEST3.dbo)를 봤는데 **거기엔 3건뿐**이라 품명이 거의 다 빈칸이었다.
+    #   품목 정본은 nx.item(25,403건)이다 — CLAUDE.md §1-9.
+    #   컬럼 대응: item_desc → item_name · item_sgroup → sgroup.
+    _c4, itrows = _rows("SELECT UPPER(item_code) mat, item_name, item_spec, sgroup AS item_sgroup FROM PARTNER_ERP_TEST3.nx.item")
     _c5, sgrows = _rows("SELECT DETAIL_CODE cd, REPLACE(REPLACE(DETAIL_DESC,CHAR(13),''),CHAR(10),'') nm FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE='PR006'")
     _c6, pnrows = _rows("SELECT gagong_proc_code code, gagong_proc_desc nm FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG")
     im = {r["mat"]: r for r in itrows}
@@ -992,15 +1060,32 @@ def _prodinout(ym, frm=None, to=None, src="nx", inc_zero=False):
     for r in moves:
         k = (r["part"], r["mat"])
         net[k] = net.get(k, 0) + (float(r["inq"] or 0) - float(r["outq"] or 0) + float(r["etc"] or 0))
-    # ★2026-08-25 현재고 = 전월이월(BF) + 기간이동(net). 좌측·우측이 같은 근거여야 한다.
-    #   (한때 잔액 스냅샷을 정본으로 썼는데, 그러면 우측 이력 누계와 값이 어긋난다 —
-    #    실측 nx 300/1655행 불일치. 사용자는 이력이 근거라고 확인.)
-    #   nx 모드는 CUR/BF 원천을 '라이브 ∪ nx(중복배제)' 로 읽으므로 미러 지연분도 잡힌다.
-    #   유니버스는 라이브∪nx 잔액이라 어느 쪽에만 있는 품목도 목록에는 뜬다.
+    # ★★2026-09-08 재고기준 = **조회 종료일이 오늘이면 실시간 잔액, 과거면 이력합계**
+    #   (대표 확정 — 자재입출고현황과 같은 규칙. "오늘날짜면 현재재고, 어제면 이력재고 합계").
+    #   · 오늘  → nx.PR_T_MAT_STOCK_WH 잔액(파트별). 레거시 f_pr_set_mat_stock_wh 가 갱신하는
+    #             그 테이블이고, 웹도 자재출고(stock.py:469)·준비실적(ready.py)·생산실적
+    #             (prodsheet.py)·가공바코드(procbc.py) 에서 실시간으로 증감시킨다.
+    #   · 과거  → 종전대로 BF(2502 마감) + 기간이동. 그 날짜의 잔액은 남아있지 않으므로 이력이 유일한 근거.
+    #
+    #   ★왜 바꿨나 — 기초(BF)가 `stock_yymm='2502'` 고정이고 PR_T_MONTH_STOCK_WH 에는
+    #     실제로 2502 한 달치(1,700행)뿐이라, 오늘 재고를 내려고 3년 반치 전표를 매번 다시 더한다.
+    #     그 긴 누적 어디서든 어긋나면 오차가 그대로 남는다 — 실측 불일치 53조합(2.9%):
+    #       S10 MJU66929204 화면 600 / 잔액 0 · P0001 MJU66885911-3M 화면 293.62 / 잔액 346.51
+    #     자재쪽에서 같은 구조 때문에 "재고 있는데 출고가 막힌다"가 났었다([[stock-gate-must-match-screen]]).
+    #   ⟹ 오늘 재고는 실시간 잔액이 정본이다. 화면·게이트·실적이 같은 값을 봐야 한다.
+    #   ★폴백 없음(하드룰 §1-9-1) — 잔액에 없으면 0. BF+이동으로 몰래 되돌리지 않는다.
+    _today6 = _scalar("SELECT FORMAT(GETDATE(),'yyMMdd')") or ""
+    _live_basis = bool(_today6) and (str(y99) >= _today6)
+    balm = {}
+    if _live_basis:
+        _cb, brows = _rows("""SELECT RTRIM(part_code) part, UPPER(RTRIM(mat_code)) mat, SUM(stock_qty) q
+                                FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK)
+                               GROUP BY RTRIM(part_code), UPPER(RTRIM(mat_code))""")
+        balm = {(r["part"], r["mat"]): float(r["q"] or 0) for r in brows}
     stock = []
     for u in uni:
         k = (u["part"], u["mat"]); bf = bfm.get(k, 0)
-        st = bf + net.get(k, 0)
+        st = balm.get(k, 0) if _live_basis else (bf + net.get(k, 0))
         # ★0재고 숨김/표시 — inc_zero=1 이면 0 도 남긴다(2026-08-28 사용자요청).
         #   0 이어도 기간 중 입·출고가 있었으면 이력을 봐야 한다(가공이동으로 0 이 된 품목 등).
         if abs(st) <= 0.0001 and not inc_zero:
@@ -1017,7 +1102,8 @@ def _prodinout(ym, frm=None, to=None, src="nx", inc_zero=False):
                                          round(float(r["etc"] or 0), 3), r["div"], (r["tag"] or "").strip()])
     partNames = {str(r["code"]).strip(): str(r["nm"]).strip() for r in pnrows}
     stock.sort(key=lambda r: (r[0], r[2], r[1]))
-    return stock, mv, partNames
+    return stock, mv, partNames, {"basis": ("live" if _live_basis else "hist"),
+                                  "asof": (_today6 if _live_basis else y99)}
 
 @live_router.get("/prodinout")
 def prodinout(ym: str = Query(""), frm: str = Query(""), to: str = Query(""), source: str = Query("live"),
@@ -1035,9 +1121,11 @@ def prodinout(ym: str = Query(""), frm: str = Query(""), to: str = Query(""), so
     y = _ym4(ym) or (f6[:4] if f6 else None) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
     if source == "ledger":   # 웹 자체원장(stock_ledger)만 — 진단용
         r = _nx_screen("PRD", (f6 or y + "01"), (t6 or y + "31")); r["ym"] = y; return r
-    stock, moves, partNames = _prodinout(y, f6 or None, t6 or None, src=source, inc_zero=bool(inc_zero))
+    stock, moves, partNames, meta = _prodinout(y, f6 or None, t6 or None, src=source, inc_zero=bool(inc_zero))
     return {"ym": y, "frm": f6 or (y + "01"), "to": t6 or (y + "99"), "stock": stock, "moves": moves,
-            "partNames": partNames, "inc_zero": bool(inc_zero)}
+            "partNames": partNames, "inc_zero": bool(inc_zero),
+            # ★재고기준 표기(2026-09-08) — live=실시간 잔액(오늘) / hist=이력합계(과거일자)
+            "basis": meta.get("basis"), "asof": meta.get("asof")}
 
 # ================= 제품입출고현황 (영업, dw_pr_stock_110) — 제품(P/N) 마스터-디테일 =================
 # 유니버스=SA_T_ITEM_STOCK, BF=2502마감+2502~당월(고정base), 당월=[ym01,ym99]. patch_110.py 이식.
@@ -1079,9 +1167,21 @@ def _prodinvout(ym, frm=None, to=None):
     #   생산입출고(_prodinout)와 같은 이유 — BF+net 은 원천 하나만 미러가 늦어도
     #   값이 통째로 어긋나고, 0 이 되면 목록에서 사라진다(실측 nx 0행).
     #   잔액 테이블은 웹 실적/조정이 즉시 반영되는 정본이다.
+    # ★★2026-09-08 재고기준 = **조회 종료일이 오늘이면 잔액, 과거면 이력합계**
+    #   (대표 확정 — 자재·생산입출고현황과 같은 규칙).
+    #   종전엔 종료일과 무관하게 항상 잔액이라 **어제를 골라도 오늘 값**이 나왔다
+    #   (실측 오늘 74,181.00 = 어제 74,181.00 로 동일).
+    #   우측 이력은 종료일까지만 집계하는데 좌측 재고만 오늘 값이면 둘이 어긋난다 —
+    #   출하가 많은 날 과거를 조회하면 그대로 틀린 재고가 된다.
+    #   ※오늘 기준에서는 두 값이 이미 일치한다(실측 242품목 불일치 0) — 이 분기는
+    #     과거 조회를 바로잡을 뿐 오늘 값을 바꾸지 않는다.
+    #   ★폴백 없음(하드룰 §1-9-1).
+    _today6 = _scalar("SELECT FORMAT(GETDATE(),'yyMMdd')") or ""
+    _live_basis = bool(_today6) and (str(y99) >= _today6)
     stock = []
     for u in uni:
-        it = u["item"]; bf = bfm.get(it, 0); stv = float(u.get("snap") or 0)
+        it = u["item"]; bf = bfm.get(it, 0)
+        stv = float(u.get("snap") or 0) if _live_basis else (bf + net.get(it, 0))
         if abs(stv) <= 0.0001:
             continue
         d = info.get(it, {})
@@ -1094,7 +1194,8 @@ def _prodinvout(ym, frm=None, to=None):
             mv.setdefault(it, []).append([r["ymd"], round(float(r["inq"] or 0), 3), round(float(r["outq"] or 0), 3),
                                           round(float(r["etc"] or 0), 3), r["div"], (r["cust"] or "").strip()])
     stock.sort(key=lambda r: (r[2], r[0]))
-    return stock, mv
+    return stock, mv, {"basis": ("live" if _live_basis else "hist"),
+                       "asof": (_today6 if _live_basis else y99)}
 
 @live_router.get("/prodinvout")
 def prodinvout(ym: str = Query(""), frm: str = Query(""), to: str = Query(""), source: str = Query("live")):
@@ -1105,8 +1206,10 @@ def prodinvout(ym: str = Query(""), frm: str = Query(""), to: str = Query(""), s
     #   nx(기본) = 라이브 + 웹실적 / live = 라이브만 / ledger = 웹 자체원장(진단용)
     if source == "ledger":
         r = _nx_screen("ASY", (f6 or y + "01"), (t6 or y + "31")); r["ym"] = y; return r
-    stock, moves = _prodinvout(y, f6 or None, t6 or None)
-    return {"ym": y, "frm": f6 or (y + "01"), "to": t6 or (y + "99"), "stock": stock, "moves": moves}
+    stock, moves, meta = _prodinvout(y, f6 or None, t6 or None)
+    return {"ym": y, "frm": f6 or (y + "01"), "to": t6 or (y + "99"), "stock": stock, "moves": moves,
+            # ★재고기준 표기(2026-09-08) — live=실시간 잔액(오늘) / hist=이력합계(과거일자)
+            "basis": meta.get("basis"), "asof": meta.get("asof")}
 
 # ================= 출하실적현황 (영업, dw_sa_list_010) — 라인단위 =================
 @live_router.get("/shipment")
@@ -1227,6 +1330,21 @@ WHERE m.item_code IN (SELECT DISTINCT item_code FROM PARTNER_ERP_TEST3.nx.SA_T_L
 
 # ================= 생산재고조회 (생산, dw_pr_stock_040/480) — 가공(P0001)/용접(그외) 라인재고 =================
 # 원장 9-union(2502기초+당월이동), 라인별 집계. export_web_data.py prodStock 이식, 레거시 pr_m_item 조인.
+# ★재진입 가드 — 무한재귀 차단 (2026-09-08)
+#   고리: _sal_base 가 확정 스냅샷을 못 찾으면 salesstock() 으로 시드를 만든다.
+#         그런데 salesstock 이 "화면과 값을 맞추려고" _apply_ledger_price 를 부르고,
+#         그게 다시 _sal_ledger → _sal_base → salesstock … 으로 돌아온다.
+#   ⟹ 스냅샷이 **없는 구간**을 계산할 때마다 재귀. 실측: 영업 2601~2606 마감 전부 해당
+#      (영업 확정 스냅샷이 2606 부터라 그 앞은 전부 폴백으로 간다).
+#   기간 한정 버그가 아니다 — **폴백 경로 자체가 깨져 있고**, 평소엔 최근 기간에
+#   스냅샷이 있어 안 밟을 뿐이다. 컷오버 후 재구축·마감 해제 때도 그대로 재발한다.
+#   ★조용한 실패였다: RecursionError 를 잡아 한 줄 찍고 return 0 → **단가 미보정 값이
+#     그대로 저장**된다. 로그를 안 보면 모른다.
+#   가드는 (domain) 단위. 시드 계산 중에는 단가 재보정을 건너뛴다 — 시드는 수량·기초단가만
+#   쓰이고, 최종 단가는 바깥 _sal_ledger 가 이동평균으로 다시 굴린다.
+_LEDGER_PX_BUSY = set()
+
+
 def _apply_ledger_price(rows, fr6, to6, domain="PRD", keyloc=True):
     """★단가·금액을 **생산 수불장과 동일**하게 맞춘다. 맞춘 행 수를 돌려준다.
 
@@ -1239,11 +1357,15 @@ def _apply_ledger_price(rows, fr6, to6, domain="PRD", keyloc=True):
        ★대표 확정 2026-08-29: 재고조회를 수불장에 맞춘다.
          이로써 레거시 w_pr_stock_480(마스터 단가)과는 달라진다 — 그 대가를 알고 택했다.
     """
+    d = str(domain or "PRD").upper()
+    if d in _LEDGER_PX_BUSY:        # ★재진입 = 시드 계산 중 → 단가 보정 건너뜀(재귀 차단)
+        return 0
     try:
         from routers.close import ledger_cached          # ★엔드포인트와 캐시 공유
     except Exception:
         return 0
     cn = _nxc(); cur = cn.cursor()
+    _LEDGER_PX_BUSY.add(d)
     try:
         _r = ledger_cached(cur, domain, fr6, to6)        # ★(rows, breaks, basis) 3-튜플
         lrows = _r[0] if isinstance(_r, tuple) else _r
@@ -1253,6 +1375,7 @@ def _apply_ledger_price(rows, fr6, to6, domain="PRD", keyloc=True):
         print(f"[_apply_ledger_price] {type(_e).__name__}: {str(_e)[:150]}")
         return 0
     finally:
+        _LEDGER_PX_BUSY.discard(d)
         cn.close()
     # ★생산은 (품번,재고위치) 2축, 영업은 품번 1축이다(수불장 축을 그대로 따른다)
     def _k(r, loc_field="loc"):

@@ -388,8 +388,15 @@ def cost_lgcompare(ymd: str = Query('260630', description="단가기준일 YYMMD
        여러 형태 BOM 샘플링(노드수 단순→복잡) — 재료/가공/내부원가 diff + 판정(일치/불일치 전부 반환)."""
     if NxCostEngine is None:
         raise HTTPException(500, "nx_cost_engine 로드 실패")
-    eng = NxCostEngine(); cur = eng.cur
-    try:
+    # ★성능(2026-09-09) — 종전엔 여기서 `NxCostEngine()` 을 **매 요청 새로** 만들고 끝에 닫았다.
+    #   그러면 다른 원가 화면이 데워 둔 캐시를 못 쓰고 **요청마다 콜드 스타트**를 다시 겪는다.
+    #     실측(ymd=260630·n=20) : naewon 20건 38.3초 + naewon_lg 4.0초 = 42.3초
+    #                             같은 20건을 **한 번 더** 돌리면 1.3초 (전부 엔진 캐시)
+    #   close.py `_bom_engine` 이 같은 문제를 같은 방법으로 이미 고쳤다(30.5초 → 0.7초).
+    #   공용 싱글턴은 warm_all() 예열·커넥션 헬스체크·락을 갖췄다. ★닫지 않는다(공용이므로).
+    with _COST_LOCK:
+        eng = _get_cost_engine()
+        cur = eng.cur
         cur.execute("""SELECT lb.model, COUNT(*) c FROM (SELECT DISTINCT model FROM nx.lg_bom) lb
             JOIN nx.bom_header h ON h.item_code=lb.model
             JOIN nx.lg_bom g ON g.model=lb.model GROUP BY lb.model ORDER BY c""")
@@ -409,8 +416,6 @@ def cost_lgcompare(ymd: str = Query('260630', description="단가기준일 YYMMD
             except Exception as e:
                 rows.append({"item": it, "err": str(e)[:60], "ok": False})
         return {"ymd": ymd, "total": len(picks), "pass": npass, "fail": len(picks) - npass, "rows": rows}
-    finally:
-        eng.close()
 
 @router.get("/api/cost/compare")
 def cost_compare(item: str = Query(..., description="품번"),

@@ -324,9 +324,23 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
             for r in cur.fetchall(): mstr[str(r[0])] = (float(r[1] or 100), str(r[2] or ''), str(r[3] or ''), str(r[4] or ''))
             # ★검사 = INSP_FLAG IN ('S','F') → '1' 로 정규화(프론트는 '1'/'0' 으로 판정).
             #   ⛔종전엔 원값을 그대로 실어 프론트의 '1' 비교가 전건 실패 → 검사칸 항상 빈칸.
+            # ★★2026-09-08 원천을 **클린 nx.item_sub** 로 교정(대표 지시).
+            #   품목마스터 화면(w_pr_master_010 → item.py:145 s.insp_flag)이 저장하는 곳은
+            #   **nx.item_sub** 인데 여기서는 미러 nx.PR_M_ITEM_SUB 를 읽고 있었다.
+            #   ⟹ 화면에서 '유검사'로 바꿔도 발행이 못 봐서 무검사로 나갔다.
+            #   실측 2026-09-08: 공통 14,466건 중 **30건 불일치**, 대부분 클린 'F'(유검사) / 미러 'N'(무검사).
+            #     예 5210A28001C · AJR74522901-12-1 · AJR74963002-4-1 …
+            #   매핑 = F 유검사 · S 체크검사 · N/빈 무검사 (core.js:1454 화면 라벨과 동일).
+            #   ※PACK_QTY 는 클린에 없어 미러에서 따로 읽는다(아래).
+            cur.execute(f"SELECT item_code, ISNULL(insp_flag,'N') FROM PARTNER_ERP_TEST3.nx.item_sub WHERE item_code IN ({ph})", *ch)
+            _ins = {str(r[0]).strip(): str(r[1] or 'N').strip() for r in cur.fetchall()}
             cur.execute(f"SELECT ITEM_CODE, ISNULL(INSP_FLAG,'N'), ISNULL(PACK_QTY,0) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB WHERE ITEM_CODE IN ({ph})", *ch)
             for r in cur.fetchall():
-                msub[str(r[0])] = ('1' if str(r[1] or 'N').strip() in ('S', 'F') else '0', int(r[2] or 0))
+                _k = str(r[0])
+                # ★검사구분은 클린(_ins) 우선, 클린에 없는 품목만 미러값으로 폴백.
+                #   클린 nx.item_sub 는 14,466건이고 미러에만 있는 56,577건은 대부분 죽은 품목이다.
+                _f = _ins.get(_k.strip(), str(r[1] or 'N').strip())
+                msub[_k] = ('1' if _f in ('S', 'F') else '0', int(r[2] or 0))
         # 자도번LIST(레거시 f_find_cust_mat_list2 = PR_M_CUST_MAT_LIST 조회, '(1)' 제거)
         matlist = {}
         for ch in _chunks(assys):
@@ -1566,7 +1580,23 @@ def partner_deliv420_issue(request: Request, body: dict = Body(...)):
         #     (종전 주석은 "발행분 차감으로 줄고, 그 물량이 입고대기에 잡힌다"였는데
         #      두 경로가 같은 물량이라 45가 0이 됐다. _deliv420_rows 909행 참조).
         _rmap = {str(r["assy"]).strip(): r for r in res["rows"]}
-        cur.execute("SELECT ISNULL(MAX(CAST(sheet_no AS bigint)),900000)+1 FROM nx.set_input_req WHERE ISNUMERIC(sheet_no)=1")
+        # ★★2026-09-08 채번 교정 — 헤더만 보면 **번호가 재사용**된다(실사고).
+        #   종전: MAX(sheet_no) FROM set_input_req 만 조회.
+        #   명세(set_input_req_dtl)는 헤더보다 먼저 들어가거나(아래 상세 INSERT 순서),
+        #   헤더 INSERT 가 실패해도 남는다(L1604 except: pass) → **고아 명세**가 생긴다.
+        #   그 뒤 발행이 같은 번호를 다시 받아 **남의 명세와 합쳐진다**.
+        #   실측 2026-09-08: 헤더 MAX 901,199 vs 명세 MAX 901,533 (334 앞섬) · 고아 명세 670행.
+        #   실사고 sheet=901199 — 06:59:54 에 5210AP4184A(중앙정밀, BOM 무관) 20개가 남아 있었고,
+        #   10:35:14 에 발행된 ACQ30605001(미래정밀) 송장이 같은 번호를 받아 그 행을 끌어안았다.
+        #   → 거래명세표 인쇄는 1줄인데 DB 명세는 2줄, 입고 시 엉뚱한 자재 20개가 재고에 잡혔다.
+        #   ⟹ **헤더·명세 양쪽의 MAX 를 함께 본다.**
+        cur.execute("""SELECT ISNULL(MAX(v),900000)+1 FROM (
+                           SELECT MAX(CAST(sheet_no AS bigint)) v FROM nx.set_input_req
+                            WHERE ISNUMERIC(sheet_no)=1
+                           UNION ALL
+                           SELECT MAX(CAST(sheet_no AS bigint)) FROM nx.set_input_req_dtl
+                            WHERE ISNUMERIC(sheet_no)=1
+                       ) t""")
         _sh = int(cur.fetchone()[0])
         _hms = _di2.datetime.now().strftime('%H%M%S')
         for p in plan:
@@ -1591,16 +1621,23 @@ def partner_deliv420_issue(request: Request, body: dict = Body(...)):
             #   전개 = setin.py 의 검증된 dw_6 재귀 CTE 재사용(세트도번→그 거래처 자도번).
             try:
                 from routers.setin import _set_bom_expand
+                # ★★2026-09-08 — 이 번호에 **남의 명세(고아)가 이미 있으면** 지우고 시작한다.
+                #   채번을 헤더+명세 양쪽 MAX 로 고쳤어도(위), 과거에 쌓인 고아 670행이 남아 있어
+                #   그 번호대를 지날 때 다시 합쳐질 수 있다. 헤더를 방금 만든 번호이므로
+                #   이 시점에 남아 있는 같은 sheet_no 행은 정의상 우리 것이 아니다.
+                #   (실사고 sheet=901199 — 06:59 고아 1행 + 10:35 발행분이 한 송장이 됐다)
+                cur.execute("DELETE FROM nx.set_input_req_dtl WHERE sheet_no=?", str(_sh))
+                _ln = 0
                 for _m in _set_bom_expand(cur, p["assy"], cust, ymd):
                     _uq = float(_m.get("use_qty") or 0)
                     if _uq <= 0:
                         continue
+                    _ln += 1          # ★line_no 는 로컬 카운터 — 남은 행에 이어붙지 않는다
                     cur.execute("""INSERT INTO nx.set_input_req_dtl
                            (sheet_no, line_no, mat_code, use_qty, mat_qty, insp_flag, insert_datetime)
-                           SELECT ?, ISNULL(MAX(line_no),0)+1, ?, ?, ?, ?, getdate()
-                             FROM nx.set_input_req_dtl WHERE sheet_no=?""",
-                        str(_sh), _m["mat_code"], _uq,
-                        p["deliver_qty"] * _uq, (_m.get("insp_flag") or '0')[:1], str(_sh))
+                           VALUES(?,?,?,?,?,?,getdate())""",
+                        str(_sh), _ln, _m["mat_code"], _uq,
+                        p["deliver_qty"] * _uq, (_m.get("insp_flag") or '0')[:1])
             except Exception:
                 # 전개 실패로 발행 자체를 막지 않는다(헤더는 이미 정상). 상세는 소급 보정 가능.
                 pass
@@ -1710,8 +1747,12 @@ def partner_deliv420_invoice(request: Request, barcode: str = Query(...)):
             #   ⛔종전엔 '1' 과 비교해 전건 무검사로 떨어졌고 출하검사성적서가 아예 출력되지 않았다.
             #   실제 값은 F=유검사 · S=체크검사 · N/''/NULL = 무검사 (레거시 원화면 드롭다운 확인 2026-08-31,
             #   common.py:342·purmagam.py:18 등 코드베이스 전반이 ('S','F') 를 검사대상으로 쓴다).
+            # ★★2026-09-08 클린 우선(대표 지시) — 품목마스터 화면은 nx.item_sub 에 저장한다.
+            #   미러만 읽으면 화면에서 '유검사'로 바꾼 것이 거래명세표에 안 찍힌다(실측 30건 불일치).
             cur.execute(f"SELECT ITEM_CODE, ISNULL(INSP_FLAG,'N') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB WHERE ITEM_CODE IN ({ph})", *ch)
             for rr in cur.fetchall(): inspm[str(rr[0]).strip()] = str(rr[1] or 'N').strip()
+            cur.execute(f"SELECT item_code, ISNULL(insp_flag,'N') FROM PARTNER_ERP_TEST3.nx.item_sub WHERE item_code IN ({ph})", *ch)
+            for rr in cur.fetchall(): inspm[str(rr[0]).strip()] = str(rr[1] or 'N').strip()   # 클린이 덮어씀
         # 하위 자재 품명 보강(자도번은 위 assys 에 없으므로 따로 조회)
         #   ★검사구분도 함께 읽는다(2026-08-31) — 레거시 거래명세표는 **하위 P/No. 행**에
         #     '유검사'/'체크' 를 찍는다. 종전엔 도번(Assy)만 조회하고 하위 행 insp 를 ''
@@ -1723,6 +1764,9 @@ def partner_deliv420_invoice(request: Request, barcode: str = Query(...)):
             cur.execute(f"SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(item_spec,''), ISNULL(UNIT,'EA') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
             for rr in cur.fetchall(): nmm.setdefault(str(rr[0]).strip(), (rr[1], rr[2], rr[3]))
             cur.execute(f"SELECT ITEM_CODE, ISNULL(INSP_FLAG,'N') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB WHERE ITEM_CODE IN ({ph})", *ch)
+            for rr in cur.fetchall(): inspm[str(rr[0]).strip()] = str(rr[1] or 'N').strip()
+            # ★2026-09-08 클린 우선(위와 동일 규칙)
+            cur.execute(f"SELECT item_code, ISNULL(insp_flag,'N') FROM PARTNER_ERP_TEST3.nx.item_sub WHERE item_code IN ({ph})", *ch)
             for rr in cur.fetchall(): inspm[str(rr[0]).strip()] = str(rr[1] or 'N').strip()
         # ★납품표(2번 출력물)용 — 작업처·입고구분·생산계획일·SVC
         _wcm = {}; _gbm = {}; _pym = {}; _lym = {}; _svc = set()

@@ -126,9 +126,14 @@ def qareview_detail(seq: int = Query(...)):
               -- ★레거시는 WORK_CODE 로 조인해 항상 '전체'가 나오는 버그. 웹은 코드로 조인(§7 버그 미복제)
               ISNULL((SELECT TOP 1 GAGONG_PROC_DESC FROM {NXS}.PR_M_PROC_GAGONG WITH(NOLOCK)
                        WHERE GAGONG_PROC_CODE=A.GAGONG_PROC_CODE),'전체') proc_nm,
-              -- ★CM_M_USERS_INFO 만 라이브 유지 — nx 에 아직 없다(작성자명 표시용 조회).
-              ISNULL((SELECT TOP 1 USER_NAME FROM {LIVE}.CM_M_USERS_INFO WITH(NOLOCK)
-                       WHERE USER_ID=A.WRITE_USER_ID),'') user_name,
+              -- ★작성자명 = nx.app_user (2026-09-07 컷오버).
+              --   종전엔 라이브 CM_M_USERS_INFO 를 봤는데, 컷오버로 그 DB 가 은퇴하면서
+              --   LIVE 상수가 nx 로 치환됐다. 그런데 이 테이블은 nx 에 없어(dbo 에만 있고 그것도 낡음)
+              --   **상세조회가 208 로 죽었다** — 목록은 나오는데 행을 클릭하면 우측이 빈 증상.
+              --   ★계정 체계가 nx.app_user 로 바뀌었으므로 사용자 정본은 이제 여기다.
+              --     실측: WRITE_USER_ID 가 곧 계정 id 라 그대로 조인된다(최정숙·최윤섭·이윤석 확인).
+              ISNULL((SELECT TOP 1 name FROM {NXS}.app_user WITH(NOLOCK)
+                       WHERE RTRIM(user_id)=RTRIM(A.WRITE_USER_ID)),'') user_name,
               A.INSERT_USER_ID,A.INSERT_DATETIME,A.UPDATE_USER_ID,A.UPDATE_DATETIME
             FROM {src}.PR_T_DAILY_ISSUE_REVIEW A WITH(NOLOCK) WHERE A.ISSUE_SEQ=?""", seq)
         r = cur.fetchone()

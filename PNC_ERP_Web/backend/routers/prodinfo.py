@@ -81,16 +81,29 @@ def _route_no_of(cur, route_id):
     r = cur.fetchone()
     return int(r[0]) if r else 1
 
-def _pi_proc_rows(cur, item, use_nx, route_id=0):
+def _pi_proc_rows(cur, item, use_nx=True, route_id=0):
     """생산공정순서 행 조회. 마스터 조인으로 표시명·회수율 포함.
-       route_id가 R02+(route_no>1)면 nx.route_proc_gagong(route 스코프), 아니면 use_nx=True→nx.prodinfo_proc / False→레거시."""
+       route_id가 R02+(route_no>1)면 nx.route_proc_gagong(route 스코프), 아니면 nx.prodinfo_proc.
+
+       ★2026-09-08 미러 폴백 제거(CLAUDE.md §1-9-1 클린 단일화).
+         종전엔 품번 단위 폴백이었다 — 웹에서 저장한 적 있는 품번만 nx.prodinfo_proc 를 읽고
+         나머지(4,187품번)는 미러 PR_M_ITEM_PROC_GAGONG 로 떨어졌다.
+         컷오버로 레거시가 은퇴하면 그 폴백 대상이 **얼어붙은 옛 값**이 되므로,
+         미러 9,901행을 클린에 적재(_migration/prodinfo_proc_seed.py)하고 폴백을 없앴다.
+         적재 후 대조: 미러 품번 중 클린 누락 0 · 가공공정/작업처/ST/LT/전표 불일치 0.00%.
+       ※use_nx 인자는 호출부 호환을 위해 남겼으나 더는 분기하지 않는다(항상 클린)."""
     use_route = _route_no_of(cur, route_id) > 1
     if use_route:
         _ensure_route_proc(cur)
-        src = "nx.route_proc_gagong a"; C = (lambda c: c.lower())
+        src = "nx.route_proc_gagong a"
     else:
+<<<<<<< HEAD
         src = "nx.prodinfo_proc a"   # ★R01 클린 단일(미러 PR_M_ITEM_PROC_GAGONG 폴백 은퇴 260909·§1-9-1·클린⊇미러)
         C = (lambda c: c.lower())
+=======
+        src = "nx.prodinfo_proc a"
+    C = (lambda c: c.lower())   # 클린은 소문자 컬럼(route_proc_gagong·prodinfo_proc 동일)
+>>>>>>> zt/main
     cur.execute(f"""
         SELECT a.{C('PROC_SEQ')}, ISNULL(a.{C('WORK_CODE')},'') , ISNULL(a.{C('GAGONG_PROC_CODE')},''),
                ISNULL(a.{C('S_WORK_CODE')},0), ISNULL(a.{C('MACH_CODE')},''), ISNULL(a.{C('WORK_QTY')},0),
@@ -175,22 +188,19 @@ def prodinfo_get(item: str = Query(...), assyall: int = Query(0), route_id: int 
                 d[k] = (None if v is None else round(float(v), 3))
             single.append(d)
 
-        # ── 패널③ 생산공정순서(nx우선 by item, R02+면 route 스코프) ──
+        # ── 패널③ 생산공정순서(정본 nx.prodinfo_proc, R02+면 route 스코프) ──
+        # ★2026-09-08 미러 폴백 제거 — 품번별로 클린/미러를 갈라 읽던 분기를 없앴다(§1-9-1).
         if _route_no_of(cur, route_id) > 1:
             _ensure_route_proc(cur)
             cur.execute("SELECT COUNT(*) FROM nx.route_proc_gagong WHERE route_id=? AND item_code=?", int(route_id), item)
             if cur.fetchone()[0] > 0:
-                proc = _pi_proc_rows(cur, item, True, route_id=int(route_id)); proc_src = "route"
+                proc = _pi_proc_rows(cur, item, route_id=int(route_id)); proc_src = "route"
             else:
                 # R02 미등록 → R01/품번키(생산 ST축)에서 시드 템플릿 제공(저장 전엔 route_proc_gagong 미기록)
-                cur.execute("SELECT COUNT(*) FROM nx.prodinfo_proc WHERE item_code=?", item)
-                seed_nx = cur.fetchone()[0] > 0
-                proc = _pi_proc_rows(cur, item, seed_nx); proc_src = "route_seed"
+                proc = _pi_proc_rows(cur, item); proc_src = "route_seed"
         else:
-            cur.execute("SELECT COUNT(*) FROM nx.prodinfo_proc WHERE item_code=?", item)
-            use_nx = cur.fetchone()[0] > 0
-            proc = _pi_proc_rows(cur, item, use_nx)
-            proc_src = "nx" if use_nx else "legacy"
+            proc = _pi_proc_rows(cur, item)
+            proc_src = "nx"
 
         # ── 하단 탭: LOB(item_st, nx우선) ──
         cur.execute("""SELECT prod_gubun, ISNULL(member_qty,0), ISNULL(capa_qty,0), 'nx'
@@ -218,6 +228,29 @@ def prodinfo_get(item: str = Query(...), assyall: int = Query(0), route_id: int 
                  "zig_qty": int(sub[5] or 0), "insp_count": int(sub[6] or 0), "err_rate": float(sub[7] or 0)}
                 if sub else {})
 
+        # ── 포장·작업자(레거시 「품번별추가정보」 w_pr_master_080) — ★편집본 = 클린 nx.item_sub ──
+        #   포장종류·포장수량·용접자·검사자. 라벨(제품스티커)·가간판이 이 값을 찍는다.
+        #   ★저장은 항상 클린 nx.item_sub. 조회는 **클린 우선 · 미러 폴백**(한시적).
+        #     ⚠폴백은 §1-9-1 위반이지만 지금은 불가피하다 —
+        #       클린 nx.item(14,466) 이 미러(71,043) 를 다 담지 못해 nx.item_sub 의
+        #       FK(fk_item_sub_item) 가 이관을 막는다(실측 2026-09-08: 3,144 중 3,141 충돌).
+        #       폴백 없이 클린 단독으로 두면 기존 값이 **화면에서 통째로 빈칸**이 된다.
+        #     ⟹ 품목마스터 이관이 끝나면 이 COALESCE 를 지우고 클린 단독으로 되돌린다.
+        #   ※품목마스터(item.py)도 같은 행을 쓰지만 **서로 다른 컬럼만** 만진다
+        #     (item.py:323 주석 — 그쪽은 내 컬럼만 UPDATE 하도록 2026-09-08 교정).
+        cur.execute("""SELECT COALESCE(NULLIF(RTRIM(c.pack_kind),''), RTRIM(m.PACK_KIND), ''),
+                              COALESCE(NULLIF(c.pack_qty,0), m.PACK_QTY, 0),
+                              COALESCE(NULLIF(RTRIM(c.prod_worker),''), RTRIM(m.PROD_WORKER), ''),
+                              COALESCE(NULLIF(RTRIM(c.insp_worker),''), RTRIM(m.INSP_WORKER), '')
+                         FROM (SELECT ? AS ic) x
+                         LEFT JOIN nx.item_sub c WITH(NOLOCK) ON c.item_code=x.ic
+                         LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB m WITH(NOLOCK) ON m.ITEM_CODE=x.ic""", item)
+        pk = cur.fetchone()
+        packd = {"pack_kind": (str(pk[0]).strip() if pk else ""),
+                 "pack_qty": (int(pk[1] or 0) if pk else 0),
+                 "prod_worker": (str(pk[2]).strip() if pk else ""),
+                 "insp_worker": (str(pk[3]).strip() if pk else "")}
+
         # ── 하단 탭 ⑦ 지그정보(nx 다행) + 레거시 단건 참조(읽기) ──
         cur.execute("""SELECT seq, ISNULL(jig_gubun,''), ISNULL(jig_qty,0), ISNULL(rack_loc,''), ISNULL(make_ymd,'')
             FROM nx.prodinfo_jig WHERE item_code=? ORDER BY seq""", item)
@@ -244,6 +277,7 @@ def prodinfo_get(item: str = Query(...), assyall: int = Query(0), route_id: int 
 
         return {"head": head, "assy": assy, "assy_master_cnt": assy_master_cnt, "single": single,
                 "proc": proc, "proc_src": proc_src, "item_st": item_st, "sub": subd,
+                "pack": packd,
                 "jig": jig, "jig_legacy": jig_legacy, "yield": yield_rows, "yangsan": yangsan,
                 "od_cols": [od for _, od in _OD_COLS]}
     finally:
@@ -427,6 +461,84 @@ def prodinfo_itemst_save(payload: dict = Body(...)):
         return {"ok": False, "detail": str(e)[:200]}
     finally:
         cn.close()
+
+def save_item_pack(cur, item, pack_kind=None, pack_qty=None, prod_worker=None, insp_worker=None):
+    """포장·작업자 4종을 클린 nx.item_sub 에 기록(공용 헬퍼).
+
+       ★None 인 항목은 건드리지 않는다 — 부분수정을 허용해야
+         라벨 재발행 팝업(용접사·검사자만 준다)이 포장정보를 지우지 않는다.
+       ★행이 없으면 INSERT, 있으면 **해당 컬럼만** UPDATE.
+         품목마스터(item.py)가 같은 행의 다른 컬럼을 쓰므로 서로 덮지 않게 한다.
+       호출측이 commit 한다(트랜잭션 경계를 부르는 쪽이 정한다).
+    """
+    item = str(item or "").strip()
+    if not item:
+        return 0
+    sets, vals = [], []
+    if pack_kind is not None:
+        sets.append("pack_kind=?");   vals.append(str(pack_kind).strip()[:50])
+    if pack_qty is not None:
+        try: _q = int(float(pack_qty or 0))
+        except Exception: _q = 0
+        sets.append("pack_qty=?");    vals.append(_q)
+    if prod_worker is not None:
+        sets.append("prod_worker=?"); vals.append(str(prod_worker).strip()[:50])
+    if insp_worker is not None:
+        sets.append("insp_worker=?"); vals.append(str(insp_worker).strip()[:50])
+    if not sets:
+        return 0
+    cur.execute("SELECT 1 FROM nx.item_sub WHERE item_code=?", item)
+    if cur.fetchone():
+        cur.execute(f"UPDATE nx.item_sub SET {','.join(sets)} WHERE item_code=?", *vals, item)
+    else:
+        cols = [s.split("=")[0] for s in sets]
+        cur.execute(f"INSERT INTO nx.item_sub(item_code,{','.join(cols)}) "
+                    f"VALUES(?,{','.join(['?']*len(cols))})", item, *vals)
+    return 1
+
+
+@router.get("/api/prodinfo/pack/kinds")
+def prodinfo_pack_kinds():
+    """포장종류 자동완성 후보 — 실제 쓰이는 값에서 뽑는다(코드마스터가 따로 없다).
+       레거시 화면도 자유입력이라 마스터 대신 **기존 사용값**을 제안한다."""
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("""SELECT k, COUNT(*) c FROM (
+                         SELECT RTRIM(ISNULL(pack_kind,'')) k FROM nx.item_sub WITH(NOLOCK)
+                         UNION ALL
+                         SELECT RTRIM(ISNULL(PACK_KIND,'')) k
+                           FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB WITH(NOLOCK)) t
+                        WHERE k<>'' GROUP BY k ORDER BY COUNT(*) DESC""")
+        return {"kinds": [str(r[0]).strip() for r in cur.fetchall()][:200]}
+    finally:
+        cn.close()
+
+
+@router.post("/api/prodinfo/pack/save")
+def prodinfo_pack_save(payload: dict = Body(...)):
+    """포장종류·포장수량·용접자·검사자 저장 → 클린 nx.item_sub (레거시 「품번별추가정보」).
+
+       ★저장 위치가 클린인 이유 = CLAUDE.md §1-9-1. 미러 PR_M_ITEM_SUB 에 쓰면
+         레거시가 덮어쓰고, 컷오버 후엔 얼어붙는다. 라벨·가간판도 클린을 읽도록 함께 전환한다.
+    """
+    item = str(payload.get("item", "")).strip()
+    if not item:
+        return {"ok": False, "detail": "품번 필수"}
+    cn = _nx(); cur = cn.cursor()
+    try:
+        save_item_pack(cur, item,
+                       pack_kind=payload.get("pack_kind", ""),
+                       pack_qty=payload.get("pack_qty", 0),
+                       prod_worker=payload.get("prod_worker", ""),
+                       insp_worker=payload.get("insp_worker", ""))
+        cn.commit()
+        return {"ok": True, "item": item}
+    except Exception as e:
+        cn.rollback()
+        return {"ok": False, "detail": str(e)[:200]}
+    finally:
+        cn.close()
+
 
 @router.post("/api/prodinfo/jig/save")
 def prodinfo_jig_save(payload: dict = Body(...)):

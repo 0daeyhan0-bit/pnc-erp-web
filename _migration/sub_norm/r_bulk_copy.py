@@ -33,6 +33,29 @@ TABLES=['PR_M_ITEM_BOM','CS_M_ITEM_BOM','PR_M_ITEM','PR_M_MAT',
         'SA_T_MONTH_STOCK','SA_T_PLAN_DTL','SA_T_STOCK_MAINT']
 cn=pyodbc.connect(f'DRIVER={{SQL Server}};SERVER={db_client.DB_SERVER},{db_client.DB_PORT};DATABASE=PARTNER_ERP_TEST3;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD}', autocommit=True)
 c=cn.cursor()
+# ★★보호 테이블 — 이 스크립트는 DROP TABLE + SELECT * INTO 로 통째 갈아엎는다.
+#   아래는 **우리가 만든 산출물**이라 레거시에 원본이 없다. 목록에 실수로 들어오면
+#   마감·이월 기록이 통째로 사라지고 2501~ 마감을 처음부터 다시 해야 한다.
+#   (대표 지시 2026-09-08: "컷오버 때 이 기록은 덮어쓰지 않도록 기록을 해야한다")
+#   ※r_delta_sync 는 대상을 접두어(PU_/SA_/PR_/CM_/QA_/CS_/HR_)로 뽑아 소문자 신규
+#     테이블이 애초에 안 걸린다. 여기만 명시 목록이라 가드가 필요하다.
+PROTECTED = {
+    "period_close",          # 마감 확정·잠금·지문(src_rows/src_sum/src_ins/src_upd)
+    "stock_snapshot",        # 확정 스냅샷(기초의 원천)
+    "stock_snapshot_drop",   # 스냅샷 제외분(단가0·음수) — 사라지면 추적 불가
+    "magam_carry_ovr",       # 이월 재배정(당월↔차월) override
+    "prod_stock_adjust",     # 웹 제품재고조정(영업 수불장 원천)
+    "stock_ledger",          # 웹 단일원장
+    "app_user", "app_session", "user_perm",   # 계정·권한
+}
+_bad = sorted({t for t in TABLES if str(t).strip().lower() in PROTECTED})
+if _bad:
+    print('★중단 — 보호 테이블이 TABLES 에 들어 있다:', ', '.join(_bad))
+    print('  이 테이블들은 레거시에 원본이 없는 우리 산출물이다(마감·이월·원장·계정).')
+    print('  DROP+재복사하면 2501~ 마감 기록이 사라진다. 목록에서 빼라.')
+    print('  정본 = _schema/CUTOVER_MIGRATION_SCOPE.md')
+    raise SystemExit(2)
+
 FAIL=[]; SKIP=0
 for t in TABLES:
     src=f"PARTNER_ERP.dbo.{t}"; nxt=f"nx.{t}"

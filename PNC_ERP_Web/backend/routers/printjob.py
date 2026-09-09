@@ -103,6 +103,74 @@ def _finish(doc) -> bytes:
     return out
 
 
+def _tspl_text_bitmap(txt: str, x: int, y: int, height_dot: int = 20,
+                      bold: bool = True) -> str:
+    """한글 문자열을 **1비트 비트맵**으로 그려 TSPL BITMAP 명령으로 만든다.
+
+    ★왜 필요한가 (2026-09-08 현장 실측)
+      TSPL 의 `TEXT` 는 **프린터 내장 폰트**로 찍는다. 내장 폰트("1"~"5")는 ASCII 전용이라
+      한글 글자가 통째로 **누락**된다 — 현장 라벨에 용접사/검사자가 `/` 만 찍히고
+      이름이 안 나온 것이 정확히 이 증상이다(CODEPAGE UTF-8 을 줘도 글리프 자체가 없다).
+      같은 데이터를 PDF 경로로 뽑으면 맑은 고딕이 embed 돼 멀쩡히 나온다 —
+      즉 데이터·좌표 문제가 아니라 **폰트 문제**다.
+
+    ⟹ 그 줄만 서버에서 그려 비트맵으로 보낸다. TSPL 의 선명함·속도는 유지하면서
+      한글이 확실히 나온다(프린터 기종·펌웨어에 의존하지 않는다).
+
+    ※BITMAP 형식 = `BITMAP x,y,width_bytes,height,mode,<raw>`
+      · width_bytes = 가로 픽셀/8 (8픽셀=1바이트, 부족하면 오른쪽을 흰색으로 채운다)
+      · mode 0 = OVERWRITE
+      · 비트 1 = **흰색**, 0 = 검정 (TSPL 은 반전이다 — 그대로 보내면 배경이 새까맣게 나온다)
+    """
+    txt = str(txt or "")
+    if not txt.strip():
+        return ""
+    fitz = _fitz()
+    fp = _font_path(bold)
+    if not fp:
+        # 한글 폰트가 없으면 비트맵을 만들 수 없다 → 호출측이 TEXT 로 폴백하게 빈 문자열
+        return ""
+    # 텍스트를 딱 맞는 크기의 흑백 이미지로 렌더 — 여백 없이 뽑아야 좌표가 어긋나지 않는다.
+    fs = height_dot * 0.78          # dot 높이 → 글자 크기(어센더/디센더 여유)
+    try:
+        font = _measure_font(fp)
+        w_pt = font.text_length(txt, fontsize=fs)
+    except Exception:
+        w_pt = len(txt) * fs * 0.6
+    w_dot = max(8, int(w_pt) + 2)
+    h_dot = max(8, int(height_dot))
+    doc = fitz.open()
+    page = doc.new_page(width=w_dot, height=h_dot)
+    try:
+        page.insert_font(fontname="kf", fontfile=fp)
+        page.insert_text((1, h_dot * 0.78), txt, fontname="kf", fontsize=fs)
+    except Exception:
+        doc.close()
+        return ""
+    # 1배율 그레이스케일 → 임계값으로 1비트화
+    pm = page.get_pixmap(colorspace=fitz.csGRAY, alpha=False)
+    W, H = pm.width, pm.height
+    wb = (W + 7) // 8
+    samples = pm.samples
+    out = bytearray()
+    for row in range(H):
+        for byte_i in range(wb):
+            b = 0
+            for bit in range(8):
+                px = byte_i * 8 + bit
+                # 범위 밖(패딩) = 흰색(1). 밝으면 흰색(1), 어두우면 검정(0).
+                white = 1
+                if px < W:
+                    white = 0 if samples[row * W + px] < 128 else 1
+                b = (b << 1) | white
+            out.append(b)
+    doc.close()
+    head = f"BITMAP {int(x)},{int(y)},{wb},{H},0,".encode("ascii")
+    # ★latin-1 로 되돌려 문자열에 실어 보낸다 — 바이트 1:1 대응이라 값이 보존된다.
+    #   (에이전트가 이 문자열을 다시 latin-1 로 인코딩해 프린터에 그대로 흘린다)
+    return (head + bytes(out)).decode("latin-1")
+
+
 def _mkdoc(w_mm: float, h_mm: float):
     """지정 mm 크기의 빈 PDF 문서 생성."""
     fitz = _fitz()
@@ -370,10 +438,11 @@ def build_kanban_pdf(cards: list[dict]) -> bytes:
 
 # ───────────────────────────── 라벨 ─────────────────────────────
 def build_label_pdf(j: dict) -> bytes:
-    """제품스티커 PDF — 40×20mm, 1장=1페이지.
+    """제품스티커 PDF — 40×25mm, 1장=1페이지.
        양식(QR3 실측): 좌 QR / PNC Industry / {출력일자} {라벨번호}-{일련4} / n / 전체 / 도번 / 용접사/검사자
+       ★용지 실측 = 40×25mm (2026-09-08 현장 확인). 종전 20mm 로 만들고 있었다.
     """
-    doc = _mkdoc(40, 20)
+    doc = _mkdoc(40, 25)
     labels = j.get("labels") or []
     tot = j.get("org_qty") or j.get("qty") or len(labels)
     for L in labels:
@@ -385,18 +454,19 @@ def build_label_pdf(j: dict) -> bytes:
         #   ★11mm 안전근거 = 실측: 최악 데이터(한글도번 24자)가 QR 버전3(29모듈)이라
         #     border 포함 31칸 → 셀 0.355mm. 열전사 권장하한 0.33mm 를 넘는다.
         #     10mm 는 0.323mm 로 하한에 닿으므로 더 줄이지 않는다(screens.prod.js 주석에 표 있음).
-        #   세로 중앙정렬 — 라벨 높이 20mm 기준 (20-11)/2 = 4.5mm.
+        #   세로 중앙정렬 — 라벨 높이 25mm 기준 (25-11)/2 = 7.0mm (2026-09-08 용지 교정).
         try:
-            d.image(1.2, 4.5, 11.0, 11.0, _qr_png(L.get("qr", ""), scale=6, border=1))
+            d.image(1.2, 7.0, 11.0, 11.0, _qr_png(L.get("qr", ""), scale=6, border=1))
         except Exception:
-            d.text(1.2, 8, "QR?", size=5)
+            d.text(1.2, 10.5, "QR?", size=5)
         # 우측 텍스트 — 화면 .tx 의 5줄. QR 이 줄어든 만큼 왼쪽으로 당기고 폭을 넓힌다.
+        #   ★25mm 용지로 바로잡으며 5줄 전체를 2.5mm 내려 세로 중앙을 다시 맞췄다.
         tx, tw = 13.0, 26.0
-        d.text(tx, 2.0, "PNC Industry", size=4.4, bold=True, align="center", w=tw)
-        d.text(tx, 5.4, str(L.get("disp", "")), size=4.0, align="center", w=tw)
-        d.text(tx, 8.8, f"{L.get('n','')} / {tot}", size=4.4, bold=True, align="center", w=tw)
-        d.text(tx, 12.2, str(j.get("item", "")), size=5.0, bold=True, align="center", w=tw)
-        d.text(tx, 15.8, f"{j.get('worker','')}/{j.get('inspector','')}", size=3.8,
+        d.text(tx, 4.5, "PNC Industry", size=4.4, bold=True, align="center", w=tw)
+        d.text(tx, 7.9, str(L.get("disp", "")), size=4.0, align="center", w=tw)
+        d.text(tx, 11.3, f"{L.get('n','')} / {tot}", size=4.4, bold=True, align="center", w=tw)
+        d.text(tx, 14.7, str(j.get("item", "")), size=5.0, bold=True, align="center", w=tw)
+        d.text(tx, 18.3, f"{j.get('worker','')}/{j.get('inspector','')}", size=3.8,
                align="center", w=tw)
     return _finish(doc)
 
@@ -420,12 +490,16 @@ LABEL_GAP_MM = 3
 LABEL_GAPDETECT = True
 _GAP_DONE = False          # 이번 프로세스에서 이미 측정을 보냈는가
 
-# ★세로 보정 기본값 = -96 dot (12mm 위로) — 현장 실측 확정(2026-09-07).
-#   TSC TE210 + 40×20mm 용지에서 인쇄가 그만큼 아래로 밀려 찍혔다.
-#   갭을 2·3·4mm 로 바꿔도, GAPDETECT 로도 잡히지 않아 SHIFT 로 직접 당겨 해결했다.
-#   ※화면(생산전표출력관리)에서 이 값을 덮어쓸 수 있고, 그 값은 PC 별로 저장된다.
-#     여기 기본값은 화면을 거치지 않는 호출(RPA·직접 API)에도 적용되도록 두는 것이다.
-LABEL_SHIFT_DOT = -96
+# ★세로 보정 기본값 = 0 (2026-09-08 교정).
+#   종전 -96dot(12mm 위로)은 **용지 크기를 20mm 로 잘못 선언한 것을 상쇄하던 값**이었다.
+#   실물은 40×25mm 인데 SIZE 를 20mm 로 주니 프린터가 시작점을 40dot 어긋나게 잡았고,
+#   그걸 SHIFT 로 되밀어 눈으로는 맞아 보이게 만든 상태였다(원인이 아니라 증상 보정).
+#   ⟹ SIZE 를 실물(25mm)로 바로잡았으므로 보정은 0 이 기본이다.
+#     -96 을 그대로 두면 이제는 반대로 위쪽이 잘린다.
+#   ※프린터·용지 편차로 여전히 어긋나면 화면(생산전표출력관리)에서 8dot(1mm) 단위로
+#     조정할 수 있고 그 값은 PC 별로 저장된다. 여기 기본값은 화면을 거치지 않는
+#     호출(RPA·직접 API)용이다.
+LABEL_SHIFT_DOT = 0
 
 
 def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3, gap: float = 0,
@@ -454,7 +528,12 @@ def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3, gap: float = 0,
     #   ※그래도 밀리면 프린터 자체 캘리브레이션(전원 켠 뒤 FEED 길게 눌러 용지 자동감지)을
     #     한 번 해야 한다 — 센서 기준값은 프린터에 저장된다.
     out = [
-        "SIZE 40 mm,20 mm",
+        # ★용지 실측 = 40×25mm (2026-09-08 현장 확인). 종전 20mm 로 선언하고 있었다.
+        #   20mm(160dot) 로 선언하면 프린터는 라벨을 40dot 짧게 잡는다 —
+        #   마지막 줄(용접사/검사자, y=130 + 글자높이 ≈154dot)이 160dot 경계에
+        #   걸려 라벨 사이 갭으로 밀려나 **인쇄되지 않았다**.
+        #   (에이전트 TSPL 직송에서만 드러난다 — 화면 미리보기는 잘림이 없어 정상으로 보인다.)
+        "SIZE 40 mm,25 mm",
         # ★gap 인자가 오면 그 값으로 — 실물 갭이 3mm 가 아닐 때 화면에서 2·3·4 를 시험해볼 수 있게.
         f"GAP {(f'{float(gap):g}' if 0.5 <= float(gap or 0) <= 20 else LABEL_GAP_MM)} mm,0",
         f"DENSITY {max(0, min(int(darkness), 15))}",
@@ -479,6 +558,12 @@ def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3, gap: float = 0,
     if LABEL_GAPDETECT and not _GAP_DONE:
         out.append("GAPDETECT")      # ★첫 1회만 — 측정값은 프린터에 저장된다
         _GAP_DONE = True
+    # ★용접사/검사자 줄은 한글이라 비트맵으로 그린다(장마다 같은 값이므로 한 번만 만든다).
+    #   실패 시 빈 문자열 → 아래에서 종전 TEXT 로 폴백.
+    try:
+        _wi_cmd = _tspl_text_bitmap(wi, 104, 130, height_dot=20, bold=True)
+    except Exception:
+        _wi_cmd = ""
     for L in labels:
         out += [
             "CLS",
@@ -490,14 +575,18 @@ def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3, gap: float = 0,
             #   ⟹ 화면·PDF 를 11mm 로 내린 지금이 오히려 세 경로가 일치하는 상태다.
             #   ★cell=2 로 더 내리지 말 것 — 셀 0.250mm 로 열전사 권장하한 0.33mm 미만이다
             #     (cell=3 은 0.375mm 로 안전). 더 줄여야 하면 QR 데이터를 줄여야 한다.
-            #   세로 중앙정렬 — (20mm − 11.6mm)/2 ≈ 4.2mm → 34dot.
-            f'QRCODE 10,34,M,3,A,0,"{L.get("qr","")}"',
+            #   세로 중앙정렬 — (25mm − 11.6mm)/2 ≈ 6.7mm → 54dot (용지 25mm 기준, 2026-09-08).
+            f'QRCODE 10,54,M,3,A,0,"{L.get("qr","")}"',
             # 텍스트 시작 x — QR(10dot 시작 + 93dot) 뒤. 104dot=13mm 로 PDF(tx=13.0)와 맞춘다.
             f'TEXT 104,14,"2",0,1,1,"PNC Industry"',
             f'TEXT 104,42,"1",0,1,1,"{L.get("disp","")}"',
             f'TEXT 104,66,"2",0,1,1,"{L.get("n","")} / {tot}"',
             f'TEXT 104,96,"3",0,1,1,"{item}"',
-            f'TEXT 104,130,"1",0,1,1,"{wi}"',
+            # ★용접사/검사자 = 한글이라 내장폰트로는 **안 찍힌다**(2026-09-08 현장 실측).
+            #   서버에서 맑은 고딕으로 그려 비트맵으로 보낸다(_tspl_text_bitmap 주석 참조).
+            #   폰트를 못 찾는 등으로 비트맵 생성이 실패하면 종전 TEXT 로 폴백한다
+            #   — 최소한 ASCII(사번·영문)라도 나오게.
+            (_wi_cmd or f'TEXT 104,130,"1",0,1,1,"{wi}"'),
             "PRINT 1,1",
         ]
     return "\r\n".join(out) + "\r\n"
@@ -536,8 +625,14 @@ def print_label(print_seq: str = Query(...), start_no: int = Query(0), end_no: i
         raise HTTPException(404, j.get("detail") or "라벨 조회 실패")
     doc = f"제품스티커 {j.get('item','')} ({j.get('qty',0)}장)"
     if str(mode).lower() == "tspl":
+        # ★b64 로 보낸다(2026-09-08) — 용접사/검사자 줄이 **비트맵 바이너리**를 품고 있어
+        #   그대로 문자열로 흘리면 에이전트의 `str(data).encode("utf-8")` 에서 값이 바뀐다
+        #   (latin-1 로 실은 0x80~0xFF 바이트가 UTF-8 2바이트로 부풀어 비트맵이 깨진다).
+        #   에이전트는 예전부터 b64 플래그를 지원하므로 **에이전트 재설치 없이** 동작한다.
+        tspl = build_label_tspl(j, darkness, speed, gap, shift)
         return {"ok": True, "kind": "label", "mode": "tspl", "cnt": j.get("qty", 0), "doc": doc,
-                "tspl": build_label_tspl(j, darkness, speed, gap, shift)}
+                "b64": True,
+                "tspl": base64.b64encode(tspl.encode("latin-1")).decode("ascii")}
     return {"ok": True, "kind": "label", "mode": "pdf", "cnt": j.get("qty", 0), "doc": doc,
             "pdf": base64.b64encode(build_label_pdf(j)).decode("ascii")}
 
@@ -558,7 +653,7 @@ def print_label_calib(gap: float = Query(0, description="갭 mm — 0이면 기�
     if not (0.5 <= g <= 20):      # 이상값이면 기본값으로 — 잘못된 입력이 용지를 낭비하지 않게
         g = float(LABEL_GAP_MM)
     gs = (f"{g:g}")
-    cmds = ["SIZE 40 mm,20 mm", f"GAP {gs} mm,0", "GAPDETECT"]
+    cmds = ["SIZE 40 mm,25 mm", f"GAP {gs} mm,0", "GAPDETECT"]   # ★용지 실측 40×25mm(2026-09-08)
     return {"ok": True, "kind": "label", "mode": "tspl", "cnt": 0, "gap": g,
             "doc": f"라벨 갭 보정 ({gs}mm)", "tspl": "\r\n".join(cmds) + "\r\n"}
 

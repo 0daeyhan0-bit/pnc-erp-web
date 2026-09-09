@@ -121,6 +121,9 @@ PROBES = [
     ("자재수불장", "SELECT COUNT(*) FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=?"),
     ("수불장수량", "SELECT ISNULL(SUM(CAST(MAINT_QTY AS float)),0) FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=?"),
     ("공정실적수량", "SELECT ISNULL(SUM(CAST(PROD_QTY AS float)),0) FROM nx.proc_result WHERE PROD_YMD=?"),
+    # ★웹 제품재고조정 — 영업 수불장이 이 테이블을 안 읽어 조정·반품·불량이 통째로 누락됐던 자리
+    #   (2026-09-08 전수검증 FAIL → _sal_moves 에 UNION 연결). 회귀 감시용 프로브.
+    ("제품조정", "SELECT ISNULL(SUM(CAST(maint_qty AS float)),0) FROM nx.prod_stock_adjust WHERE maint_ymd=?"),
     ("판매출고수량", "SELECT ISNULL(SUM(CAST(maint_qty AS float)),0) FROM nx.saleout_maint WHERE maint_ymd=?"),
 ]
 # 품번 스코프(자재재고는 일자축이 없다)
@@ -135,9 +138,17 @@ ROLLBACK_TABS = ("nx.stock_ledger", "nx.PU_T_STOCK_MAINT", "nx.PU_T_MAT_STOCK_WH
                  # 협력사 세트입고(2026-08-29) — 송장/입고거래도 오염 0 대상이다.
                  #   입고취소는 이 두 테이블을 지우므로, 여기 없으면 "깨끗하다"가 거짓말이 된다.
                  "nx.set_input_req", "nx.set_input_req_dtl", "nx.set_stock_maint",
+                 # 웹 제품재고조정(2026-09-08) — 영업 수불장이 읽는 원천이 됐다. 쓰기 대상이므로 감시.
+                 "nx.prod_stock_adjust",
                  # 인증(2026-08-29) — 하네스가 로그인하면 세션이 생기고 실패하면 잠금이 걸린다.
                  #   여기 없으면 "오염 0" 이 계정 테이블을 안 본 채로 통과한다.
                  "nx.app_user", "nx.app_session")
+
+# ★오염 판정에서 제외 — 로그인은 하네스가 **반드시** 만드는 부수효과라
+#   여기 넣어두면 토큰을 새로 딸 때마다 "오염 의심" 이 뜬다(2026-09-08 실측 app_session +3).
+#   거짓 경보가 반복되면 진짜 오염 신호를 무시하게 되므로 분리한다 — 계속 **관측은 하되**
+#   판정에서만 뺀다. app_user(계정 자체)는 변하면 안 되므로 판정에 남긴다.
+SIDE_EFFECT_TABS = ("nx.app_session",)
 _ROWS0 = {}
 
 
@@ -266,11 +277,15 @@ def _flow_rollback():
     chk = pyodbc.connect(CS, autocommit=True).cursor()
     for t in ROLLBACK_TABS:
         chk.execute(f"SELECT COUNT(*) FROM {t}"); after[t] = chk.fetchone()[0]
-    clean = all(_ROWS0.get(t) == after[t] for t in ROLLBACK_TABS)
+    judged = [t for t in ROLLBACK_TABS if t not in SIDE_EFFECT_TABS]
+    clean = all(_ROWS0.get(t) == after[t] for t in judged)
     return {"ok": True, "rolled_back": True, "clean": clean,
             "rows_at_start": _ROWS0, "rows_after_rollback": after,
-            "diff": {t: after[t] - _ROWS0.get(t, 0) for t in ROLLBACK_TABS
-                     if after[t] != _ROWS0.get(t)}}
+            "diff": {t: after[t] - _ROWS0.get(t, 0) for t in judged
+                     if after[t] != _ROWS0.get(t)},
+            # 하네스 로그인 부수효과(판정 제외·관측만)
+            "side_effects": {t: after[t] - _ROWS0.get(t, 0) for t in SIDE_EFFECT_TABS
+                             if after[t] != _ROWS0.get(t)}}
 
 
 # ★app.mount("/", StaticFiles) 가 먼저 매칭되므로 제어 라우트를 **맨 앞으로** 옮긴다.

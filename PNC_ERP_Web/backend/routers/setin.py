@@ -642,6 +642,18 @@ def setstock_manual(payload: dict = Body(...)):
                               NULL,'세트수동입고',?,getdate())""",
                             ymd, lseq, cust, b["mat_code"], jq, b["cost"],
                             int(jq * b["cost"]), ic, ymd, mseq, ymd, user)
+                # ★★2026-09-08 — 원장만 쓰면 **자재재고가 안 늘어난다**(실사고).
+                #   웹 재고 쓰기는 3군데를 채워야 화면까지 이어진다(_mirror_ins docstring):
+                #     ① nx.stock_ledger(위) ② nx.PU_T_MAT_STOCK_WH ③ nx.PU_T_STOCK_MAINT
+                #   검사완료 경로(L980·982)·직납출고(L1035·1037)는 ②③을 부르는데
+                #   **이 수동입고 경로만 빠져 있었다.**
+                #   실측 2026-09-08 AJR73803003-F&T 1,000개 수동입고:
+                #     원장 1건 O / 미러이력 0건 / 잔액 13,280 그대로 → 화면에 입고가 안 보였다.
+                #   (같은 날 바코드 경로 ACQ30605001 은 원장·미러 둘 다 들어가 정상이었다.)
+                _upd_mat_wh(cur, str(b["mat_code"]).strip(), jq)
+                _mirror_ins(cur, ymd, 'S', str(b["mat_code"]).strip(), jq,
+                            cust=cust, item=ic, remarks='세트수동입고',
+                            screen='w_pu_stock_146')
                 posted += 1
                 sagub_src.append((b["mat_code"], jq))
             made.append({"seq": mseq, "item_code": ic, "qty": q,
@@ -691,6 +703,30 @@ def setstock_manual_delete(payload: dict = Body(...)):
         _assert_open(cur, str(r[2] or ''), "MAT", "세트수동입고취소")
         # ★자도번 파생행(tag='S')도 함께 — 세트만 지우면 단품재고가 남는다.
         #   근거키 = 그 수동입고NO 가 만든 (SET_MAINT_YMD, SET_MAINT_SEQ) 쌍뿐(§1-3).
+        # ★★2026-09-08 — 원장을 지우기 **전에** 잔액·미러이력을 되돌린다(등록과 대칭).
+        #   등록(L620~)이 ①원장 ②PU_T_MAT_STOCK_WH ③PU_T_STOCK_MAINT 3층에 쓰므로
+        #   취소도 3층을 다 되돌려야 한다. 원장만 지우면 **잔액이 부풀어 남는다**.
+        #   (2026-09-08 등록 경로에 ②③을 추가하면서 이 취소도 함께 맞춤)
+        cur.execute("""SELECT RTRIM(g.MAT_CODE), ISNULL(SUM(g.MAINT_QTY),0), MIN(g.MAINT_YMD),
+                              MAX(RTRIM(ISNULL(g.ITEM_CODE,''))), MAX(RTRIM(ISNULL(g.CUST_CODE,'')))
+                         FROM nx.stock_ledger g WITH(NOLOCK)
+                        WHERE g.MAINT_TAG='S'
+                          AND EXISTS(SELECT 1 FROM nx.set_stock_maint m WITH(NOLOCK)
+                                      WHERE m.manual_sheet_no=? AND m.maint_tag='1'
+                                        AND m.maint_ymd=g.SET_MAINT_YMD
+                                        AND m.maint_seq=g.SET_MAINT_SEQ)
+                        GROUP BY RTRIM(g.MAT_CODE)""", no)
+        _undo = [(str(x[0]).strip(), float(x[1] or 0), str(x[2] or '').strip(),
+                  str(x[3] or '').strip(), str(x[4] or '').strip()) for x in cur.fetchall()]
+        for _m, _q, _ymd, _it, _cc in _undo:
+            if not _m or not _q:
+                continue
+            _upd_mat_wh(cur, _m, -_q)                     # 잔액 원복
+            _mirror_ins(cur, (_ymd or str(r[2] or '').strip()), 'S', _m, -_q,
+                        cust=(_cc or None), item=(_it or None),
+                        remarks='세트수동입고취소(MANUAL#%s)' % no,
+                        screen='w_pu_stock_146')          # 미러이력에 역행 기록
+
         cur.execute("""DELETE g FROM nx.stock_ledger g
                         WHERE g.MAINT_TAG='S'
                           AND EXISTS(SELECT 1 FROM nx.set_stock_maint m WITH(NOLOCK)
@@ -1198,15 +1234,36 @@ def setstock_cancel_preview(request: Request, barcode: str = Query(...)):
 @router.get("/api/setinsp/list")
 def setinsp_list(request: Request, frm: str = Query(""), to: str = Query(""),
                  cust: str = Query(""), item: str = Query(""),
-                 stat: str = Query("30"), limit: int = Query(500)):
+                 stat: str = Query("30"), insp: str = Query("Y"), limit: int = Query(500)):
     """검사대상 목록. stat: 30=입고대기(기본) · 90=검사완료 · ''=전체.
 
     레거시 160 대응 컬럼(입고일자·입고SEQ·입고구분·거래처·자도번·입고수량·검사구분·상태)을 채운다.
     ★거래처·품명은 LEFT JOIN — 레거시는 cm_m_cust INNER 라 미등록 거래처가 통째로 누락된다(§1-7 결함).
+
+    ★★2026-09-08 insp 필터 신설(대표 지시) — **유검사품만 나와야 한다**.
+      insp: 'Y'=유검사만(기본·고정) · 'N'=무검사만 · ''=전체
+      판정 = 품목마스터 검사구분 IN ('F','S')  (F=유검사 · S=체크검사 · N/빈=무검사)
+      원천 = **클린 nx.item_sub**(품목마스터 화면이 저장하는 곳, item.py:145 s.insp_flag),
+             클린에 없는 품목만 미러 nx.PR_M_ITEM_SUB 로 폴백.
+      ⛔종전엔 필터가 없어 무검사품까지 IQC 목록에 떴다. 무검사는 입고 즉시 재고가 잡히므로
+        검사 대상이 아니다(입고 시 status 90 즉시완료 — setstock_receive).
+      ※송장(set_input_req.insp_flag)은 실측 923건이 전부 '0' 이라 판정 근거로 쓸 수 없다.
+        품목마스터를 직접 조인해 판정한다.
     """
     staff_only(request, "자재입고검사")
     f6, t6 = _d6(frm), _d6(to)
     w, p = ["m.in_tag='1'"], []
+    _iv = str(insp or "").strip().upper()
+    _INSP_SRC = """COALESCE(
+        (SELECT TOP 1 RTRIM(ISNULL(cs.insp_flag,'N')) FROM PARTNER_ERP_TEST3.nx.item_sub cs WITH(NOLOCK)
+          WHERE RTRIM(cs.item_code)=RTRIM(m.item_code)),
+        (SELECT TOP 1 RTRIM(ISNULL(ms.INSP_FLAG,'N')) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB ms WITH(NOLOCK)
+          WHERE RTRIM(ms.ITEM_CODE)=RTRIM(m.item_code)),
+        'N')"""
+    if _iv == "Y":
+        w.append(f"{_INSP_SRC} IN ('F','S')")
+    elif _iv == "N":
+        w.append(f"{_INSP_SRC} NOT IN ('F','S')")
     if f6: w.append("m.maint_ymd>=?"); p.append(f6)
     if t6: w.append("m.maint_ymd<=?"); p.append(t6)
     s = str(stat or "").strip()
@@ -1224,21 +1281,26 @@ def setinsp_list(request: Request, frm: str = Query(""), to: str = Query(""),
                   CAST(ISNULL(m.maint_qty,0) AS float), RTRIM(ISNULL(m.sheet_no,'')),
                   RTRIM(ISNULL(m.status,'')), RTRIM(ISNULL(m.derived_flag,'0')),
                   CONVERT(varchar(19), m.insert_datetime, 120),
-                  ISNULL(RTRIM(q.insp_flag),'0'), RTRIM(ISNULL(q.sheet_no,'')),
-                  CONVERT(varchar(19), q.status_dt, 120), ISNULL(RTRIM(q.status_user),'')
+                  -- ★2026-09-08 검사구분 = 품목마스터(클린 우선) 기준. 종전 q.insp_flag 는 전건 '0' 이라 못 쓴다.
+                  CASE WHEN {INSPSRC} IN ('F','S') THEN '1' ELSE '0' END,
+                  RTRIM(ISNULL(q.sheet_no,'')),
+                  CONVERT(varchar(19), q.status_dt, 120), ISNULL(RTRIM(q.status_user),''),
+                  {INSPSRC}
              FROM nx.set_stock_maint m WITH(NOLOCK)
              LEFT JOIN nx.v_cm_m_cust c WITH(NOLOCK) ON RTRIM(c.CUST_CODE)=RTRIM(m.cust_code)
              LEFT JOIN nx.item i WITH(NOLOCK) ON RTRIM(i.item_code)=RTRIM(m.item_code)
              LEFT JOIN nx.set_input_req q WITH(NOLOCK)
                     ON RTRIM(ISNULL(q.barcode_no,''))=RTRIM(ISNULL(m.sheet_no,''))
                    AND RTRIM(ISNULL(q.item_code,''))=RTRIM(ISNULL(m.item_code,''))
-            WHERE {} ORDER BY m.maint_ymd DESC, m.maint_seq DESC""".format(
+            WHERE {} ORDER BY m.maint_ymd DESC, m.maint_seq DESC"""
+            .replace("{INSPSRC}", _INSP_SRC).format(
             max(1, min(int(limit or 500), 3000)), " AND ".join(w)), *p)
         rows = [{"ymd": str(r[0]).strip(), "seq": int(r[1] or 0), "tag": r[2],
                  "cust": r[3], "cust_nm": r[4], "item": r[5], "item_nm": r[6],
                  "qty": float(r[7] or 0), "sheet": r[8], "stat": r[9],
                  "derived": r[10], "in_dt": r[11], "insp": r[12], "req_sheet": r[13],
-                 "insp_dt": r[14], "insp_user": r[15]} for r in cur.fetchall()]
+                 "insp_dt": r[14], "insp_user": r[15],
+                 "insp_raw": str(r[16] or "N").strip()} for r in cur.fetchall()]
         return {"ok": True, "rows": rows, "cnt": len(rows),
                 "qty": sum(x["qty"] for x in rows)}
     finally:
@@ -1438,10 +1500,29 @@ def setstock_cancel(request: Request, payload: dict = Body(...)):
             _assert_open(cur, str(ymd).strip(), "MAT", "세트입고 취소")
 
         # ③ 재고 파생분 먼저 제거 (원장 → 거래 → 상태 순서로 되돌린다)
+        #   ★★2026-09-08 — 종전엔 **원장만** 지워서 잔액(PU_T_MAT_STOCK_WH)과
+        #     미러이력(PU_T_STOCK_MAINT)이 그대로 남았다. 입고는 3층에 쓰는데(L1016·1018)
+        #     취소는 1층만 지우니 **취소해도 화면 재고가 안 줄었다**.
+        #     실측 2026-09-08 HTTP: 입고 원장+9·잔액+9·미러+9 → 취소 원장−9·잔액 0·미러 0.
+        #   ⟹ 지우기 전에 그 행들을 읽어 잔액·미러이력을 먼저 되돌린다(근거키 = SHEET_NO).
         led = 0
         try:
-            cur.execute("DELETE FROM nx.stock_ledger WHERE SHEET_NO=? AND MAINT_TAG='S'",
-                        int(bc) if bc.isdigit() else None)
+            _bcn = int(bc) if bc.isdigit() else None
+            cur.execute("""SELECT RTRIM(MAT_CODE), ISNULL(SUM(MAINT_QTY),0), MIN(MAINT_YMD),
+                                  MAX(RTRIM(ISNULL(ITEM_CODE,''))), MAX(RTRIM(ISNULL(CUST_CODE,'')))
+                             FROM nx.stock_ledger WITH(NOLOCK)
+                            WHERE SHEET_NO=? AND MAINT_TAG='S'
+                            GROUP BY RTRIM(MAT_CODE)""", _bcn)
+            _undo = [(str(x[0]).strip(), float(x[1] or 0), str(x[2] or '').strip(),
+                      str(x[3] or '').strip(), str(x[4] or '').strip()) for x in cur.fetchall()]
+            for _m, _q, _ym, _it, _cc in _undo:
+                if not _m or not _q:
+                    continue
+                _upd_mat_wh(cur, _m, -_q)                    # 잔액 원복
+                _mirror_ins(cur, _ym, 'S', _m, -_q,          # 미러이력에 역행 기록
+                            cust=(_cc or None), item=(_it or None),
+                            remarks='세트입고취소(SET%s)' % bc, screen='setstock')
+            cur.execute("DELETE FROM nx.stock_ledger WHERE SHEET_NO=? AND MAINT_TAG='S'", _bcn)
             led = cur.rowcount
         except Exception:
             led = 0
