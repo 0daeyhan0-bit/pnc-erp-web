@@ -2635,15 +2635,27 @@ def sourcing_current_order_vendor(payload: dict = Body(...)):
             raise HTTPException(400, "다중업체는 모든 업체에 배분%를 입력해야 합니다")
         if abs(sum(rated) - 100.0) > 0.01:
             raise HTTPException(400, f"배분% 합이 100이 아닙니다(현재 {sum(rated):.0f}%)")
-    # ★단가 미등록 업체 저장 차단(현행 매입처=품목 대표단가 인정)
+    # ★단가 미등록 업체 — **차단하지 않는다**(2026-09-09 대표 지시 "발주업체 지정은 저장을 할 수 있어야 해").
+    #
+    #   종전엔 여기서 400 으로 막았다. 그 결과 실제로 이런 일이 벌어졌다 —
+    #     대원산업 직납품인데 **대원산업을 등록할 수가 없다**(대표 지적).
+    #     실측: AJR30125501 에 대원산업 지정 → `단가 미등록 업체는 저장할 수 없습니다: 대원산업`
+    #   업체 지정과 단가 등록은 **다른 축**이다.
+    #     · 업체 지정 = 누구에게 발주할 것인가(조달) — 지금 정해야 편성·협력사 계획이 돈다
+    #     · 매입단가 = 얼마에 살 것인가(정산) — **마감 때만 수정**(CLAUDE §1-2)이라 나중에 들어온다
+    #   단가가 없다고 업체를 못 정하게 하면, 신규 거래·직납처럼 **단가가 아직 없는 건을 영영 등록 못 한다.**
+    #   ⟹ 저장은 허용하고, 어느 업체가 단가 미등록인지 **응답으로 알려준다**(화면이 빨간 배지로 이미 표시 중).
+    unreg_names = []
     if norm:
-        priced = _priced_vendors(item_code, list(norm.keys()))
-        unreg = [v for v in norm if v not in priced]
-        if unreg:
-            nn = _nx(); nc = nn.cursor()
-            try: un = _custnm_map(nc, set(unreg))
-            finally: nn.close()
-            raise HTTPException(400, "단가 미등록 업체는 저장할 수 없습니다: " + ", ".join(un.get(v, v) for v in unreg))
+        try:
+            priced = _priced_vendors(item_code, list(norm.keys()))
+            unreg = [v for v in norm if v not in priced]
+            if unreg:
+                nn = _nx(); nc = nn.cursor()
+                try: unreg_names = [_custnm_map(nc, set(unreg)).get(v, v) for v in unreg]
+                finally: nn.close()
+        except Exception:
+            unreg_names = []
     nx = _nx_tx(); cur = nx.cursor()
     try:
         _ensure_order_vendor_tbl(cur)
@@ -2652,7 +2664,12 @@ def sourcing_current_order_vendor(payload: dict = Body(...)):
             r = rt if rt is not None else (100 if len(norm) == 1 else None)
             cur.execute("INSERT INTO nx.order_vendor(item_code,vendor_code,alloc_ratio,upd_dt) VALUES(?,?,?,getdate())", item_code, vc, r)
         nx.commit()
-        return {"ok": True, "item_code": item_code, "vendors": len(norm), "cleared": (len(norm) == 0)}
+        return {"ok": True, "item_code": item_code, "vendors": len(norm), "cleared": (len(norm) == 0),
+                # ★단가 미등록은 저장을 막지 않는다(§업체지정≠단가등록). 대신 경고로 알리고,
+                #   이 상태로는 **승인이 안 되게** 한다(아래 approve 게이트). 대표 지시 2026-09-09.
+                "warn_unpriced": unreg_names,
+                "warn": ("단가 미등록 업체가 있습니다: " + ", ".join(unreg_names)
+                         + " — 저장은 됐지만 단가를 등록해야 승인할 수 있습니다.") if unreg_names else ""}
     except HTTPException:
         nx.rollback(); raise
     except Exception:
