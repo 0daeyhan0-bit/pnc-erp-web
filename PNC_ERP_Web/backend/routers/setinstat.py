@@ -180,7 +180,7 @@ def setinstat_opts():
         # ★자도번작업처 = 자도번의 매입처(pr_m_item.IN_CUST_CODE) — list 와 동일 기준
         cur.execute("""SELECT mi.IN_CUST_CODE cd, ISNULL(c.CUST_DESC,'') nm
                          FROM nx.plan_part_mat m WITH(NOLOCK)
-                         JOIN nx.pr_m_item mi WITH(NOLOCK) ON mi.ITEM_CODE=m.mat_code
+                         JOIN nx.v_pr_m_item mi WITH(NOLOCK) ON mi.ITEM_CODE=m.mat_code
                          LEFT JOIN nx.v_cm_m_cust c WITH(NOLOCK) ON c.CUST_CODE=mi.IN_CUST_CODE
                         WHERE ISNULL(mi.IN_CUST_CODE,'')<>''
                         GROUP BY mi.IN_CUST_CODE, c.CUST_DESC

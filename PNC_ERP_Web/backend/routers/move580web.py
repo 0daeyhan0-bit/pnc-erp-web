@@ -77,7 +77,7 @@ SELECT A.PLAN_YMD, A.WORK_ORDER, A.SPLIT_WORK_ORDER, A.C_ITEM_CODE, 0, A.C_ITEM_
        '', 0, '', 0, 0,
        A.PLAN_YMD, A.OUTPUT_HM, A.PLAN_QTY * A.USE_QTY
   FROM {S}.v_plan_item_dtl_new A WITH (NOLOCK)
-  JOIN {S}.PR_M_ITEM M ON A.C_ITEM_CODE = M.ITEM_CODE
+  JOIN {S}.v_pr_m_item M ON A.C_ITEM_CODE = M.ITEM_CODE
  WHERE M.IN_CUST_CODE > '' AND A.PLAN_YMD >= CONVERT(VARCHAR, GETDATE(), 12)
 UNION ALL
 SELECT A.PLAN_YMD, A.WORK_ORDER, A.WORK_ORDER, A.ITEM_CODE, 0, A.ITEM_CODE,
@@ -85,7 +85,7 @@ SELECT A.PLAN_YMD, A.WORK_ORDER, A.WORK_ORDER, A.ITEM_CODE, 0, A.ITEM_CODE,
        '', 0, '', 0, 0,
        A.PLAN_YMD, A.OUTPUT_HM, A.PLAN_QTY
   FROM {S}.v_prod_plan_input_new A WITH (NOLOCK)
-  JOIN {S}.PR_M_ITEM M ON A.ITEM_CODE = M.ITEM_CODE
+  JOIN {S}.v_pr_m_item M ON A.ITEM_CODE = M.ITEM_CODE
  WHERE M.IN_CUST_CODE > '' AND A.PLAN_YMD >= CONVERT(VARCHAR, GETDATE(), 12)
 UNION ALL
 SELECT A.PLAN_YMD, A.WORK_ORDER, A.WORK_ORDER, A.ITEM_CODE, 0, A.ITEM_CODE,
@@ -93,7 +93,7 @@ SELECT A.PLAN_YMD, A.WORK_ORDER, A.WORK_ORDER, A.ITEM_CODE, 0, A.ITEM_CODE,
        '', 0, '', 0, 0,
        A.PLAN_YMD, A.OUTPUT_HM, A.PLAN_QTY
   FROM {S}.v_prod_plan_input_new A WITH (NOLOCK)
-  JOIN {S}.PR_M_ITEM M ON A.ITEM_CODE = M.ITEM_CODE
+  JOIN {S}.v_pr_m_item M ON A.ITEM_CODE = M.ITEM_CODE
  WHERE M.WORK_CODE = 'P2' AND A.PLAN_YMD >= CONVERT(VARCHAR, GETDATE(), 12)
 """
 
@@ -282,7 +282,7 @@ T_SUB_CTE(item_code, mat_code, stock_qty, pr_stock_qty, set_stock_qty, FIX_STOCK
             /*사급재고 — ★계획과 조인 없음(SP 332~335 그대로). 전체 사급재고를 싣는다*/
             SELECT a.mat_code, 0, A.STOCK_QTY, 0, 0
               FROM {S}.PU_T_SAGUB_STOCK A WITH (NOLOCK)
-              JOIN {S}.pr_m_item M WITH (NOLOCK) ON A.MAT_CODE = M.ITEM_CODE
+              JOIN {S}.v_pr_m_item M WITH (NOLOCK) ON A.MAT_CODE = M.ITEM_CODE
              WHERE M.SAGUB_STOCK_FLAG = '1'
             UNION ALL
             /*자재창고재고*/
@@ -367,7 +367,7 @@ CTE1(item_code, item_gagong_proc_code, mat_code, cum_use_qty, sagub_flag, SET_EX
                  WHERE ITEM_CODE = T.ITEM_CODE AND PROC_SEQ = 1))) AS varchar(10)),
            CAST(AM.WORK_CODE AS varchar(10)), CAST(AM.ITEM_CLASS AS varchar(30))
       FROM PL T
-      JOIN {S}.pr_m_item AM WITH (NOLOCK) ON T.item_code = AM.item_code
+      JOIN {S}.v_pr_m_item AM WITH (NOLOCK) ON T.item_code = AM.item_code
      WHERE T.proc_seq <= 1
     UNION ALL
     /*재귀(SP 405~422) — 하위품이 사내생산이 아닌 것까지만*/
@@ -384,8 +384,8 @@ CTE1(item_code, item_gagong_proc_code, mat_code, cum_use_qty, sagub_flag, SET_EX
            CAST(M.WORK_CODE AS varchar(10)), CAST(M.ITEM_CLASS AS varchar(30))
       FROM CTE1 cb
       JOIN {S}.pr_m_item_bom b  WITH (NOLOCK) ON cb.mat_code = b.item_code
-      JOIN {S}.pr_m_item      AM WITH (NOLOCK) ON b.item_code = AM.item_code
-      JOIN {S}.pr_m_item      M  WITH (NOLOCK) ON b.mat_code  = M.item_code
+      JOIN {S}.v_pr_m_item      AM WITH (NOLOCK) ON b.item_code = AM.item_code
+      JOIN {S}.v_pr_m_item      M  WITH (NOLOCK) ON b.mat_code  = M.item_code
      WHERE ISNULL(b.except_flag,'0')='0'
        AND (B.VIR_ITEM_FLAG='1' OR M.IN_CUST_CODE>'' OR M.WORK_CODE='P2'
             OR NOT EXISTS (SELECT * FROM {S}.nx.v_item_proc WITH (NOLOCK) WHERE ITEM_CODE = B.MAT_CODE))
@@ -407,8 +407,8 @@ CTE2(item_code, item_gagong_proc_code, mat_code, cum_use_qty, sagub_flag, SET_EX
            CAST(M.WORK_CODE AS varchar(10)), CAST(M.ITEM_CLASS AS varchar(30))
       FROM PL T
       JOIN {S}.pr_m_item_bom b  WITH (NOLOCK) ON T.ITEM_CODE = b.item_code
-      JOIN {S}.pr_m_item      AM WITH (NOLOCK) ON b.item_code = AM.item_code
-      JOIN {S}.pr_m_item      M  WITH (NOLOCK) ON b.mat_code  = M.item_code
+      JOIN {S}.v_pr_m_item      AM WITH (NOLOCK) ON b.item_code = AM.item_code
+      JOIN {S}.v_pr_m_item      M  WITH (NOLOCK) ON b.mat_code  = M.item_code
      WHERE ISNULL(b.except_flag,'0')='0'
        AND T.ASSY_ITEM_CODE = T.ITEM_CODE
        AND T.proc_seq <= 1
@@ -427,8 +427,8 @@ CTE2(item_code, item_gagong_proc_code, mat_code, cum_use_qty, sagub_flag, SET_EX
            CAST(M.WORK_CODE AS varchar(10)), CAST(M.ITEM_CLASS AS varchar(30))
       FROM CTE2 cb
       JOIN {S}.pr_m_item_bom b  WITH (NOLOCK) ON cb.mat_code = b.item_code
-      JOIN {S}.pr_m_item      AM WITH (NOLOCK) ON b.item_code = AM.item_code
-      JOIN {S}.pr_m_item      M  WITH (NOLOCK) ON b.mat_code  = M.item_code
+      JOIN {S}.v_pr_m_item      AM WITH (NOLOCK) ON b.item_code = AM.item_code
+      JOIN {S}.v_pr_m_item      M  WITH (NOLOCK) ON b.mat_code  = M.item_code
      WHERE ISNULL(b.except_flag,'0')='0'
 ),
 STK(MAT_CODE, STOCK_QTY, PR_STOCK_QTY) AS (
@@ -769,7 +769,7 @@ def compute(cur, from_ymd, to_ymd, work_code, pu_part="IS0001"):
     idesc = {}
     for i in range(0, len(assys), 900):
         ck = assys[i:i + 900]; ph = ",".join("?" * len(ck))
-        cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM {S}.pr_m_item WITH (NOLOCK) WHERE ITEM_CODE IN ({ph})", *ck)
+        cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM {S}.v_pr_m_item WITH (NOLOCK) WHERE ITEM_CODE IN ({ph})", *ck)
         for r in cur.fetchall():
             idesc[_s(r[0])] = _s(r[1])
     cur.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(PROD_RATE,0) FROM {S}.v_part_master WITH (NOLOCK)")

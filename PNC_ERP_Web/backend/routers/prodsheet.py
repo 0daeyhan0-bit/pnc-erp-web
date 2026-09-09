@@ -1715,7 +1715,7 @@ def procbc_list(ymd: str = Query(""), part: str = Query(""), swork: str = Query(
                   s.gagong_proc_code, s.s_work_code as proc_code, a.mach_code, a.worker_code,
                   a.barcode, a.sta_datetime, a.prod_datetime as fin_datetime, a.prod_qty, …
              from nx.PR_T_PROD_DTL_STICKER a
-             join nx.PR_M_ITEM b on a.item_code=b.item_code
+             join nx.v_pr_m_item b on a.item_code=b.item_code
              join nx.PR_T_INDI_WELD_SHEET_DTL s on a.sheet_no=s.sheet_no and a.proc_seq=s.proc_seq
        → 스캔 1건 = 1행이므로 구간별 **생산시작(STA_DATETIME) / 생산종료(PROD_DATETIME)** 가 그대로 보임.
          파트(gagong_proc_code)·공정(s_work_code)은 전표 DTL 쪽 값을 정본으로 사용(레거시 동일).
