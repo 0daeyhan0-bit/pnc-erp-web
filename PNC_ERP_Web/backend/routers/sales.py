@@ -1096,7 +1096,7 @@ def saleout_sagubflag(item: str = Query(...), cust: str = Query(...)):
 
     원문(사용자 제공):
         select isnull(max(sagub_flag),'0') into :ls_sagub_flag
-          from nx.PR_M_ITEM_BOM a
+          from nx.v_pr_bom a
           join nx.v_pr_m_item b on a.item_code = b.item_code
          where a.mat_code   = :ls_item_code     -- 출고하려는 자재
            and b.in_cust_code = :ls_cust_code;  -- 그 거래처가 납품처인 도번

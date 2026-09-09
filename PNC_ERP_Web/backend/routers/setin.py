@@ -372,7 +372,7 @@ WITH CTE_BOM(mat_code, in_cust_code, mat_use_qty, cum_in_cust_code,
          (SELECT insp_flag FROM nx.pr_m_item_sub s WHERE m.item_code = s.item_code),
          b1.in_gagong_proc_code
     FROM CTE_BOM cb
-    JOIN nx.pr_m_item_bom b1 ON cb.mat_code = b1.item_code
+    JOIN nx.v_pr_bom b1 ON cb.mat_code = b1.item_code
     JOIN nx.item m      ON b1.mat_code = m.item_code
    WHERE ISNULL(b1.except_flag,'0') <> '1'
      AND NOT EXISTS (SELECT '2' FROM nx.pr_m_mat WHERE mat_code = b1.mat_code)
@@ -441,7 +441,7 @@ def _apply_sagub(cur, ymd, cust, mats, user, win, ref=""):
             MERGE INTO nx.PU_T_SAGUB_STOCK AS T
             USING (SELECT b.mat_code, ? AS cust_code,
                           SUM(b.use_qty * ? * -1) AS MAINT_QTY
-                     FROM nx.pr_m_item_bom b WITH(NOLOCK)
+                     FROM nx.v_pr_bom b WITH(NOLOCK)
                      JOIN nx.pr_m_item_bom_sub c WITH(NOLOCK)
                        ON b.item_code=c.item_code AND b.mat_code=c.mat_code
                      JOIN nx.item a WITH(NOLOCK) ON b.mat_code=a.item_code
@@ -469,7 +469,7 @@ def _apply_sagub(cur, ymd, cust, mats, user, win, ref=""):
             SELECT ?, ? + ROW_NUMBER() OVER (ORDER BY b.mat_code), 'A', ?, b.mat_code,
                    b.use_qty * ? * -1, ?, ?, ?, ?,
                    ?, GETDATE(), ?, ?, GETDATE(), ?
-              FROM nx.pr_m_item_bom b WITH(NOLOCK)
+              FROM nx.v_pr_bom b WITH(NOLOCK)
               JOIN nx.item a WITH(NOLOCK) ON b.mat_code=a.item_code
              WHERE b.item_code=? AND b.sagub_flag='1'
         """, ymd, sseq, cust, qty, ref, mat_code, ymd, 0,
