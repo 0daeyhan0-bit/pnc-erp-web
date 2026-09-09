@@ -763,8 +763,24 @@ def sourcing_routes(item: str = Query(...), show_unapproved: int = Query(1), for
             fr = [dict(r, readonly=(not r["approve_flag"])) for r in routes if keep(r)]
             routes = fr
         next_no = _peek_route_no(cur, item)   # 단조증가 다음 번호(자동라벨 표시용)
+        # ★최상위 ASSY 의 레거시 지정(2026-09-09) — 레거시 견적원가조회(w_cs_esti_010)가
+        #   최상위 행에 보여주는 생산구분·구매업체명이다(실측 AJJ30041801 = 2:외주 · 대원산업).
+        #   출처 = 품목마스터(make_type·in_cust). R01(현행)은 저장 헤더가 없는 파생이라
+        #   이 값이 없으면 상위 행을 그릴 수가 없다. 화면(R01 상세·후보 상세)이 공통으로 쓴다.
+        _MK5 = {'1': '제작', '2': '외주', '3': '구매', '4': '사급', '5': '외주직납'}
+        _tg = _tv = _tvn = _tmk = ''
+        try:
+            cur.execute("SELECT ISNULL(make_type,''), ISNULL(in_cust,'') FROM nx.item WHERE item_code=?", item)
+            _tr = cur.fetchone()
+            if _tr:
+                _tmk = str(_tr[0]).strip(); _tv = str(_tr[1]).strip()
+                _tg = _MK5.get(_tmk, '')
+                _tvn = _custnm_map(cur, {_tv}).get(_tv, _tv) if _tv else ''
+        except Exception:
+            pass
         return {"item": item, "item_name": nm, "nx_new": _nxnew, "gubun_opts": _ROUTE_GUBUN, "line_gubun_opts": _LINE_GUBUN,
-                "routes": routes, "next_route_no": next_no}
+                "routes": routes, "next_route_no": next_no,
+                "top_gubun": _tg, "top_make_type": _tmk, "top_vendor": _tv, "top_vendor_name": _tvn}
     finally:
         nx.close()
 
@@ -1482,6 +1498,29 @@ def sourcing_route_detail(route_id: int = Query(...)):
                "gubun": h[4], "vendor_code": str(h[5]).strip(), "vendor_name": vmap.get(str(h[5]).strip(), str(h[5]).strip()),
                "approve_flag": bool(h[6]), "reject_flag": bool(h[7]), "reject_reason": h[8], "apply_from": h[9],
                "note": h[10], "ins_user": h[11]}
+        # ★★최상위 ASSY 의 **레거시 지정**(2026-09-09 대표 지시 ①"레거시에 지정된 업체를 보여준다").
+        #   레거시 견적원가조회 `w_cs_esti_010` 이 최상위 행에 보여주는 두 값이다 —
+        #     생산구분 `2:외주` · 구매업체명 `대원산업`  (실측 AJJ30041801)
+        #   출처는 품목마스터다: make_type · in_cust. 신규에도 **이미 같은 값이 들어와 있다**
+        #     (nx.item make_type=2 · in_cust=2148 — 레거시 PR_M_ITEM 과 일치 확인).
+        #   지금까지 화면이 이 둘을 안 그려서 "레거시엔 지정이 있는데 여기선 보이지도 않는다" 였다.
+        #   ⟹ seed 로 함께 내려보내고, 화면은 헤더값(사용자 지정)이 비었을 때 이 seed 를 보여준다.
+        #   ※경로 헤더(sourcing_route.gubun/vendor_code)가 채워지면 그것이 우선한다(=사용자 수정분).
+        _MK5 = {'1': '제작', '2': '외주', '3': '구매', '4': '사급', '5': '외주직납'}
+        try:
+            cur.execute("SELECT ISNULL(make_type,''), ISNULL(in_cust,'') FROM nx.item WHERE item_code=?",
+                        str(h[1]).strip())
+            _r = cur.fetchone()
+            _mk = str(_r[0]).strip() if _r else ''
+            _ic = str(_r[1]).strip() if _r else ''
+            _icnm = _custnm_map(cur, {_ic}).get(_ic, _ic) if _ic else ''
+            hdr["gubun_seed"] = _MK5.get(_mk, '')          # 레거시 생산구분
+            hdr["make_type"] = _mk
+            hdr["vendor_seed"] = _ic                        # 레거시 구매업체(품목마스터 매입처)
+            hdr["vendor_seed_name"] = _icnm
+        except Exception:
+            hdr["gubun_seed"] = ''; hdr["make_type"] = ''
+            hdr["vendor_seed"] = ''; hdr["vendor_seed_name"] = ''
         base_g = None; base_procs = []
         try:
             with _COST_LOCK:
@@ -1667,6 +1706,57 @@ def sourcing_part_assign(payload: dict = Body(...)):
         nx.rollback(); raise
     finally:
         nx.close()
+
+@router.post("/api/sourcing/route/gubun")
+def sourcing_route_gubun(payload: dict = Body(...)):
+    """★최상위 ASSY(경로 헤더)의 구분·업체 지정 — 조달후보 상세편집 레벨0 행 (2026-09-09 신설).
+
+       왜 필요한가 —
+         종전엔 구분 드롭다운이 **SUB·부품 라인에만** 있었다(`/api/sourcing/line/gubun`).
+         그래서 "이 완제품 자체를 대원산업이 만들어 직납한다"를 **표현할 자리가 없었다.**
+         레거시 견적원가조회(w_cs_esti_010)는 최상위 행에 생산구분(2:외주)·구매업체명(대원산업)을
+         분명히 갖고 있는데, 신규는 그것을 보여주지도 고치지도 못했다(대표 지적 2026-09-09).
+
+       저장 위치 = `nx.sourcing_route.gubun` · `vendor_code` — **이미 있는 컬럼**이다(신설 아님).
+       payload {route_id, gubun, vendor_code?}. 편집이므로 승인 리셋(라인 구분과 동일 규약).
+       ※업체를 빈 문자열로 주면 지정 해제 = 품목마스터 매입처(seed)로 되돌아간다.
+    """
+    rid = int(payload.get("route_id") or 0)
+    gubun = str(payload.get("gubun", "")).strip()[:20]
+    has_v = "vendor_code" in payload
+    ven = str(payload.get("vendor_code", "")).strip()[:20]
+    if rid <= 0:
+        raise HTTPException(400, "route_id 필요")
+    # ★허용값 — 이 컬럼에는 **두 벌의 라벨**이 섞여 있다(2026-09-09 실측: 기존 7행이 전부 '자체').
+    #     조달후보 라인 라벨 : 제작 / 외주 / 구매 / 사급 / 외주직납   (make_type 5종 · 화면 드롭다운)
+    #     조달프로파일 라벨   : 자체 / 외주가공 / 매입 / 유상사급 / 외주완성  (planrev `_MKMAP`)
+    #   화면에서 새로 고르는 것은 앞의 5종이지만, **기존 값을 되돌려 쓸 수 있어야** 하므로
+    #   뒤의 라벨도 막지 않는다(검증 중 '자체' 를 못 넣어 원복이 실패한 실측이 있었다).
+    _OK_GUBUN = ("제작", "외주", "구매", "사급", "외주직납", "매입",
+                 "자체", "외주가공", "유상사급", "외주완성")
+    if gubun and gubun not in _OK_GUBUN:
+        raise HTTPException(400, "구분은 제작/외주/구매/사급/외주직납 중 하나")
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        if has_v:
+            cur.execute("UPDATE nx.sourcing_route SET gubun=?, vendor_code=?, approve_flag=0, upd_dt=getdate() "
+                        "WHERE route_id=?", gubun, ven, rid)
+        else:
+            cur.execute("UPDATE nx.sourcing_route SET gubun=?, approve_flag=0, upd_dt=getdate() "
+                        "WHERE route_id=?", gubun, rid)
+        n = cur.rowcount
+        if n == 0:
+            raise HTTPException(404, f"대상 없음(route_id={rid})")
+        nx.commit()
+        return {"ok": True, "updated": n, "gubun": gubun, "vendor_code": (ven if has_v else None)}
+    except HTTPException:
+        nx.rollback(); raise
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
+
 
 @router.post("/api/sourcing/line/gubun")
 def sourcing_line_gubun(payload: dict = Body(...)):
@@ -2395,6 +2485,10 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
         if not agg:
             return {"item": item, "asof": asof, "rows": [], "n": 0, "note": "현행 BOM 구성 없음"}
         codes = [c for c in agg if not c.upper().startswith("RAC")]   # 용접봉 제외
+        # ★최상위 ASSY 자신도 조회 대상에 넣는다(2026-09-09) — 품명·매입처·단가를 아래 공통 로직이 채우도록.
+        #   안 넣으면 ASSY 행만 품명·업체가 빈칸으로 나온다(실측).
+        if item not in codes:
+            codes.append(item)
         info = {}
         for i in range(0, len(codes), 900):
             ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
@@ -2415,7 +2509,18 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
                 WHERE ITEM_CODE IN ({ph}) AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
                   AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1' AND ISNULL(EXCEPT_FLAG,'0')<>'1' AND UPPER(LTRIM(RTRIM(MAT_CODE))) NOT LIKE 'RAC%'""", *ch)
             for r in cur.fetchall(): maker_parents.add(str(r[0]).strip())
-        order_items = {c: agg[c] for c in codes if c not in maker_parents}
+        order_items = {c: agg[c] for c in codes if c not in maker_parents and c in agg}
+        # ★★최상위 ASSY 자신을 목록에 넣는다 (2026-09-09 대표 지시).
+        #   종전엔 `order_soyo(품번)` 이 **자식만** 돌려주어 이 팝업에 ASSY 행이 없었다.
+        #   그래서 "이 완제품 자체를 대원산업이 만들어 직납한다" 를 지정할 자리가 없었고,
+        #   대표 지적 그대로 **"대원산업을 등록하고 싶어도 등록할 수가 없다"** 였다.
+        #   레거시 견적원가조회(w_cs_esti_010)는 최상위 행에 생산구분·구매업체명을 갖고 있다
+        #   (실측 AJJ30041801 = 2:외주 · 대원산업 = nx.item make_type=2 · in_cust=2148).
+        #   ⟹ 소요량 1 로 맨 위에 세우고, 아래 기존 로직(매입처 시드·단가·배분)을 그대로 태운다.
+        #      `is_top` 로 표시해 화면이 구분해 그릴 수 있게 한다.
+        _TOP = item
+        if _TOP not in order_items:
+            order_items[_TOP] = 1.0
         oc = list(order_items.keys())
         price = {}
         for i in range(0, len(oc), 900):
@@ -2470,7 +2575,10 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
         finally:
             cn2.close()
     rows = []
-    for c in sorted(oc, key=lambda x: (-order_items[x], x)):
+    # ★최상위 ASSY 는 항상 맨 앞. 나머지 부품은 종전 정렬(소요량 내림차순·품번) 유지.
+    _order = ([item] if item in order_items else []) \
+             + sorted([x for x in oc if x != item], key=lambda x: (-order_items[x], x))
+    for c in _order:
         ii = info.get(c, {}); pp = price.get(c, {})
         cur_vc = ii.get("cust", ""); cur_vn = ii.get("custnm", "")
         lst = alloc.get(c)
@@ -2494,6 +2602,7 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
         rows.append({"item_code": c, "item_name": ii.get("nm", ""), "spec": ii.get("spec", ""), "qty": round(order_items[c], 4),
             "make_type": ii.get("mk", ""), "make_label": _MK_LABEL.get(ii.get("mk", ""), ii.get("mk", "")),
             "sagub": bool(sagub.get(c, 0)),
+            "is_top": (c == item),      # ★최상위 ASSY 행 — 화면이 구분해 그린다(직납 업체 지정 자리)
             "cur_vendor_code": cur_vc, "cur_vendor_name": cur_vn, "has_override": bool(lst), "vendors": vends,
             "eff_vendor_code": prim["vendor_code"], "eff_vendor_name": prim["vendor_name"],
             "master_price": pp.get("cost"), "price_apply": pp.get("apply", ""), "currency": pp.get("curr", "")})
@@ -2526,15 +2635,27 @@ def sourcing_current_order_vendor(payload: dict = Body(...)):
             raise HTTPException(400, "다중업체는 모든 업체에 배분%를 입력해야 합니다")
         if abs(sum(rated) - 100.0) > 0.01:
             raise HTTPException(400, f"배분% 합이 100이 아닙니다(현재 {sum(rated):.0f}%)")
-    # ★단가 미등록 업체 저장 차단(현행 매입처=품목 대표단가 인정)
+    # ★단가 미등록 업체 — **차단하지 않는다**(2026-09-09 대표 지시 "발주업체 지정은 저장을 할 수 있어야 해").
+    #
+    #   종전엔 여기서 400 으로 막았다. 그 결과 실제로 이런 일이 벌어졌다 —
+    #     대원산업 직납품인데 **대원산업을 등록할 수가 없다**(대표 지적).
+    #     실측: AJR30125501 에 대원산업 지정 → `단가 미등록 업체는 저장할 수 없습니다: 대원산업`
+    #   업체 지정과 단가 등록은 **다른 축**이다.
+    #     · 업체 지정 = 누구에게 발주할 것인가(조달) — 지금 정해야 편성·협력사 계획이 돈다
+    #     · 매입단가 = 얼마에 살 것인가(정산) — **마감 때만 수정**(CLAUDE §1-2)이라 나중에 들어온다
+    #   단가가 없다고 업체를 못 정하게 하면, 신규 거래·직납처럼 **단가가 아직 없는 건을 영영 등록 못 한다.**
+    #   ⟹ 저장은 허용하고, 어느 업체가 단가 미등록인지 **응답으로 알려준다**(화면이 빨간 배지로 이미 표시 중).
+    unreg_names = []
     if norm:
-        priced = _priced_vendors(item_code, list(norm.keys()))
-        unreg = [v for v in norm if v not in priced]
-        if unreg:
-            nn = _nx(); nc = nn.cursor()
-            try: un = _custnm_map(nc, set(unreg))
-            finally: nn.close()
-            raise HTTPException(400, "단가 미등록 업체는 저장할 수 없습니다: " + ", ".join(un.get(v, v) for v in unreg))
+        try:
+            priced = _priced_vendors(item_code, list(norm.keys()))
+            unreg = [v for v in norm if v not in priced]
+            if unreg:
+                nn = _nx(); nc = nn.cursor()
+                try: unreg_names = [_custnm_map(nc, set(unreg)).get(v, v) for v in unreg]
+                finally: nn.close()
+        except Exception:
+            unreg_names = []
     nx = _nx_tx(); cur = nx.cursor()
     try:
         _ensure_order_vendor_tbl(cur)
@@ -2543,7 +2664,12 @@ def sourcing_current_order_vendor(payload: dict = Body(...)):
             r = rt if rt is not None else (100 if len(norm) == 1 else None)
             cur.execute("INSERT INTO nx.order_vendor(item_code,vendor_code,alloc_ratio,upd_dt) VALUES(?,?,?,getdate())", item_code, vc, r)
         nx.commit()
-        return {"ok": True, "item_code": item_code, "vendors": len(norm), "cleared": (len(norm) == 0)}
+        return {"ok": True, "item_code": item_code, "vendors": len(norm), "cleared": (len(norm) == 0),
+                # ★단가 미등록은 저장을 막지 않는다(§업체지정≠단가등록). 대신 경고로 알리고,
+                #   이 상태로는 **승인이 안 되게** 한다(아래 approve 게이트). 대표 지시 2026-09-09.
+                "warn_unpriced": unreg_names,
+                "warn": ("단가 미등록 업체가 있습니다: " + ", ".join(unreg_names)
+                         + " — 저장은 됐지만 단가를 등록해야 승인할 수 있습니다.") if unreg_names else ""}
     except HTTPException:
         nx.rollback(); raise
     except Exception:

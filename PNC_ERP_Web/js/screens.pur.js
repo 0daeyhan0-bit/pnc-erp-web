@@ -2065,7 +2065,7 @@ SCREEN.sourceprofile=(c)=>{
       if(vs.length>=2){if(vs.some(v=>v.ratio==null)){om.saving=false;om.msg=`⚠ 저장 불가 — [${r.item_code}] 다중업체는 모든 업체에 배분% 입력 필요`;draw();return;}
         const s=vs.reduce((a,v)=>a+(+v.ratio||0),0);if(Math.abs(s-100)>0.01){om.saving=false;om.msg=`⚠ 저장 불가 — [${r.item_code}] 배분% 합이 ${s}% (100% 필요)`;draw();return;}}}
     if(!targets.length){om.saving=false;om.msg='변경사항 없음';draw();return;}
-    om.msg='';draw();let cnt=0;
+    om.msg='';draw();let cnt=0;const warns=[];   // ★단가 미등록 경고 수집(2026-09-09)
     try{for(const i of targets){const r=om.rows[i];const vs=r.vendors.filter(v=>v.code);
         let allocations;
         if(isR02){allocations=vs.map(v=>({vendor_code:v.code,alloc_ratio:v.ratio}));}                       // R02: 지정행(시드포함) 확정 · 빈칸=지정해제
@@ -2073,8 +2073,24 @@ SCREEN.sourceprofile=(c)=>{
         const url=isR02?`${API}/api/sourcing/route_order/vendor`:`${API}/api/sourcing/current_order/vendor`;
         const body=isR02?{route_id:+om.route_id,item_code:r.item_code,allocations}:{item_code:r.item_code,allocations};
         const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-        const jj=await res.json();if(!res.ok||!jj.ok){om.saving=false;om.msg=`⚠ 저장 불가 — [${r.item_code}] ${jj.detail||'저장실패'}`;draw();return;}cnt++;}
-      await omOpen(om.item,om.route_id);om.msg=`✅ 발주업체·배분 저장 (${cnt}건)`;draw();
+        const jj=await res.json();if(!res.ok||!jj.ok){om.saving=false;om.msg=`⚠ 저장 불가 — [${r.item_code}] ${jj.detail||'저장실패'}`;draw();return;}
+        // ★단가 미등록 경고 모으기(2026-09-09) — 저장은 되지만 **왜 승인이 안 되는지** 알려줘야 한다.
+        //   종전엔 여기서 400 으로 막아 "대원산업을 등록할 수가 없다" 였다(대표 지적).
+        if(jj.warn_unpriced&&jj.warn_unpriced.length)warns.push(`[${r.item_code}] ${jj.warn_unpriced.join(', ')}`);
+        cnt++;}
+      await omOpen(om.item,om.route_id);
+      // ★메시지는 **무엇이·왜·어떻게** 를 다 담는다(대표 지시 2026-09-09 "정확하게 설명하는 메시지").
+      //   무엇 = 어느 품번의 어느 업체가 단가가 없는지
+      //   왜   = 발주업체 지정은 저장됐지만 매입단가가 없어 승인 단계에서 막힌다는 것
+      //   어떻게 = 어디서 등록하면 되는지(품목단가 관리)
+      om.msg=warns.length
+        ? `✅ 발주업체·배분 저장 완료 (${cnt}건). `
+          + `⚠ 다만 아래 ${warns.length}건은 매입단가가 등록돼 있지 않습니다 — `
+          + `${warns.slice(0,3).join(' / ')}${warns.length>3?` 외 ${warns.length-3}건`:''}. `
+          + `업체 지정은 저장됐고 편성에는 반영되지만, 단가가 없으면 조달후보 승인 단계에서 막힙니다. `
+          + `[개발 › 품목단가 관리] 에서 해당 품번·업체의 매입단가를 등록하세요.`
+        : `✅ 발주업체·배분 저장 (${cnt}건)`;
+      draw();
     }catch(e){om.saving=false;om.msg='❌ 저장 실패: '+e;draw();}};
   const orderModal=()=>{if(!om)return '';
     const isR02=(+om.route_id>0);   // ★R02+ = 대안 조달경로(route_order/sourcing_profile) · R01 = 현행(current_order/order_vendor)
