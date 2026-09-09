@@ -651,6 +651,7 @@ def _route_gate_incomplete(cur):
 def _route_setup(cur):
     """★조달경로 반영 인프라(2026-08-24, 게이트강화 2026-08-25, ★활성소스 통일 2026-08-31). 매일 rebuild(compose_mat)에서 STEP7 직전 호출.
     - nx.route_edges(route_id,item_code,mat_code,use_qty_pr): 경로별 BOM엣지(Rnn 저장시 자동등록·§19-A). 없으면 fallback.
+      ★★이름충돌 주의(SUB_ARCHITECTURE_REANALYSIS §1): nx.route_edges=**자재 BOM엣지**(여기·STEP7 전개) ≠ nx.routing_edge=**생산처(work-center) 캐시**(별개 축·한대윤 코드). 거의 같은 이름·둘 다 live.
     - nx.plan_route_active(assy_item_code,route_id): ★활성 게이트(§19-C) 통과한 Rnn만.
       ★활성지정 단일소스 = nx.route_alloc.is_active(조달프로파일 택1 라디오). 구조축(여기)·배분축(plan_mat_source)이 동일 스위치를 본다.
       (이전엔 sourcing_route.current_flag로 게이팅했으나 그 컬럼을 켜는 R02 UI가 없어 반영불가 + plan_mat_source에선 current_flag=1이 'R01 취급'으로 겹침

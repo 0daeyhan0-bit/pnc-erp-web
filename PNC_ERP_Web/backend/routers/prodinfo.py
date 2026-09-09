@@ -204,6 +204,7 @@ def prodinfo_get(item: str = Query(...), assyall: int = Query(0), route_id: int 
                     "src": r[3]} for r in cur.fetchall()]
 
         # ── 하단 탭: 양산준비/지그(PR_M_ITEM_SUB 실측 후보 컬럼, 읽기전용 [재구성]) ──
+        # ★이름충돌 주의(SUB_ARCHITECTURE_REANALYSIS §1): PR_M_ITEM_SUB=**품목 1:1 부가정보**(검사·포장·지그·RACK)로 구조 SUB(자도번·하위조립품)와 **완전 무관**.
         cur.execute("""SELECT ISNULL(PROD_STEP_MEMO,''), ISNULL(PROD_STEP_MEMO2,''), ISNULL(PROD_WORKER,''),
               ISNULL(INSP_WORKER,''), ISNULL(MAIN_MACH_CODE,''), ISNULL(ZIG_QTY,0), ISNULL(INSP_COUNT,0), ISNULL(ERR_RATE,0)
             FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB WHERE ITEM_CODE=?""", item)

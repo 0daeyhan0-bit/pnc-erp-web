@@ -628,7 +628,10 @@ def _refresh_shared(cur, code):
 
 
 def _mint_sub(cur, sig, rep_item, nm='', birth_assy=None, birth_route=None):
-    """레지스트리 dedup-safe 등록 + 출생라벨. sig 존재 시 기존 S **강제재사용**(중복 완전차단=사장님 확정:
+    """구조 SUB(=자도번=하위조립품) 레지스트리 dedup-safe 등록 + 출생라벨.
+       ★★이름충돌 주의(SUB_ARCHITECTURE_REANALYSIS §1): ①여기 '구조 SUB'(자도번·하위조립품) ≠ **PR_M_ITEM_SUB**(품목 1:1 부가정보=검사·포장·지그, 구조 무관)
+         ②우리 정규형 **`품번_S{nn}`(언더스코어)** ≠ 레거시 접미사 **`-S1`(대시·sub_variant_map·분석용)**(BOM_STRUCTURE_CANON §2 "혼동 절대 금지").
+       레지스트리 dedup: sig 존재 시 기존 S **강제재사용**(중복 완전차단=사장님 확정:
        동일 품목+공정용접+제작처면 무조건 재사용)·공용flag 갱신. 없으면 신규 S##### 발급.
        birth_assy/route 주어지면(route 편성) 출생라벨 {ASSY}_R{route}_S{nn}(영속번호=(assy,route)별 max+1) 부여.
        반환 (sub_code, is_new). ★DROP+재빌드 재실행 금지(append-only)."""

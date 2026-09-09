@@ -283,11 +283,13 @@ def _ensure_bom_snap(cur):
 
 def _routing_edge_sync(cur):
     """routing_edge 생산처(wc) 시드/싱크 — soyo.py:709 복사분(SQL 원문 동일).
+    ★★이름충돌 주의(SUB_ARCHITECTURE_REANALYSIS §1): nx.routing_edge=**생산처(work-center) 캐시**(여기·조달경로 아님)
+      ≠ nx.route_edges=**자재 BOM엣지**(STEP7 전개). 거의 같은 이름·둘 다 live·완전 별개 축.
 
     모델: wc_live = 마스터(work_code || in_cust) 시드 · wc_user = 사용자 편집(NULL=미편집)
           유효 wc = COALESCE(wc_user, wc_live)
     ⟹ 미편집 엣지는 마스터 자동 추종, **편집 엣지는 보존**. 신규 엣지는 마스터 기준 INSERT.
-       그래서 편성마다 호출해도 사용자가 지정한 조달경로는 덮이지 않는다."""
+       그래서 편성마다 호출해도 사용자가 지정한 **생산처(wc)**는 덮이지 않는다(조달경로 아님)."""
     cur.execute("IF COL_LENGTH('nx.routing_edge','wc_live') IS NULL ALTER TABLE nx.routing_edge ADD wc_live varchar(20)")
     cur.execute("IF COL_LENGTH('nx.routing_edge','wc_user') IS NULL ALTER TABLE nx.routing_edge ADD wc_user varchar(20)")
     # ★2026-09-01: 실제 컬럼은 7개(parent_item·child_item·seq·route_id·wc·wc_live·wc_user)다.
