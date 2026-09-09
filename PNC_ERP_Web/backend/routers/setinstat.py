@@ -635,7 +635,7 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
         # 사급 — 그 자도번이 쓰는 사급품 수량(레거시 '사급' 컬럼)
         sagub = {}
         _fill(jados, """SELECT b.item_code, ISNULL(SUM(b.use_qty),0)
-                          FROM nx.pr_m_item_bom b WITH(NOLOCK)
+                          FROM nx.v_pr_bom b WITH(NOLOCK)
                           JOIN nx.pr_m_item_bom_sub c WITH(NOLOCK)
                             ON c.item_code=b.item_code AND c.mat_code=b.mat_code
                          WHERE b.item_code IN ({ph}) AND c.sagub_flag='1'

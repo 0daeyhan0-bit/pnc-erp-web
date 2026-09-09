@@ -791,7 +791,7 @@ def _bom_expand_legacy(cur, item, gpc_like):
     AS (
         SELECT b.mat_code, b.use_qty, m.work_code, ISNULL(b.SAGUB_FLAG,'0'),
                b.GAGONG_PROC_CODE, b.vir_item_flag
-          FROM nx.pr_m_item_bom b
+          FROM nx.v_pr_bom b
           JOIN nx.item i ON b.item_code=i.item_code
           JOIN nx.item m ON b.mat_code =m.item_code
          WHERE b.item_code=? AND ISNULL(b.except_flag,'0')<>'1'
@@ -799,7 +799,7 @@ def _bom_expand_legacy(cur, item, gpc_like):
         SELECT b.mat_code, cb.cum_use_qty*b.use_qty, m.work_code, ISNULL(b.SAGUB_FLAG,'0'),
                b.GAGONG_PROC_CODE, b.vir_item_flag
           FROM CTE_BOM cb
-          JOIN nx.pr_m_item_bom b ON cb.mat_code=b.item_code
+          JOIN nx.v_pr_bom b ON cb.mat_code=b.item_code
           JOIN nx.item i ON b.item_code=i.item_code
           JOIN nx.item m ON b.mat_code =m.item_code
          WHERE ISNULL(b.except_flag,'0')<>'1' AND cb.vir_item_flag='1'

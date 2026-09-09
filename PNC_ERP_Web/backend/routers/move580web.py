@@ -299,7 +299,7 @@ T_SUB_CTE(item_code, mat_code, stock_qty, pr_stock_qty, set_stock_qty, FIX_STOCK
            CONVERT(int, CASE WHEN cb.FIX_STOCK_QTY <> 0 THEN cb.FIX_STOCK_QTY
                              ELSE (cb.pr_stock_qty + cb.stock_qty) END * b.use_qty)
       FROM T_SUB_CTE cb
-      JOIN {S}.pr_m_item_bom b WITH (NOLOCK) ON cb.mat_code = b.item_code
+      JOIN {S}.v_pr_bom b WITH (NOLOCK) ON cb.mat_code = b.item_code
      WHERE ISNULL(b.except_flag,'0') <> '1'
 )
 SELECT s.item_code, s.mat_code,
@@ -383,7 +383,7 @@ CTE1(item_code, item_gagong_proc_code, mat_code, cum_use_qty, sagub_flag, SET_EX
                      WHERE ITEM_CODE = B.ITEM_CODE AND PROC_SEQ = 1))) AS varchar(10)),
            CAST(M.WORK_CODE AS varchar(10)), CAST(M.ITEM_CLASS AS varchar(30))
       FROM CTE1 cb
-      JOIN {S}.pr_m_item_bom b  WITH (NOLOCK) ON cb.mat_code = b.item_code
+      JOIN {S}.v_pr_bom b  WITH (NOLOCK) ON cb.mat_code = b.item_code
       JOIN {S}.v_pr_m_item      AM WITH (NOLOCK) ON b.item_code = AM.item_code
       JOIN {S}.v_pr_m_item      M  WITH (NOLOCK) ON b.mat_code  = M.item_code
      WHERE ISNULL(b.except_flag,'0')='0'
@@ -406,7 +406,7 @@ CTE2(item_code, item_gagong_proc_code, mat_code, cum_use_qty, sagub_flag, SET_EX
                  WHERE ITEM_CODE = B.ITEM_CODE AND PROC_SEQ = 1)) AS varchar(10)),
            CAST(M.WORK_CODE AS varchar(10)), CAST(M.ITEM_CLASS AS varchar(30))
       FROM PL T
-      JOIN {S}.pr_m_item_bom b  WITH (NOLOCK) ON T.ITEM_CODE = b.item_code
+      JOIN {S}.v_pr_bom b  WITH (NOLOCK) ON T.ITEM_CODE = b.item_code
       JOIN {S}.v_pr_m_item      AM WITH (NOLOCK) ON b.item_code = AM.item_code
       JOIN {S}.v_pr_m_item      M  WITH (NOLOCK) ON b.mat_code  = M.item_code
      WHERE ISNULL(b.except_flag,'0')='0'
@@ -426,7 +426,7 @@ CTE2(item_code, item_gagong_proc_code, mat_code, cum_use_qty, sagub_flag, SET_EX
                      WHERE ITEM_CODE = B.ITEM_CODE AND PROC_SEQ = 1))) AS varchar(10)),
            CAST(M.WORK_CODE AS varchar(10)), CAST(M.ITEM_CLASS AS varchar(30))
       FROM CTE2 cb
-      JOIN {S}.pr_m_item_bom b  WITH (NOLOCK) ON cb.mat_code = b.item_code
+      JOIN {S}.v_pr_bom b  WITH (NOLOCK) ON cb.mat_code = b.item_code
       JOIN {S}.v_pr_m_item      AM WITH (NOLOCK) ON b.item_code = AM.item_code
       JOIN {S}.v_pr_m_item      M  WITH (NOLOCK) ON b.mat_code  = M.item_code
      WHERE ISNULL(b.except_flag,'0')='0'

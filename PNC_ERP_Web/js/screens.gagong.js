@@ -565,11 +565,23 @@ SCREEN.gagongprog420=(c)=>{
     const T_DEF=['finish','sale','ing','proc','jae_m','jae_p','jae_s','fixst','assyst','use',
                  'diam','thick','length','lgout','line_no','bl','wo'];
     const H_LS='g420_headorder', T_LS='g420_tailorder';
+    /* ★ALLDEF = 앞·뒤 정의를 합친 것. 항목보기는 그룹 경계를 넘는 이동을 허용하므로
+         저장된 순서에는 **반대 그룹의 키**가 섞여 있다(예: 뒤 컬럼 '생산재고'를 앞으로 옮김).
+         종전엔 loadOrd 가 그룹별 정의(HDEF/TDEF)로 걸러서 그 키가 **탈락**했고,
+         곧이어 def(T_DEF) 보충 루프가 되살려 **맨 뒤**에 붙였다 —
+         "앞으로 옮겼는데 저장하면 맨 뒤로 간다"의 정체(2026-09-09 사용자 신고).
+         ⟹ 필터는 ALLDEF 로 한다(410 파트별계획과 동일 처방). */
+    const ALLDEF=Object.assign({},HDEF,TDEF);
     const loadOrd=(key,def,defs)=>{try{const s=JSON.parse(localStorage.getItem(key)||'null');
       if(Array.isArray(s)&&s.length){const v=s.filter(k=>defs[k]);def.forEach(k=>{if(!v.includes(k))v.push(k);});return v;}
       }catch(e){}
       return def.slice();};
-    const hOrd=loadOrd(H_LS,H_DEF,HDEF), tOrd=loadOrd(T_LS,T_DEF,TDEF);
+    const hOrd=loadOrd(H_LS,H_DEF,ALLDEF);
+    let tOrd=loadOrd(T_LS,T_DEF,ALLDEF);
+    /* ★한 컬럼이 양쪽 그룹에 동시에 있으면 표에 두 번 나온다.
+         loadOrd 는 "저장에 없는 기본컬럼을 뒤에 보충"하는데, 앞으로 옮긴 컬럼은
+         tail 저장목록에서 빠졌으므로 T_DEF 보충 때 되살아난다 → head 가 가진 키는 tail 에서 뺀다. */
+    tOrd=tOrd.filter(k=>!hOrd.includes(k));
     /* ★헤더 드래그 제거(2026-09-06 사용자 요청 "버벅거린다") — 410 과 같은 방식으로 전환.
          표를 직접 끌면 매 이동마다 레이아웃이 무효화돼 저사양 PC 에서 멈춘다.
          순서·숨김은 **항목보기**(버튼 또는 헤더 우클릭)에서 한다 — 목록 행만 움직이므로 가볍다. */
@@ -578,8 +590,11 @@ SCREEN.gagongprog420=(c)=>{
     const _hid=(()=>{try{const s=JSON.parse(localStorage.getItem('g420_hidecols')||'[]');
       return new Set(Array.isArray(s)?s:[]);}catch(_){return new Set();}})();
     const vis=ks=>ks.filter(k=>!_hid.has(k));
-    const mkTh=(ks,defs,grp)=>vis(ks).map(k=>`<th class="${defs[k].cls||'center'}" data-tk="${k}" data-grp="${grp}" title="우클릭 = 항목보기(순서·숨김)">${defs[k].t}</th>`).join('');
-    const mkTd=(ks,defs,r)=>vis(ks).map(k=>defs[k].h(r)).join('');
+    /* ★defs 는 항상 ALLDEF 로 찾는다 — 그룹을 넘어온 키는 그 그룹 정의에 없다.
+         (HDEF/TDEF 로 찾으면 defs[k] 가 undefined 라 렌더가 그 자리에서 죽는다.) */
+    const mkTh=(ks,defs,grp)=>vis(ks).map(k=>{const d=ALLDEF[k]; if(!d)return '';
+      return `<th class="${d.cls||'center'}" data-tk="${k}" data-grp="${grp}" title="우클릭 = 항목보기(순서·숨김)">${d.t}</th>`;}).join('');
+    const mkTd=(ks,defs,r)=>vis(ks).map(k=>{const d=ALLDEF[k]; return d?d.h(r):'';}).join('');
     const rowHtml=(r)=>`<tr class="g4row">
         ${mkTd(hOrd,HDEF,r)}
         ${dates.map(d=>frac((r.done&&r.done[d])||0,(r.days&&r.days[d])||0,(r.colors&&r.colors[d])||'',r,d)).join('')}
@@ -606,12 +621,14 @@ SCREEN.gagongprog420=(c)=>{
                 plan_qty:`<td class="num"><b>${nf(sPl)}</b></td>`,
                 prior:`<td class="num"${sPrBg?` style="${sPrBg}"`:''}>${sPrP?nf(sPrF)+'/'+nf(sPrP):''}</td>`};
       const ST={finish:`<td class="num">${nf(sFn)}</td>`};
+      /* ★소계 셀도 그룹을 합쳐 찾는다 — 컬럼이 앞↔뒤로 옮겨져도 값이 따라간다. */
+      const SA=Object.assign({},SH,ST);
       return `<tr style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8">
-        ${vis(hOrd).map(k=>SH[k]||'<td></td>').join('')}
+        ${vis(hOrd).map(k=>SA[k]||'<td></td>').join('')}
         ${dates.map(d=>{const pl=blk.reduce((s,r)=>s+((r.days&&r.days[d])||0),0),dn=blk.reduce((s,r)=>s+((r.done&&r.done[d])||0),0);
           const bg=rollBg(blk.filter(r=>((r.days&&r.days[d])||0)>0).map(r=>(r.colors&&r.colors[d])||''));
           return `<td class="num"${bg?` style="${bg}"`:''}>${pl?nf(dn)+'/'+nf(pl):''}</td>`;}).join('')}
-        ${vis(tOrd).map(k=>ST[k]||'<td></td>').join('')}</tr>`;};
+        ${vis(tOrd).map(k=>SA[k]||'<td></td>').join('')}</tr>`;};
     // ★colspan 은 실제 보이는 컬럼 수로 — NC 고정값(23)을 쓰면 숨김 시 어긋난다.
     const NCV=()=>vis(hOrd).length+vis(tOrd).length;
     const bodyHtml=()=>{if(!disp.length)return `<tr><td colspan="${NCV()+dates.length}" class="empty">${
@@ -687,10 +704,13 @@ SCREEN.gagongprog420=(c)=>{
                   plan_qty:`<td class="num">${nf(tPlan)}</td>`,
                   prior:`<td class="num">${nf(tPFn)}/${nf(tPPl)}</td>`};
         const FT={finish:`<td class="num">${nf(tFin)}</td>`, sale:`<td class="num">${nf(tSale)}</td>`};
+        /* ★합계행도 vis() 로 거르고 그룹을 합쳐 찾는다 —
+             종전엔 hOrd/tOrd 를 그대로 써서 **숨긴 컬럼만큼 칸이 남아돌아** 어긋났다. */
+        const FA=Object.assign({},FH,FT);
         return `<tfoot><tr class="grandtot">
-        ${hOrd.map(k=>FH[k]||'<td></td>').join('')}
+        ${vis(hOrd).map(k=>FA[k]||'<td></td>').join('')}
         ${dates.map(d=>`<td class="num" style="white-space:nowrap">${nf(dSum[d].dn)}/${nf(dSum[d].pl)}</td>`).join('')}
-        ${tOrd.map(k=>FT[k]||'<td></td>').join('')}</tr></tfoot>`;})():''}
+        ${vis(tOrd).map(k=>FA[k]||'<td></td>').join('')}</tr></tfoot>`;})():''}
       </table></div>`;
     const g=id=>c.querySelector(id);
     g('#g4-search').onclick=()=>{st.from=g('#g4-from').value;st.to=iso(new Date(new Date(st.from).getTime()+(st.gigan-1)*864e5));st.wc=g('#g4-wc').value.trim();
@@ -922,9 +942,9 @@ SCREEN.gagongprog420=(c)=>{
             항목보기 <span style="font-weight:400;font-size:11px;color:#7b8aa0">체크 해제 = 숨김 · 행을 끌거나 ▲▼ 로 순서 변경</span></div>
           <div style="flex:1;overflow:auto;padding:4px 0">
             <div style="padding:4px 10px;font-size:11px;color:#7b8aa0;font-weight:700">앞쪽 컬럼</div>
-            <div id="g4cp-h">${hOrd.map(k=>item(k,HDEF,'head')).join('')}</div>
+            <div id="g4cp-h">${hOrd.map(k=>item(k,ALLDEF,'head')).join('')}</div>
             <div style="padding:6px 10px 4px;font-size:11px;color:#7b8aa0;font-weight:700">일자칸 뒤 컬럼</div>
-            <div id="g4cp-t">${tOrd.map(k=>item(k,TDEF,'tail')).join('')}</div>
+            <div id="g4cp-t">${tOrd.map(k=>item(k,ALLDEF,'tail')).join('')}</div>
           </div>
           <div style="padding:9px 12px;border-top:1px solid #e3e9f2;display:flex;gap:6px;justify-content:flex-end">
             <button class="btn ghost" id="g4cp-reset">초기화</button>
@@ -1539,18 +1559,27 @@ SCREEN.gagongmove580=(c)=>{
   const MH_DEF=['seq','dest','assy','item','jado','part_ymd','hm','line','jp_print','need','prior'];
   const MT_DEF=['sale','assy_stock','stock','pr_stock','fix_stock'];
   const MH_LS='mv580_headorder', MT_LS='mv580_tailorder', MV_HIDE='mv580_hidecols';
+  /* ★MVALL = 앞·뒤 정의를 합친 것(420·410 과 동일 처방, 2026-09-09).
+       항목보기가 그룹 경계를 넘는 이동을 허용하므로 저장순서에 반대 그룹 키가 섞인다.
+       그룹별 정의로 거르면 그 키가 탈락 → 기본목록 보충 때 **맨 뒤**로 되살아난다
+       ("앞으로 옮겼는데 저장하면 맨 뒤로 간다"). */
+  const MVALL=Object.assign({},MHDEF,MTDEF);
   const mvOrd=(key,def,defs)=>{try{const s=JSON.parse(localStorage.getItem(key)||'null');
     if(Array.isArray(s)&&s.length){const v=s.filter(k=>defs[k]);def.forEach(k=>{if(!v.includes(k))v.push(k);});return v;}
     }catch(e){} return def.slice();};
   /* ★hOrd/tOrd 처럼 **가변 배열**로 둔다 — 항목보기 적용 시 제자리에서 고쳐야
        화면 재렌더가 새 순서를 바로 본다(다시 진입하지 않아도 된다). */
-  const MH_ORD=mvOrd(MH_LS,MH_DEF,MHDEF), MT_ORD=mvOrd(MT_LS,MT_DEF,MTDEF);
+  const MH_ORD=mvOrd(MH_LS,MH_DEF,MVALL), MT_ORD=mvOrd(MT_LS,MT_DEF,MVALL);
+  /* head 가 이미 가진 키는 tail 에서 뺀다(양쪽 등재 = 표에 두 번 나옴). ★in-place — 배열 참조가 유지돼야 한다. */
+  for(let _i=MT_ORD.length-1;_i>=0;_i--) if(MH_ORD.includes(MT_ORD[_i])) MT_ORD.splice(_i,1);
   const mvLoadHide=()=>{try{const s=JSON.parse(localStorage.getItem(MV_HIDE)||'[]');
     return new Set(Array.isArray(s)?s:[]);}catch(_){return new Set();}};
   let mvHid=mvLoadHide();
   const mvVis=ks=>ks.filter(k=>!mvHid.has(k));
-  const mvTh=(ks,defs,grp)=>mvVis(ks).map(k=>`<th data-tk="${k}" data-grp="${grp}" title="우클릭 = 항목보기(순서·숨김)">${defs[k].t}</th>`).join('');
-  const mvTd=(ks,defs,r,i)=>mvVis(ks).map(k=>defs[k].h(r,i)).join('');
+  /* ★defs 는 항상 MVALL 로 찾는다 — 그룹을 넘어온 키는 그 그룹 정의에 없다(undefined → 렌더 사망). */
+  const mvTh=(ks,defs,grp)=>mvVis(ks).map(k=>{const d=MVALL[k]; if(!d)return '';
+    return `<th data-tk="${k}" data-grp="${grp}" title="우클릭 = 항목보기(순서·숨김)">${d.t}</th>`;}).join('');
+  const mvTd=(ks,defs,r,i)=>mvVis(ks).map(k=>{const d=MVALL[k]; return d?d.h(r,i):'';}).join('');
 
   /* == 항목보기 (2026-09-06 — 420·410 과 같은 방식) ========================
        체크 해제 = 그 컬럼 숨김 · 행을 끌거나 ▲▼ 로 순서 변경.
@@ -1577,9 +1606,9 @@ SCREEN.gagongmove580=(c)=>{
           항목보기 <span style="font-weight:400;font-size:11px;color:#7b8aa0">체크 해제 = 숨김 · 행을 끌거나 ▲▼ 로 순서 변경</span></div>
         <div style="flex:1;overflow:auto;padding:4px 0">
           <div style="padding:4px 10px;font-size:11px;color:#7b8aa0;font-weight:700">앞쪽 컬럼</div>
-          <div id="mvcp-h">${MH_ORD.map(k=>item(k,MHDEF,'head')).join('')}</div>
+          <div id="mvcp-h">${MH_ORD.map(k=>item(k,MVALL,'head')).join('')}</div>
           <div style="padding:6px 10px 4px;font-size:11px;color:#7b8aa0;font-weight:700">일자칸 뒤 컬럼</div>
-          <div id="mvcp-t">${MT_ORD.map(k=>item(k,MTDEF,'tail')).join('')}</div>
+          <div id="mvcp-t">${MT_ORD.map(k=>item(k,MVALL,'tail')).join('')}</div>
         </div>
         <div style="padding:9px 12px;border-top:1px solid #e3e9f2;display:flex;gap:6px;justify-content:flex-end">
           <button class="btn ghost" id="mvcp-reset">초기화</button>

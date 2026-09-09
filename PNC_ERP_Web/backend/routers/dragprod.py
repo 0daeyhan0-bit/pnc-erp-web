@@ -61,7 +61,7 @@ def _bom(cur, item):
     """도번의 BOM 하위 — 실사용분만(제외플래그 제외)."""
     cur.execute("""SELECT b.MAT_CODE, ISNULL(b.USE_QTY,0),
                           ISNULL(b.GAGONG_PROC_CODE,'')
-                     FROM nx.pr_m_item_bom b WITH(NOLOCK)
+                     FROM nx.v_pr_bom b WITH(NOLOCK)
                     WHERE b.ITEM_CODE=? AND ISNULL(b.EXCEPT_FLAG,'0')<>'1'""", item)
     return [(str(a).strip(), float(q or 0), str(g or "").strip())
             for a, q, g in cur.fetchall() if a and float(q or 0) > 0]
@@ -231,7 +231,7 @@ def dragprod_save(payload: dict = Body(...)):
             dk, dp = ("ASSY", None)
             if _prod_dest:
                 # 상위품번 = BOM 상위(화면 '상위도번'과 같은 기준)
-                cur.execute("""SELECT TOP 1 ITEM_CODE FROM nx.pr_m_item_bom WITH(NOLOCK)
+                cur.execute("""SELECT TOP 1 ITEM_CODE FROM nx.v_pr_bom WITH(NOLOCK)
                                 WHERE MAT_CODE=? AND ISNULL(EXCEPT_FLAG,'0')<>'1'""", item)
                 _r = cur.fetchone()
                 upper = str(_r[0] or "").strip() if _r else ""
@@ -550,7 +550,7 @@ def dragprod_cancel(payload: dict = Body(...)):
             # ④ 완성품 입고 취소(−) — save 와 **같은 판정**이어야 엉뚱한 창고에서 빠지지 않는다
             dest = "ASSY"
             if _prod_dest:
-                cur.execute("""SELECT TOP 1 ITEM_CODE FROM nx.pr_m_item_bom WITH(NOLOCK)
+                cur.execute("""SELECT TOP 1 ITEM_CODE FROM nx.v_pr_bom WITH(NOLOCK)
                                 WHERE MAT_CODE=? AND ISNULL(EXCEPT_FLAG,'0')<>'1'""", item)
                 _r2 = cur.fetchone()
                 upper = str(_r2[0] or "").strip() if _r2 else ""

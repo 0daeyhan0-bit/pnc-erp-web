@@ -331,15 +331,18 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
             #   실측 2026-09-08: 공통 14,466건 중 **30건 불일치**, 대부분 클린 'F'(유검사) / 미러 'N'(무검사).
             #     예 5210A28001C · AJR74522901-12-1 · AJR74963002-4-1 …
             #   매핑 = F 유검사 · S 체크검사 · N/빈 무검사 (core.js:1454 화면 라벨과 동일).
-            #   ※PACK_QTY 는 클린에 없어 미러에서 따로 읽는다(아래).
-            cur.execute(f"SELECT item_code, ISNULL(insp_flag,'N') FROM PARTNER_ERP_TEST3.nx.item_sub WHERE item_code IN ({ph})", *ch)
-            _ins = {str(r[0]).strip(): str(r[1] or 'N').strip() for r in cur.fetchall()}
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(INSP_FLAG,'N'), ISNULL(PACK_QTY,0) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB WHERE ITEM_CODE IN ({ph})", *ch)
+            # ★2026-09-09 폴백 제거 — 클린 단독(§1-9-1). PACK_QTY 도 클린에 있다(종전 주석은 낡음).
+            #   종전: COALESCE(클린 insp_flag, 미러 INSP_FLAG) + PACK_QTY 는 미러에서 별도 조회.
+            #   폴백을 두었던 이유는 "품목마스터 이관이 FK 로 막혀 있다" 였는데 실측하니 둘 다 사실이 아니었다 —
+            #     · nx.item_sub 에 FK 가 없다(이관을 막는 제약 없음)
+            #     · 미러에만 있던 3,141건은 미러·라이브 PR_M_ITEM 어디에도 없는 고아행이고
+            #       생산실적/출하 최근 1년 0종·스티커 최근일자 2023-09-06 인 폐기품목이다.
+            #   이관 가능분 3건은 item_sub_pack_finish_260909.py 로 옮겼다(2,477→2,480).
+            cur.execute(f"SELECT item_code, ISNULL(insp_flag,'N'), ISNULL(pack_qty,0) "
+                        f"FROM PARTNER_ERP_TEST3.nx.item_sub WHERE item_code IN ({ph})", *ch)
             for r in cur.fetchall():
                 _k = str(r[0])
-                # ★검사구분은 클린(_ins) 우선, 클린에 없는 품목만 미러값으로 폴백.
-                #   클린 nx.item_sub 는 14,466건이고 미러에만 있는 56,577건은 대부분 죽은 품목이다.
-                _f = _ins.get(_k.strip(), str(r[1] or 'N').strip())
+                _f = str(r[1] or 'N').strip()
                 msub[_k] = ('1' if _f in ('S', 'F') else '0', int(r[2] or 0))
         # 자도번LIST(레거시 f_find_cust_mat_list2 = PR_M_CUST_MAT_LIST 조회, '(1)' 제거)
         matlist = {}
@@ -1749,10 +1752,9 @@ def partner_deliv420_invoice(request: Request, barcode: str = Query(...)):
             #   common.py:342·purmagam.py:18 등 코드베이스 전반이 ('S','F') 를 검사대상으로 쓴다).
             # ★★2026-09-08 클린 우선(대표 지시) — 품목마스터 화면은 nx.item_sub 에 저장한다.
             #   미러만 읽으면 화면에서 '유검사'로 바꾼 것이 거래명세표에 안 찍힌다(실측 30건 불일치).
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(INSP_FLAG,'N') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB WHERE ITEM_CODE IN ({ph})", *ch)
-            for rr in cur.fetchall(): inspm[str(rr[0]).strip()] = str(rr[1] or 'N').strip()
+            # ★2026-09-09 미러 조회 제거 — 클린 단독(§1-9-1). 종전엔 미러를 읽고 클린으로 덮어썼다.
             cur.execute(f"SELECT item_code, ISNULL(insp_flag,'N') FROM PARTNER_ERP_TEST3.nx.item_sub WHERE item_code IN ({ph})", *ch)
-            for rr in cur.fetchall(): inspm[str(rr[0]).strip()] = str(rr[1] or 'N').strip()   # 클린이 덮어씀
+            for rr in cur.fetchall(): inspm[str(rr[0]).strip()] = str(rr[1] or 'N').strip()
         # 하위 자재 품명 보강(자도번은 위 assys 에 없으므로 따로 조회)
         #   ★검사구분도 함께 읽는다(2026-08-31) — 레거시 거래명세표는 **하위 P/No. 행**에
         #     '유검사'/'체크' 를 찍는다. 종전엔 도번(Assy)만 조회하고 하위 행 insp 를 ''
@@ -1763,9 +1765,7 @@ def partner_deliv420_invoice(request: Request, barcode: str = Query(...)):
             ch = _mats[i:i+900]; ph = ",".join("?"*len(ch))
             cur.execute(f"SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(item_spec,''), ISNULL(UNIT,'EA') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
             for rr in cur.fetchall(): nmm.setdefault(str(rr[0]).strip(), (rr[1], rr[2], rr[3]))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(INSP_FLAG,'N') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB WHERE ITEM_CODE IN ({ph})", *ch)
-            for rr in cur.fetchall(): inspm[str(rr[0]).strip()] = str(rr[1] or 'N').strip()
-            # ★2026-09-08 클린 우선(위와 동일 규칙)
+            # ★2026-09-09 클린 단독(§1-9-1) — 종전엔 미러를 읽고 클린으로 덮어썼다.
             cur.execute(f"SELECT item_code, ISNULL(insp_flag,'N') FROM PARTNER_ERP_TEST3.nx.item_sub WHERE item_code IN ({ph})", *ch)
             for rr in cur.fetchall(): inspm[str(rr[0]).strip()] = str(rr[1] or 'N').strip()
         # ★납품표(2번 출력물)용 — 작업처·입고구분·생산계획일·SVC
