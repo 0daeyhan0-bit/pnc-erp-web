@@ -10,7 +10,7 @@
   ISSUE_SEQ 는 라이브와 겹치지 않게 nx 전용 대역(9000000+)에서 채번한다.
 
 ★레거시 버그 미복제(§7): 상세쿼리의 가공공정명 조인이
-    (SELECT GAGONG_PROC_DESC FROM PR_M_PROC_GAGONG WHERE WORK_CODE = A.GAGONG_PROC_CODE)
+    (SELECT GAGONG_PROC_DESC FROM nx.v_part_master WHERE WORK_CODE = A.GAGONG_PROC_CODE)
   인데 저장값은 공정코드(S1·S4·S6…)라 항상 '전체'만 나온다. 웹은 GAGONG_PROC_CODE 로 조인해
   '03라인' 처럼 제대로 표시한다.
 """
@@ -47,7 +47,7 @@ def qareview_opts():
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute(f"""SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC
-              FROM {NXS}.PR_M_PROC_GAGONG
+              FROM {NXS}.v_part_master
              WHERE ISNULL(GAGONG_PROC_CODE,'')<>''
              ORDER BY SORT_KEY, GAGONG_PROC_CODE""")
         procs = [{"code": "%", "nm": "전체"}]
@@ -124,7 +124,7 @@ def qareview_detail(seq: int = Query(...)):
               A.CONTENTS_01_DESC,A.CONTENTS_02_DESC,A.CONTENTS_03_DESC,A.CONTENTS_04_DESC,
               A.GAGONG_PROC_CODE,
               -- ★레거시는 WORK_CODE 로 조인해 항상 '전체'가 나오는 버그. 웹은 코드로 조인(§7 버그 미복제)
-              ISNULL((SELECT TOP 1 GAGONG_PROC_DESC FROM {NXS}.PR_M_PROC_GAGONG WITH(NOLOCK)
+              ISNULL((SELECT TOP 1 GAGONG_PROC_DESC FROM {NXS}.v_part_master WITH(NOLOCK)
                        WHERE GAGONG_PROC_CODE=A.GAGONG_PROC_CODE),'전체') proc_nm,
               -- ★작성자명 = nx.app_user (2026-09-07 컷오버).
               --   종전엔 라이브 CM_M_USERS_INFO 를 봤는데, 컷오버로 그 DB 가 은퇴하면서

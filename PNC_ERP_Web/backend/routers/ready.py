@@ -119,7 +119,7 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
         for _i in range(0, len(occmats), 900):
             ch = occmats[_i:_i + 900]; ph = ",".join("?" * len(ch))
             cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(m.ITEM_CODE))), ISNULL(m.item_name,''),
-                   ISNULL(CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
+                   ISNULL(CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.v_work_place WHERE work_code=m.work_code)
                                ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE cust_code=m.in_cust) END,'') cust_desc
               FROM PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK)
              WHERE UPPER(LTRIM(RTRIM(m.ITEM_CODE))) IN ({ph})""", *[str(x).upper() for x in ch])
@@ -346,7 +346,7 @@ def ready_sheet(sheet_no: str = Query(...)):
                             ISNULL(d.S_WORK_CODE,'') sw,
                             ISNULL(d.MACH_CODE,'') mach, ISNULL(d.JP_PROC_METHOD,'') meth
                           FROM {dsch}.PR_T_INDI_WELD_SHEET_DTL d WITH(NOLOCK)
-                          LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g1 WITH(NOLOCK) ON g1.GAGONG_PROC_CODE=d.GAGONG_PROC_CODE
+                          LEFT JOIN PARTNER_ERP_TEST3.nx.v_part_master g1 WITH(NOLOCK) ON g1.GAGONG_PROC_CODE=d.GAGONG_PROC_CODE
                          WHERE d.SHEET_NO=? ORDER BY d.PROC_SEQ""", sn)
         # 실적방법: J=용접전표 / G=가간판 / L=라벨(스티커). 그 공정의 실적을 무엇으로 잡는지.
         _METH = {"J": "용접전표", "G": "가간판", "L": "라벨"}
@@ -361,7 +361,7 @@ def ready_sheet(sheet_no: str = Query(...)):
         def _pname(code):
             if not code: return ""
             try:
-                ccur.execute("SELECT TOP 1 GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WITH(NOLOCK) WHERE GAGONG_PROC_CODE=?", code)
+                ccur.execute("SELECT TOP 1 GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.v_part_master WITH(NOLOCK) WHERE GAGONG_PROC_CODE=?", code)
                 x = ccur.fetchone()
                 return str(x[0]).strip() if x and x[0] else code
             except Exception:
@@ -721,7 +721,7 @@ def ready_bomsheet(item: str = Query(...), gpc: str = Query("")):
         g = str(gpc or "").strip()
         if g:
             cur.execute("""SELECT TOP 1 ISNULL(GAGONG_PROC_DESC,''), ISNULL(PART_GROUP_CODE,'')
-                             FROM nx.PR_M_PROC_GAGONG WITH(NOLOCK) WHERE GAGONG_PROC_CODE=?""", g)
+                             FROM nx.v_part_master WITH(NOLOCK) WHERE GAGONG_PROC_CODE=?""", g)
             r = cur.fetchone()
             if r:
                 part_nm = str(r[0]).strip()

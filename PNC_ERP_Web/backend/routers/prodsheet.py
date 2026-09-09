@@ -110,7 +110,7 @@ def prodsheet_list(from_ymd: str = Query(""), to_ymd: str = Query(""), part: str
         pn = {}; gl = [x for x in gpcs if x]
         if gl:
             ph = ",".join("?" * len(gl))
-            cur.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE IN ({ph})", *gl)
+            cur.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_part_master WHERE GAGONG_PROC_CODE IN ({ph})", *gl)
             for a, b in cur.fetchall(): pn[str(a).strip()] = b
         for x in rows:
             x["nm"] = nm.get(x["item_code"], "")
@@ -136,7 +136,7 @@ def prodsheet_detail(sheet_no: str = Query(...)):
                           d.STA_DATETIME, d.FIN_DATETIME, ISNULL(d.MACH_CODE,''), ISNULL(d.S_WORK_CODE,''),
                           ISNULL(d.WORK_CODE,''), ISNULL(d.TOT_ST,0)
                         FROM nx.PR_T_INDI_WELD_SHEET_DTL d WITH(NOLOCK)
-                        LEFT JOIN nx.PR_M_PROC_GAGONG g WITH(NOLOCK) ON g.GAGONG_PROC_CODE=d.GAGONG_PROC_CODE
+                        LEFT JOIN nx.v_part_master g WITH(NOLOCK) ON g.GAGONG_PROC_CODE=d.GAGONG_PROC_CODE
                        WHERE d.SHEET_NO=? ORDER BY d.PROC_SEQ""", sn)
         procs = []
         for r in cur.fetchall():
@@ -220,7 +220,7 @@ def prodsheet_parts():
         nm = {}
         if codes:
             ph = ",".join("?" * len(codes))
-            c2.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE IN ({ph})", *codes)
+            c2.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_part_master WHERE GAGONG_PROC_CODE IN ({ph})", *codes)
             for a, b in c2.fetchall(): nm[str(a).strip()] = b
         rows = sorted(({"code": c, "nm": nm.get(c, c)} for c in codes), key=lambda x: x["nm"])
         return {"rows": rows, "cnt": len(rows)}
@@ -308,7 +308,7 @@ def prodsheet_kanban_preview(sheet_no: str = Query(...), pack_qty: int = Query(0
         # 대상공정(G) — 가공파트 제외
         cur.execute("""SELECT d.PROC_SEQ, d.GAGONG_PROC_CODE, ISNULL(g.GAGONG_PROC_DESC,'')
                          FROM nx.PR_T_INDI_WELD_SHEET_DTL d WITH(NOLOCK)
-                         LEFT JOIN nx.PR_M_PROC_GAGONG g WITH(NOLOCK) ON g.GAGONG_PROC_CODE=d.GAGONG_PROC_CODE
+                         LEFT JOIN nx.v_part_master g WITH(NOLOCK) ON g.GAGONG_PROC_CODE=d.GAGONG_PROC_CODE
                         WHERE d.SHEET_NO=? AND ISNULL(d.JP_PROC_METHOD,'')='G'
                           AND ISNULL(d.GAGONG_PROC_CODE,'') NOT LIKE 'P00%'
                         ORDER BY d.PROC_SEQ""", sn)
@@ -489,7 +489,7 @@ def prodsheet_kanban_print(box_no: str = Query(...)):
         #   (2026-08-19: 기존엔 G공정 1건만 표시해 다공정 품목에서 앞공정이 누락됐음)
         cur.execute("""SELECT ISNULL(g.GAGONG_PROC_DESC, d.GAGONG_PROC_CODE)
                          FROM nx.PR_T_INDI_WELD_SHEET_DTL d WITH(NOLOCK)
-                         LEFT JOIN nx.PR_M_PROC_GAGONG g WITH(NOLOCK) ON g.GAGONG_PROC_CODE=d.GAGONG_PROC_CODE
+                         LEFT JOIN nx.v_part_master g WITH(NOLOCK) ON g.GAGONG_PROC_CODE=d.GAGONG_PROC_CODE
                         WHERE d.SHEET_NO=? ORDER BY d.PROC_SEQ""", sn)
         _seq = [str(x[0]).strip() for x in cur.fetchall() if x and x[0] and str(x[0]).strip()]
         proc_nm = "-".join(_seq)
@@ -1077,7 +1077,7 @@ def procbc_masters(part: str = Query("")):
         nm = {}
         if codes:
             ph = ",".join("?" * len(codes))
-            c2.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE IN ({ph})", *codes)
+            c2.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_part_master WHERE GAGONG_PROC_CODE IN ({ph})", *codes)
             for a, b in c2.fetchall(): nm[str(a).strip()] = b
         parts = sorted(({"code": c, "nm": nm.get(c, c)} for c in codes), key=lambda x: x["nm"])
         out = {"parts": parts, "procs": [], "machs": [], "workers": []}
@@ -1098,7 +1098,7 @@ def procbc_masters(part: str = Query("")):
                 if mc and mc not in [m["code"] for m in machs]:
                     machs.append({"code": mc, "nm": mc, "cnt": int(c or 0)})
             out["machs"] = machs
-            cur.execute("""SELECT WORKER_CODE FROM nx.PR_M_PROC_GAGONG_WORKER WITH(NOLOCK)
+            cur.execute("""SELECT WORKER_CODE FROM nx.v_part_worker WITH(NOLOCK)
                             WHERE GAGONG_PROC_CODE=? AND ISNULL(WORK_FLAG,'1')='1'
                             ORDER BY WORKER_CODE""", p)
             out["workers"] = [{"code": str(r[0]).strip(), "nm": str(r[0]).strip()} for r in cur.fetchall() if r[0]]
@@ -1183,14 +1183,14 @@ def procbc_lookup(barcode: str = Query(...), proc_code: str = Query("")):
             if sheet:
                 cur.execute("""SELECT ISNULL(d.GAGONG_PROC_CODE,''), ISNULL(g.GAGONG_PROC_DESC,'')
                                  FROM nx.PR_T_INDI_WELD_SHEET_DTL d WITH(NOLOCK)
-                                 LEFT JOIN nx.PR_M_PROC_GAGONG g WITH(NOLOCK)
+                                 LEFT JOIN nx.v_part_master g WITH(NOLOCK)
                                         ON g.GAGONG_PROC_CODE=d.GAGONG_PROC_CODE
                                 WHERE d.SHEET_NO=? ORDER BY d.PROC_SEQ""", sheet)
                 _procs = [(str(x[0] or '').strip(), str(x[1] or '').strip()) for x in cur.fetchall()]
             if not _procs:
                 cur.execute("""SELECT ISNULL(m.GAGONG_PROC_CODE,''), ISNULL(g.GAGONG_PROC_DESC,'')
                                  FROM nx.prodinfo_proc m WITH(NOLOCK)
-                                 LEFT JOIN nx.PR_M_PROC_GAGONG g WITH(NOLOCK)
+                                 LEFT JOIN nx.v_part_master g WITH(NOLOCK)
                                         ON g.GAGONG_PROC_CODE=m.GAGONG_PROC_CODE
                                 WHERE m.ITEM_CODE=? ORDER BY m.PROC_SEQ""", item)
                 _procs = [(str(x[0] or '').strip(), str(x[1] or '').strip()) for x in cur.fetchall()]
@@ -1214,7 +1214,7 @@ def procbc_lookup(barcode: str = Query(...), proc_code: str = Query("")):
                 _own = ""      # 이 바코드가 원래 속한 공정(같은 품목에서 실적수단이 일치하는 공정)
                 cur.execute("""SELECT TOP 1 ISNULL(m.GAGONG_PROC_CODE,''), ISNULL(g.GAGONG_PROC_DESC,'')
                                  FROM nx.prodinfo_proc m WITH(NOLOCK)
-                                 LEFT JOIN nx.PR_M_PROC_GAGONG g WITH(NOLOCK)
+                                 LEFT JOIN nx.v_part_master g WITH(NOLOCK)
                                         ON g.GAGONG_PROC_CODE=m.GAGONG_PROC_CODE
                                 WHERE m.ITEM_CODE=? AND ISNULL(m.JP_PROC_METHOD,'')=?
                                 ORDER BY m.PROC_SEQ""", item, meth)
@@ -1241,7 +1241,7 @@ def procbc_lookup(barcode: str = Query(...), proc_code: str = Query("")):
                                   ISNULL(g.GAGONG_PROC_DESC,''), ISNULL(d.PROD_QTY,0),
                                   ISNULL(d.PROD_FIN_FLAG,'0')
                              FROM nx.PR_T_INDI_WELD_SHEET_DTL d WITH(NOLOCK)
-                             LEFT JOIN nx.PR_M_PROC_GAGONG g WITH(NOLOCK)
+                             LEFT JOIN nx.v_part_master g WITH(NOLOCK)
                                     ON g.GAGONG_PROC_CODE=d.GAGONG_PROC_CODE
                             WHERE d.SHEET_NO=? AND d.PROC_SEQ<?
                             ORDER BY d.PROC_SEQ DESC""", sheet, pseq)
@@ -1518,7 +1518,7 @@ def procbc_save(payload: dict = Body(...)):
         _dk, _dp = _prod_dest(cur, item, _upper)
         _gc = ''
         if stock_gpc:
-            cur.execute("SELECT ISNULL(GC_GUBUN,'') FROM nx.PR_M_PROC_GAGONG WITH(NOLOCK) WHERE GAGONG_PROC_CODE=?", stock_gpc)
+            cur.execute("SELECT ISNULL(GC_GUBUN,'') FROM nx.v_part_master WITH(NOLOCK) WHERE GAGONG_PROC_CODE=?", stock_gpc)
             _r = cur.fetchone()
             _gc = str(_r[0] or '').strip() if _r else ''
         if _dk == "PART" and _dp:
@@ -1714,9 +1714,9 @@ def procbc_list(ymd: str = Query(""), part: str = Query(""), swork: str = Query(
            select a.sheet_no, a.proc_seq, a.item_code, a.prod_tag,
                   s.gagong_proc_code, s.s_work_code as proc_code, a.mach_code, a.worker_code,
                   a.barcode, a.sta_datetime, a.prod_datetime as fin_datetime, a.prod_qty, …
-             from PR_T_PROD_DTL_STICKER a
-             join pr_m_item b on a.item_code=b.item_code
-             join pr_t_indi_weld_sheet_dtl s on a.sheet_no=s.sheet_no and a.proc_seq=s.proc_seq
+             from nx.PR_T_PROD_DTL_STICKER a
+             join nx.PR_M_ITEM b on a.item_code=b.item_code
+             join nx.PR_T_INDI_WELD_SHEET_DTL s on a.sheet_no=s.sheet_no and a.proc_seq=s.proc_seq
        → 스캔 1건 = 1행이므로 구간별 **생산시작(STA_DATETIME) / 생산종료(PROD_DATETIME)** 가 그대로 보임.
          파트(gagong_proc_code)·공정(s_work_code)은 전표 DTL 쪽 값을 정본으로 사용(레거시 동일).
        ※PR_T_PROD_DTL 은 '마지막 공정'에서만 쌓여 앞공정이 안 보이므로 이력원장으로 부적합."""

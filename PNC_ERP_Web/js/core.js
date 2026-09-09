@@ -444,6 +444,7 @@ const MODULES=[
    {id:'close',ic:'🔒',nm:'마감관리'},
    {id:'users',ic:'👤',nm:'사용자관리'},
    {id:'perm',ic:'🔑',nm:'권한관리'},
+   {id:'syscode',ic:'🗂️',nm:'시스템코드관리'},
  ]},
 ];
 const allSubs=()=>MODULES.flatMap(m=>m.subs);
@@ -3659,12 +3660,32 @@ function custMaint(host){
 /* cfg={sid,keyField,listEp,saveEp,delEp,cols:[{k,h,fmt?}],fields:[[k,label,type,opts?]],newDefaults,readOnly?,newcodeEp?} */
 function mstCrud(host, cfg){
   const API=API_BASE;
-  const st={rows:[],cnt:0,q:'',form:null,sel:new Set(),msg:''};
+  // ★조회 필터(2026-09-09) — cfg.qfilters=[{k,label,width,def,optEp,opts}] 가 있으면 툴바에 드롭다운을 만든다.
+  //   optEp 를 주면 그 API 에서 {rows:[{code,name}]} 를 받아 채운다(작업처 마스터 연동 등).
+  //   def 로 기본값을 준다 — 단품공정 마스터는 레거시처럼 'P1'(용접) 고정 시작.
+  const st={rows:[],cnt:0,q:'',form:null,sel:new Set(),msg:'',F:{},opts:{},fopts:{}};
+  (cfg.qfilters||[]).forEach(f=>{ st.F[f.k]=(f.def!==undefined?f.def:''); });
+  const loadOpts=async()=>{
+    for(const f of (cfg.qfilters||[])){
+      if(!f.optEp||st.opts[f.k])continue;
+      try{const r=await fetch(`${API}${f.optEp}`);st.opts[f.k]=(await r.json()).rows||[];}
+      catch(e){st.opts[f.k]=[];}
+    }
+    // 편집 폼의 selEp 필드 옵션(작업처·파트 등) — 팝업을 열기 전에 받아둔다
+    for(const f of (cfg.fields||[])){
+      if(f[2]!=='selEp'||!f[3]||st.fopts[f[0]])continue;
+      try{const r=await fetch(`${API}${f[3]}`);st.fopts[f[0]]=(await r.json()).rows||[];}
+      catch(e){st.fopts[f[0]]=[];}
+    }
+  };
   const load=async()=>{
+    await loadOpts();
     // ★listEp 에 이미 쿼리(?kind=)가 있으면 & 로 잇는다. 응답이 orows(객체행)면 그걸 우선 사용
     //   (basemaster/list 는 rows=배열행 / orows=c0..cN 객체행 둘 다 준다).
     const _sep=cfg.listEp.includes('?')?'&':'?';
-    try{const r=await fetch(`${API}${cfg.listEp}${_sep}q=`+encodeURIComponent(st.q));const j=await r.json();
+    let qs='q='+encodeURIComponent(st.q);
+    (cfg.qfilters||[]).forEach(f=>{ qs+='&'+f.k+'='+encodeURIComponent(st.F[f.k]||''); });
+    try{const r=await fetch(`${API}${cfg.listEp}${_sep}${qs}`);const j=await r.json();
       st.rows=j.orows||j.rows||[];st.cnt=j.cnt||0;st.msg='';}
     catch(e){st.msg='백엔드 연결 실패';st.rows=[];}
     render();
@@ -3673,16 +3694,30 @@ function mstCrud(host, cfg){
   const fld=(f)=>{
     const [k,label,type,ops]=f, v=st.form[k]??'';
     if(type==='sel'){const os=ops||[];return `<select class="inp" data-fk="${k}" style="min-width:80px;width:auto;max-width:240px"><option value="">선택</option>${os.map(o=>`<option value="${esc(o.code)}" ${String(o.code)===String(v)?'selected':''}>${esc(o.nm)}</option>`).join('')}</select>`;}
+    // ★selEp — API 로 채우는 드롭다운(2026-09-09). ops=엔드포인트. 코드 직접입력 대신 이름 선택(§3 UI규칙).
+    //   옵션은 st.fopts[k] 에 담기며 render 전에 loadFieldOpts() 가 미리 받아둔다.
+    if(type==='selEp'){const os=(st.fopts&&st.fopts[k])||[];
+      return `<select class="inp" data-fk="${k}" style="min-width:120px;width:auto;max-width:260px"><option value="">선택</option>`
+        +os.map(o=>`<option value="${esc(o.code)}" ${String(o.code)===String(v)?'selected':''}>${esc(o.name)} (${esc(o.code)})</option>`).join('')
+        +`</select>`;}
     if(type==='chk')return `<input type="checkbox" data-fk="${k}" ${(v===1||v==='1'||v===true)?'checked':''} style="width:18px;height:18px">`;
     if(type==='date')return `<input class="inp" data-fk="${k}" type="date" value="${esc(v)}" style="width:140px">`;
     const ro=(k===kf&&st.form._edit)?'readonly style="width:130px;background:#eef2f7"':'style="width:'+(type==='num'?90:180)+'px"';
-    return `<input class="inp" data-fk="${k}" value="${esc(v)}" ${type==='num'?'inputmode="decimal"':''} ${ro}>`;
+    // ★num 은 type=number 로 — 종전엔 text 라 문자가 들어가 서버에서야 걸렸다(2026-09-09 실사용 오류:
+    //   조립공정 마스터 공정코드에 "테스트" 입력 → "공정코드·공정명은 필수입니다" 로만 안내돼 원인 불명).
+    if(type==='num')
+      return `<input class="inp" data-fk="${k}" type="number" step="any" value="${esc(v)}" ${ro} placeholder="숫자">`;
+    return `<input class="inp" data-fk="${k}" value="${esc(v)}" ${ro}>`;
   };
   const render=()=>{
     const editing=st.form!==null;
     const ed=(!cfg.readOnly)&&((typeof PERM!=='undefined')?PERM.canEdit(cfg.sid||'basemaster'):true);
     host.innerHTML=`
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
+       ${(cfg.qfilters||[]).map(f=>`<label class="tl">${esc(f.label)}</label><select class="inp ms-qf" data-fk="${f.k}" style="width:${f.width||120}px">`
+          +`<option value="">전체</option>`
+          +((st.opts[f.k]||f.opts||[]).map(o=>`<option value="${esc(o.code)}"${String(st.F[f.k]||'')===String(o.code)?' selected':''}>${esc(o.name)}</option>`).join(''))
+          +`</select>`).join('')}
        <label class="tl">검색</label><input class="inp" id="ms-q" value="${esc(st.q)}" placeholder="코드/명" style="width:150px">
        <button class="btn" id="ms-search">🔍 조회</button>
        ${cfg.readOnly?'<span style="color:#8aa0bd;font-size:12px">🔎 조회 전용 (편집은 개발›원가/BOM기준정보)</span>':(ed?`<button class="btn" id="ms-new" style="background:#1c7c3a;color:#fff">➕ 신규</button><button class="btn" id="ms-del">🗑 선택삭제</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`)}
@@ -3714,6 +3749,8 @@ function mstCrud(host, cfg){
     const g=id=>host.querySelector(id);
     g('#ms-search').onclick=()=>{st.q=g('#ms-q').value;load();};
     g('#ms-q').onkeyup=e=>{if(e.key==='Enter')g('#ms-search').click();};
+    // ★조회 필터 — 바꾸면 바로 재조회(레거시 동작)
+    host.querySelectorAll('.ms-qf').forEach(el=>el.onchange=()=>{st.F[el.dataset.fk]=el.value;st.q=g('#ms-q').value;load();});
     if(ed){
       g('#ms-new').onclick=async()=>{let d=Object.assign({},cfg.newDefaults||{});
         if(cfg.newcodeEp){try{d[kf]=(await (await fetch(`${API}${cfg.newcodeEp}`)).json()).code;}catch(e){}}
@@ -3733,6 +3770,12 @@ function mstCrud(host, cfg){
   const save=async()=>{
     for(const f of cfg.fields){if(f[2]==='req'&&!String(st.form[f[0]]??'').trim()){alert(f[1]+'은(는) 필수입니다');return;}}
     if(!String(st.form[kf]??'').trim()){alert('코드는 필수입니다');return;}
+    // ★num 필드 숫자 검증(2026-09-09) — 서버까지 가서 "필수입니다"로 되돌아오면 원인을 알 수 없다.
+    //   실사용 오류: 조립공정 마스터 공정코드에 "테스트" 입력 → 원인 불명 실패.
+    for(const f of cfg.fields){
+      const v=String(st.form[f[0]]??'').trim();
+      if(f[2]==='num'&&v!==''&&isNaN(Number(v))){alert(f[1]+' 은(는) 숫자만 입력할 수 있습니다.\n입력값: '+v);return;}
+    }
     // cfg.kind 가 있으면 payload 에 실어 보낸다(조립/단품 공정마스터처럼 한 엔드포인트가 종류를 받는 경우)
     try{const r=await fetch(`${API}${cfg.saveEp}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...st.form,...(cfg.kind?{kind:cfg.kind}:{}),user:'웹사용자',uuser:(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹사용자')})});
       const j=await r.json();
@@ -3753,6 +3796,69 @@ const MST_CFG={
     cols:[{k:'dept_code',h:'부서코드'},{k:'dept_desc',h:'부서명',cap:180},{k:'sort_key',h:'정렬',cls:'num'},{k:'fin_dept_code',h:'재무부서'},{k:'dept_from_ymd',h:'적용시작'},{k:'dept_to_ymd',h:'적용종료'},{k:'use_flag',h:'사용',cls:'center',fmt:r=>r.use_flag?'<span class="bdg ok">사용</span>':'<span class="bdg off">중지</span>'}],
     fields:[['dept_code','부서코드','text'],['dept_desc','부서명','req'],['sort_key','정렬순서','num'],['use_flag','사용여부','chk'],['dept_desch','한자명','text'],['dept_from_ymd','적용시작','text'],['dept_to_ymd','적용종료','text'],['fin_dept_code','재무부서','text'],['fin_from_ymd','재무시작','text'],['fin_to_ymd','재무종료','text'],['enterprise_dept','전사부서','text'],['wh_code','창고','text'],['remarks','비고','text']],
     newDefaults:{use_flag:1,sort_key:0}},
+  // ★조립공정 마스터(2026-09-09 신설) — 정본 nx.work_assy(371행).
+  //   ★★「생산정보등록 › ① 조립(공정수)」 패널의 **뼈대**다. 화면의 "전체공정(371)" 이 이 행수 그대로.
+  //     여기에 없는 조립공정은 그 패널에 아예 안 뜬다.
+  //   ⛔원가포장공정(CS_M_ASSEM_PROC 21행)과 **다른 계보** — 코드 체계도 다르다(01·02 vs 517·202).
+  //   ⛔nx.prodinfo_assy 와도 다르다 — 그건 품목별 조립공정 **수량**(트랜잭션), 여기는 **정의**(마스터).
+  //   ⛔삭제 가드 = 품목이 쓰면 거부(생산정보등록 공정수가 고아가 된다).
+  wassy:{sid:'basemaster',title:'조립공정 마스터',keyField:'a_work_code',
+    listEp:'/api/workassy/list',saveEp:'/api/workassy/save',delEp:'/api/workassy/delete',org:'nx.work_assy',
+    qfilters:[{k:'pg',label:'공정구분',width:110,optEp:'/api/workassy/gubunopt'}],
+    cols:[{k:'a_work_code',h:'공정코드',cls:'num'},{k:'work_desc',h:'공정명',cap:200},
+          {k:'gubun_nm',h:'구분',cls:'center'},{k:'sort_seq',h:'정렬',cls:'num'},
+          {k:'work_st',h:'표준ST',cls:'num',fmt:r=>(r.work_st||0).toFixed(2)},
+          {k:'hour_pay',h:'임률',cls:'num',fmt:r=>won(r.hour_pay||0)},
+          {k:'welding_gubun',h:'용접구분',cls:'center'},
+          {k:'use_yn',h:'사용',cls:'center',fmt:r=>r.use_yn?'<span class="bdg ok">사용</span>':'<span class="bdg off">중지</span>'},
+          {k:'upd_user',h:'수정자',cls:'center'},{k:'upd_dt',h:'수정시각',cls:'center'}],
+    fields:[['a_work_code','공정코드(숫자)','num'],['work_desc','공정명','req'],
+            ['proc_gubun','공정구분','selEp','/api/workassy/gubunopt'],
+            ['sort_seq','정렬순서','num'],['work_st','표준ST','num'],['hour_pay','임률','num'],
+            ['welding_gubun','용접구분','num'],['welding_use_qty','용접사용량','num'],
+            ['use_yn','사용여부','chk'],['remarks','비고','text']],
+    newDefaults:{sort_seq:0,work_st:0,hour_pay:0,welding_gubun:0,welding_use_qty:0,use_yn:1}},
+  // ★단품공정 마스터(2026-09-09 신설) — 레거시 「단품공정MASTER」. 정본 nx.prodinfo_single.
+  //   ★★원가공정(CS_M_PROC)과 **다른 계보**다 — 이름만 비슷하다(교집합 코드 1종).
+  //       원가:  CS_M_PROC → CS_T_ITEM_PROC → 원가엔진        (탭 「원가공정 마스터」)
+  //       생산:  prodinfo_single → PR_M_ITEM_PROC_GAGONG → **STEP6 편성**
+  //   레거시 화면과 같은 구성 — 작업처·파트·공정코드·공정명·표시순서·컷팅공정·용접서브구분·임률.
+  //   ⛔삭제 가드 = 생산공정순서·생산정보등록·편성결과가 쓰면 거부(STEP6 편성키라 지우면 계획이 어긋난다).
+  wsingle:{sid:'basemaster',title:'단품공정 마스터',keyField:'s_work_code',
+    listEp:'/api/worksingle/list',saveEp:'/api/worksingle/save',delEp:'/api/worksingle/delete',org:'nx.prodinfo_single',
+    cols:[{k:'work_nm',h:'작업처',cls:'center'},{k:'part_nm',h:'파트',cap:150},
+          {k:'s_work_code',h:'공정코드',cls:'num'},{k:'work_desc',h:'공정명',cap:180},
+          {k:'sort_seq',h:'표시순서',cls:'num'},
+          {k:'cutting_proc_flag',h:'컷팅공정',cls:'center',fmt:r=>r.cutting_proc_flag?'<span class="bdg ok">✔</span>':''},
+          {k:'sub_weld_flag',h:'용접서브',cls:'center',fmt:r=>r.sub_weld_flag?'<span class="bdg ok">✔</span>':''},
+          {k:'hour_pay',h:'임률',cls:'num',fmt:r=>won(r.hour_pay||0)},
+          {k:'upd_user',h:'수정자',cls:'center'},{k:'upd_at',h:'수정시각',cls:'center'}],
+    // ★조회 필터 — 레거시와 동일(작업처·파트). 작업처 기본값 P1(용접) 고정 시작.
+    //   목록이 450행이라 필터 없이 열면 STS 계열이 먼저 나와 원하는 라인을 못 찾는다.
+    qfilters:[{k:'wc',label:'작업처',width:110,def:'P1',optEp:'/api/workplace/opt'},
+              {k:'part',label:'파트',width:150,optEp:'/api/partopt/list'}],
+    // ★신규/수정 팝업도 드롭다운 — 코드 직접입력 금지(§3 UI규칙)
+    fields:[['s_work_code','공정코드(숫자)','num'],['work_desc','공정명','req'],
+            ['work_code','작업처','selEp','/api/workplace/opt'],
+            ['gagong_proc_code','파트(가공공정)','selEp','/api/partopt/list'],
+            ['sort_seq','표시순서','num'],['cutting_proc_flag','컷팅공정','chk'],
+            ['sub_weld_flag','용접서브구분','chk'],['hour_pay','임률','num'],
+            ['gc_gubun','GC구분','text'],['gagong_group_code','가공그룹','text']],
+    newDefaults:{sort_seq:0,hour_pay:0,cutting_proc_flag:0,sub_weld_flag:0,work_code:'P1'}},
+  // ★작업처 마스터(2026-09-09 신설) — 레거시 「사업부MASTER」. 정본 nx.work_place.
+  //   레거시는 39컬럼(양산/셀/용접/검사 생산비율·인원·UPPH·생산구분…)이지만
+  //   **쓰는 것만** 담았다(사용자 확인) — 코드 전체에서 WORK_DESC 외 컬럼을 읽는 곳이 0곳이었다.
+  //   여기서 등록하면 파트마스터·생산공정순서 드롭다운(/api/workplace/opt)이 함께 따라온다.
+  //   ⛔D1(직납)은 작업처가 아니다 — 모델BOM P/NO 가 작업처 대신 업체를 가지면 직납으로 판정.
+  workplace:{sid:'basemaster',title:'작업처 마스터',keyField:'work_code',
+    listEp:'/api/workplace/list',saveEp:'/api/workplace/save',delEp:'/api/workplace/delete',org:'nx.work_place',
+    cols:[{k:'work_code',h:'작업처코드'},{k:'work_desc',h:'작업처명',cap:160},{k:'proc_code',h:'대공정',cls:'center'},
+          {k:'sort_seq',h:'정렬',cls:'num'},
+          {k:'use_yn',h:'사용',cls:'center',fmt:r=>r.use_yn?'<span class="bdg ok">사용</span>':'<span class="bdg off">중지</span>'},
+          {k:'remarks',h:'비고',cap:200},{k:'upd_user',h:'수정자',cls:'center'},{k:'upd_dt',h:'수정시각',cls:'center'}],
+    fields:[['work_code','작업처코드','req'],['work_desc','작업처명','req'],['proc_code','대공정코드','text'],
+            ['sort_seq','정렬순서','num'],['use_yn','사용여부','chk'],['remarks','비고','text']],
+    newDefaults:{use_yn:1,sort_seq:0}},
   line:{sid:'basemaster',title:'라인 마스터',keyField:'line_no',listEp:'/api/line/list',saveEp:'/api/line/save',delEp:'/api/line/delete',org:'nx.line_no',
     // ★명칭·구성을 레거시 「LINE-NO MASTER」와 동일하게(2026-08-27).
     //   maint_day/maint_hhmm = 라인당김(변경일자·변경시간)
@@ -3767,13 +3873,19 @@ const MST_CFG={
   //   listEp 를 basemaster/list?kind= 로 두고 keyField 는 코드컬럼 인덱스(c0)를 쓴다.
   //   행/폼 키는 목록 응답과 같은 c0..cN 으로 통일(수정 시 기존값이 그대로 폼에 채워지도록).
   //   백엔드 procmaster_save 가 c0=코드, c1.. 을 각 컬럼으로 매핑한다.
-  assem:{sid:'basemaster',title:'조립공정 마스터',kind:'assem',keyField:'c0',
+  // ★2026-09-09 개칭 — 이 탭의 원장은 nx.CS_M_ASSEM_PROC(원가 계보, 21행)다.
+  //   레거시에서 「조립공정 마스터」는 PR_M_WORK_ASSY(371행·생산)를 가리키므로 이름이 겹쳤다.
+  //   대표 확인: 이쪽은 「원가포장공정 마스터」, 생산용(wassy)이 「조립공정 마스터」.
+  assem:{sid:'basemaster',title:'원가포장공정 마스터',kind:'assem',keyField:'c0',
     listEp:'/api/basemaster/list?kind=assem',saveEp:'/api/procmaster/save',delEp:'/api/procmaster/delete',org:'nx.CS_M_ASSEM_PROC',
     cols:[{k:'c0',h:'공정코드'},{k:'c1',h:'공정명',cap:200},{k:'c2',h:'표준ST',cls:'num'},{k:'c3',h:'정렬',cls:'num'},{k:'c4',h:'사용',cls:'center'}],
     fields:[['c0','공정코드','req'],['c1','공정명','req'],['c2','표준ST','num'],['c3','정렬순서','num'],
             ['c4','사용여부','sel',[{code:'Y',nm:'사용'},{code:'N',nm:'중지'}]]],
     newDefaults:{c4:'Y',c3:0,c2:0}},
-  proc:{sid:'basemaster',title:'단품공정 마스터',kind:'proc',keyField:'c0',
+  // ★2026-09-09 개칭 — 이 탭의 원장은 nx.CS_M_PROC(원가 계보)다.
+  //   종전 이름 「단품공정 마스터」는 레거시에서 PR_M_WORK_SINGLE 을 가리키는 말이라 혼동됐다.
+  //   레거시와 맞추려고 여기를 「원가공정 마스터」로, 생산용을 「단품공정 마스터」(wsingle)로 두었다.
+  proc:{sid:'basemaster',title:'원가공정 마스터',kind:'proc',keyField:'c0',
     listEp:'/api/basemaster/list?kind=proc',saveEp:'/api/procmaster/save',delEp:'/api/procmaster/delete',org:'nx.CS_M_PROC',
     cols:[{k:'c0',h:'공정코드'},{k:'c1',h:'공정명',cap:200},{k:'c2',h:'대분류'},{k:'c3',h:'정렬',cls:'num'},{k:'c4',h:'표준UPH',cls:'num'},{k:'c5',h:'사용',cls:'center'}],
     fields:[['c0','공정코드','req'],['c1','공정명','req'],['c2','대분류','text'],['c3','정렬순서','num'],['c4','표준UPH','num'],

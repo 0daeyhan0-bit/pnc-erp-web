@@ -266,21 +266,21 @@ def _forecast_plan_gn(cur, b, t):
     params = ([b, t, b, t] if t else [b, b])
     cur.execute(f"""
       SELECT WORK_ORDER wo, LTRIM(RTRIM(C_ITEM_CODE)) it, PLAN_YMD ymd, SUM(CAST(PLAN_QTY AS float)) q
-        FROM sa_t_plan_item_dtl WHERE PLAN_YMD>=?{tc} GROUP BY WORK_ORDER, LTRIM(RTRIM(C_ITEM_CODE)), PLAN_YMD
+        FROM nx.sale_plan_item WHERE PLAN_YMD>=?{tc} GROUP BY WORK_ORDER, LTRIM(RTRIM(C_ITEM_CODE)), PLAN_YMD
       UNION ALL
       SELECT WORK_ORDER wo, LTRIM(RTRIM(ITEM_CODE)) it, PLAN_YMD ymd, SUM(CAST(PLAN_QTY AS float)) q
-        FROM pr_t_plan_input WHERE PLAN_YMD>=?{tc} GROUP BY WORK_ORDER, LTRIM(RTRIM(ITEM_CODE)), PLAN_YMD""", *params)
+        FROM nx.prod_plan_input WHERE PLAN_YMD>=?{tc} GROUP BY WORK_ORDER, LTRIM(RTRIM(ITEM_CODE)), PLAN_YMD""", *params)
     plan = defaultdict(lambda: defaultdict(float))   # (wo,item) -> {ymd: qty}
     for wo, it, ymd, q in cur.fetchall():
         plan[(str(wo or '').strip(), str(it).strip())][str(ymd).strip()] += float(q or 0)
     # 기출고 = sale_qty(finish_flag='0') − 출하반품(move_tag='3') by (work_order, item_code)
     ship = defaultdict(float)
     cur.execute("""SELECT WORK_ORDER, LTRIM(RTRIM(ITEM_CODE)), SUM(CAST(SALE_QTY AS float))
-        FROM sa_t_sale_dtl WHERE FINISH_FLAG='0' GROUP BY WORK_ORDER, LTRIM(RTRIM(ITEM_CODE))""")
+        FROM nx.SA_T_SALE_DTL WHERE FINISH_FLAG='0' GROUP BY WORK_ORDER, LTRIM(RTRIM(ITEM_CODE))""")
     for wo, it, q in cur.fetchall():
         ship[(str(wo or '').strip(), str(it).strip())] += float(q or 0)
     cur.execute("""SELECT FR_WORK_ORDER, LTRIM(RTRIM(ITEM_CODE)), SUM(CAST(MOVE_QTY AS float))
-        FROM sa_t_item_move WHERE MOVE_TAG='3' AND FR_FINISH_FLAG='0' GROUP BY FR_WORK_ORDER, LTRIM(RTRIM(ITEM_CODE))""")
+        FROM nx.SA_T_ITEM_MOVE WHERE MOVE_TAG='3' AND FR_FINISH_FLAG='0' GROUP BY FR_WORK_ORDER, LTRIM(RTRIM(ITEM_CODE))""")
     for wo, it, q in cur.fetchall():
         ship[(str(wo or '').strip(), str(it).strip())] -= float(q or 0)
     # 소진: 제번별 기출고를 이른 일자부터 계획에서 차감
@@ -322,18 +322,18 @@ def sales_forecast(base: str = Query(""), to: str = Query("")):
         # union1(sa_t_plan_item_dtl) + union4(pr_t_plan_input), item×ymd×src · 기간 base~to
         cur.execute(f"""
           SELECT C_ITEM_CODE item, PLAN_YMD ymd, 'u1' src, SUM(CAST(PLAN_QTY AS float)) q
-            FROM sa_t_plan_item_dtl WHERE PLAN_YMD>=?{tc} GROUP BY C_ITEM_CODE, PLAN_YMD
+            FROM nx.sale_plan_item WHERE PLAN_YMD>=?{tc} GROUP BY C_ITEM_CODE, PLAN_YMD
           UNION ALL
           SELECT ITEM_CODE item, PLAN_YMD ymd, 'u4' src, SUM(CAST(PLAN_QTY AS float)) q
-            FROM pr_t_plan_input WHERE PLAN_YMD>=?{tc} GROUP BY ITEM_CODE, PLAN_YMD""",
+            FROM nx.prod_plan_input WHERE PLAN_YMD>=?{tc} GROUP BY ITEM_CODE, PLAN_YMD""",
           *([b, t, b, t] if t else [b, b]))
         src = [(str(a).strip(), str(y).strip(), str(s).strip(), float(qq or 0)) for a, y, s, qq in cur.fetchall()]
         if not src:
             return {"base": b, "to": (t or b), "days": [], "rows": []}
         base_ymd = min(y for _, y, _, _ in src)  # 첫 계획일(차감 기준)
         # 단가: COST_TAG in (S,E) 최신 COST_APPLY_YMD, 품목단위(cust무관)
-        cur.execute("""SELECT c.ITEM_CODE, c.ITEM_COST FROM pr_m_item_cost c
-            JOIN (SELECT ITEM_CODE, MAX(COST_APPLY_YMD) mx FROM pr_m_item_cost WHERE COST_TAG IN('S','E') GROUP BY ITEM_CODE) m
+        cur.execute("""SELECT c.ITEM_CODE, c.ITEM_COST FROM nx.PR_M_ITEM_COST c
+            JOIN (SELECT ITEM_CODE, MAX(COST_APPLY_YMD) mx FROM nx.PR_M_ITEM_COST WHERE COST_TAG IN('S','E') GROUP BY ITEM_CODE) m
               ON c.ITEM_CODE=m.ITEM_CODE AND c.COST_APPLY_YMD=m.mx WHERE c.COST_TAG IN('S','E')""")
         cost = {}
         for ic, ct in cur.fetchall():
@@ -369,8 +369,8 @@ def sales_forecast(base: str = Query(""), to: str = Query("")):
             try:
                 cur.execute(f"""SELECT x.ITEM_CODE, SUM(CASE WHEN x.pq-x.sh>0 THEN x.pq-x.sh ELSE 0 END) rem FROM (
                     SELECT p.ITEM_CODE, p.WORK_ORDER, SUM(CAST(p.PLAN_QTY AS float)) pq, ISNULL(MAX(s.sh),0) sh
-                      FROM pr_t_plan_input p
-                      LEFT JOIN (SELECT WORK_ORDER, SUM(CAST(ISNULL(SALE_QTY,0) AS float)) sh FROM sa_t_sale_dtl GROUP BY WORK_ORDER) s ON s.WORK_ORDER=p.WORK_ORDER
+                      FROM nx.prod_plan_input p
+                      LEFT JOIN (SELECT WORK_ORDER, SUM(CAST(ISNULL(SALE_QTY,0) AS float)) sh FROM nx.SA_T_SALE_DTL GROUP BY WORK_ORDER) s ON s.WORK_ORDER=p.WORK_ORDER
                      WHERE p.PLAN_YMD>=?{tc} GROUP BY p.ITEM_CODE, p.WORK_ORDER) x GROUP BY x.ITEM_CODE""",
                     *([b, t] if t else [b]))
                 _rem = {str(a).strip(): float(q or 0) for a, q in cur.fetchall()}
@@ -425,10 +425,10 @@ def sales_forecast_sagub(base: str = Query(""), to: str = Query("")):
         # 계획 완제품 × 일자 × src (영업예상매출과 동일 소스)
         cur.execute(f"""
           SELECT C_ITEM_CODE item, PLAN_YMD ymd, 'u1' src, SUM(CAST(PLAN_QTY AS float)) q
-            FROM sa_t_plan_item_dtl WHERE PLAN_YMD>=?{tc} GROUP BY C_ITEM_CODE, PLAN_YMD
+            FROM nx.sale_plan_item WHERE PLAN_YMD>=?{tc} GROUP BY C_ITEM_CODE, PLAN_YMD
           UNION ALL
           SELECT ITEM_CODE item, PLAN_YMD ymd, 'u4' src, SUM(CAST(PLAN_QTY AS float)) q
-            FROM pr_t_plan_input WHERE PLAN_YMD>=?{tc} GROUP BY ITEM_CODE, PLAN_YMD""",
+            FROM nx.prod_plan_input WHERE PLAN_YMD>=?{tc} GROUP BY ITEM_CODE, PLAN_YMD""",
           *([b, t, b, t] if t else [b, b]))
         src = [(str(a).strip(), str(y).strip(), str(s).strip(), float(qq or 0)) for a, y, s, qq in cur.fetchall()]
         src = [r for r in src if r[0] in sac]   # 사급비 보유 완제품만
@@ -573,7 +573,7 @@ def _step6_sql(cur):
        AND b.route_id = CASE WHEN pra.route_id IS NOT NULL
              AND EXISTS(SELECT 1 FROM nx.route_proc_gagong x WHERE x.route_id=pra.route_id AND x.item_code=a.mat_code)
            THEN pra.route_id ELSE 0 END
-    JOIN {P}PR_M_WORK_SINGLE s ON b.s_work_code=s.s_work_code JOIN {P}PR_M_PROC_GAGONG g ON s.gagong_proc_code=g.gagong_proc_code
+    JOIN {P}v_work_single s ON b.s_work_code=s.s_work_code JOIN {P}v_part_master g ON s.gagong_proc_code=g.gagong_proc_code
     WHERE a.vir_item_flag='0' AND ISNULL(a.in_cust_code,'') IN ('','2228')""").replace("{P}", P))
     cur.execute("IF OBJECT_ID('nx.plan_part_swork') IS NOT NULL DROP TABLE nx.plan_part_swork")
     cur.execute(("""SELECT b.plan_ymd,b.work_order,b.split_work_order,a.assy_item_code,a.level_no AS bom_level,a.item_code AS upper_item_code,a.mat_code AS item_code,a.p_item_code,a.proc_seq,a.gc_gubun,
@@ -816,7 +816,7 @@ def plan_part(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Quer
                   COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE) wcnm, ISNULL(i.item_name,'') nm,
                   SUM(CAST(pp.PART_PLAN_QTY AS float)) q
                 FROM nx.plan_part_mat pp
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE COLLATE DATABASE_DEFAULT=pp.MAT_WORK_CENTER_CODE COLLATE DATABASE_DEFAULT
+                LEFT JOIN PARTNER_ERP_TEST3.nx.v_work_place w ON w.WORK_CODE COLLATE DATABASE_DEFAULT=pp.MAT_WORK_CENTER_CODE COLLATE DATABASE_DEFAULT
                 LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cu ON cu.CUST_CODE COLLATE DATABASE_DEFAULT=pp.MAT_WORK_CENTER_CODE COLLATE DATABASE_DEFAULT
                 LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE COLLATE DATABASE_DEFAULT=pp.MAT_CODE COLLATE DATABASE_DEFAULT
                 WHERE {' AND '.join(w)}

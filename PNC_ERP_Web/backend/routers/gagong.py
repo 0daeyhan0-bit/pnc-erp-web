@@ -37,15 +37,15 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
         if gigan_n > 1:
             try:
                 cur.execute("""SELECT SUBSTRING(MAX(calendar_yymd),3,6) FROM
-                    (SELECT ROW_NUMBER() OVER (ORDER BY calendar_yymd) rn, calendar_yymd FROM PARTNER_ERP_TEST3.nx.HR_M_CALENDAR a WITH(NOLOCK)
+                    (SELECT ROW_NUMBER() OVER (ORDER BY calendar_yymd) rn, calendar_yymd FROM PARTNER_ERP_TEST3.nx.v_cal_work a WITH(NOLOCK)
                       WHERE work_team='A' AND calendar_yymd > ? AND time_type='A' AND work_stats IN ('1','2','5','6')
-                        AND EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.pr_m_line_calendar b WITH(NOLOCK) WHERE b.calendar_ymd=SUBSTRING(a.calendar_yymd,3,6) AND b.work_stats<>'4')) t
+                        AND EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.v_cal_line b WITH(NOLOCK) WHERE b.calendar_ymd=SUBSTRING(a.calendar_yymd,3,6) AND b.work_stats<>'4')) t
                     WHERE rn=?""", '20' + d6a, gigan_n - 1)
                 _r = cur.fetchone()
                 if _r and _r[0]: d6b = str(_r[0])
             except Exception: pass
         try:
-            cur.execute("""SELECT CALENDAR_YYMD FROM PARTNER_ERP_TEST3.nx.HR_M_CALENDAR WHERE WORK_TEAM='A' AND CALENDAR_YYMD>=? AND CALENDAR_YYMD<=? ORDER BY CALENDAR_YYMD""", '20' + d6a, '20' + d6b)
+            cur.execute("""SELECT CALENDAR_YYMD FROM PARTNER_ERP_TEST3.nx.v_cal_work WHERE WORK_TEAM='A' AND CALENDAR_YYMD>=? AND CALENDAR_YYMD<=? ORDER BY CALENDAR_YYMD""", '20' + d6a, '20' + d6b)
             for (_cy,) in cur.fetchall(): dates.append(str(_cy)[2:])
         except Exception: pass
         if not dates:
@@ -125,15 +125,15 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
         for i in range(0, len(_uppers), 900):
             ch = _uppers[i:i+900]; ph2 = ",".join("?" * len(ch))
             cur.execute(f"""SELECT m.ITEM_CODE,
-                     ISNULL((SELECT CUST_DESC FROM {S}.CM_M_CUST WHERE CUST_CODE=m.in_cust),''),
-                     ISNULL((SELECT WORK_DESC FROM {S}.PR_M_WORK WHERE WORK_CODE=m.WORK_CODE),'')
+                     ISNULL((SELECT CUST_DESC FROM {S}.v_cm_m_cust WHERE CUST_CODE=m.in_cust),''),
+                     ISNULL((SELECT WORK_DESC FROM {S}.v_work_place WHERE WORK_CODE=m.WORK_CODE),'')
                    FROM {S}.item m WITH(NOLOCK) WHERE m.ITEM_CODE IN ({ph2})""", *ch)
             for a, b, c3 in cur.fetchall():
                 _ucust[a] = (b or '').strip(); _uwork[a] = (c3 or '').strip()
         for i in range(0, len(_tuips), 900):
             ch = _tuips[i:i+900]; ph2 = ",".join("?" * len(ch))
             cur.execute(f"""SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'')
-                              FROM {S}.PR_M_PROC_GAGONG WITH(NOLOCK) WHERE GAGONG_PROC_CODE IN ({ph2})""", *ch)
+                              FROM {S}.v_part_master WITH(NOLOCK) WHERE GAGONG_PROC_CODE IN ({ph2})""", *ch)
             for a, b in cur.fetchall(): _tnm[a] = (b or '').strip()
         def _outsrc(g):
             u = g.get("upper") or ''
@@ -273,7 +273,7 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
         gpcs = list({g["gpc"] for g in rows if g["gpc"]})
         if gpcs:
             ph = ",".join("?" * len(gpcs))
-            cur.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') FROM {S}.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE IN ({ph})", *gpcs)
+            cur.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') FROM {S}.v_part_master WHERE GAGONG_PROC_CODE IN ({ph})", *gpcs)
             for a, b in cur.fetchall(): gpn[a] = b
         _wcd = _ITEM_WORK.get(wcc, wcc)
         # 출력 (프론트 shape)
@@ -469,7 +469,7 @@ def gagong_prog420(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
             for a, b in cur.fetchall(): nm[a] = b
         if gpcs:
             ph = ",".join("?" * len(gpcs))
-            cur.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE IN ({ph})", *gpcs)
+            cur.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_part_master WHERE GAGONG_PROC_CODE IN ({ph})", *gpcs)
             for a, b in cur.fetchall(): gpn[a] = b
         rows = []
         for r in sp:
@@ -695,8 +695,8 @@ def gagong_jeohist(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
                   ISNULL(p.MACH_CODE,'') mach, ISNULL(mm.MACH_DESC,'') machnm,
                   ISNULL(p.PROD_QTY,0) doneq, ic2.WORK_QTY proc_cnt, ic2.STD_SIZE std
                 FROM PARTNER_ERP_TEST3.nx.PR_T_PROD_DTL_GAGONG p
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=p.GAGONG_PROC_CODE
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK_SINGLE ws ON ws.S_WORK_CODE=p.S_WORK_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.v_part_master pg ON pg.GAGONG_PROC_CODE=p.GAGONG_PROC_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.v_work_single ws ON ws.S_WORK_CODE=p.S_WORK_CODE
                 LEFT JOIN PARTNER_ERP_TEST3.nx.QA_M_MACHINE mm ON mm.MACH_CODE=p.MACH_CODE
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_T_INDI_CUTTING_PROC_GAGONG ic2 ON ic2.BOX_NO=p.BOX_NO
                      AND ISNULL(ic2.S_WORK_CODE,'')=ISNULL(p.S_WORK_CODE,'') AND ic2.PROC_SEQ=p.PROC_SEQ
@@ -736,14 +736,14 @@ def gagong_jeohist(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
             FROM PARTNER_ERP_TEST3.nx.PR_T_INDI_CUTTING ic
             LEFT JOIN PARTNER_ERP_TEST3.nx.item ma ON ma.ITEM_CODE=ic.MAT_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust mac ON mac.CUST_CODE=ma.in_cust
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK maw ON maw.WORK_CODE=ma.WORK_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_work_place maw ON maw.WORK_CODE=ma.WORK_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.item ia ON ia.ITEM_CODE=ic.ITEM_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust iac ON iac.CUST_CODE=ia.in_cust
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK iaw ON iaw.WORK_CODE=ia.WORK_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_work_place iaw ON iaw.WORK_CODE=ia.WORK_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.item aa ON aa.ITEM_CODE=ic.ASSY_ITEM_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust aac ON aac.CUST_CODE=aa.in_cust
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK aaw ON aaw.WORK_CODE=aa.WORK_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG wh ON wh.GAGONG_PROC_CODE=ic.WH_GAGONG_PROC_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_work_place aaw ON aaw.WORK_CODE=aa.WORK_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_part_master wh ON wh.GAGONG_PROC_CODE=ic.WH_GAGONG_PROC_CODE
             LEFT JOIN (SELECT BOX_NO, COUNT(*) proc_n FROM PARTNER_ERP_TEST3.nx.PR_T_INDI_CUTTING_PROC_GAGONG GROUP BY BOX_NO) pn ON pn.BOX_NO=ic.BOX_NO
             WHERE {' AND '.join(w)}
             ORDER BY ic.BOX_NO DESC""", *p)
@@ -760,7 +760,7 @@ def _sheet_procs(cur, jado):
     cur.execute("""SELECT TOP 10 ISNULL(w.WORK_DESC, CONVERT(varchar(20), d.S_WORK_CODE)),
                           ISNULL(d.STD_SIZE,'')
                      FROM nx.prodinfo_proc d
-                     LEFT JOIN nx.PR_M_WORK_SINGLE w ON w.S_WORK_CODE=d.S_WORK_CODE
+                     LEFT JOIN nx.v_work_single w ON w.S_WORK_CODE=d.S_WORK_CODE
                     WHERE d.ITEM_CODE=? ORDER BY d.PROC_SEQ""", jado)
     return [{"nm": (x[0] or '').strip(), "spec": (x[1] or '').strip()} for x in cur.fetchall()]
 
@@ -769,8 +769,8 @@ def _sheet_wh(cur, jado):
     cur.execute("""SELECT TOP 1 ISNULL(g.GAGONG_PROC_DESC, d.GAGONG_PROC_CODE),
                           ISNULL(CONVERT(varchar(20), w.GAGONG_GROUP_CODE),'')
                      FROM nx.prodinfo_proc d
-                     LEFT JOIN nx.PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE=d.GAGONG_PROC_CODE
-                     LEFT JOIN nx.PR_M_WORK_SINGLE w ON w.S_WORK_CODE=d.S_WORK_CODE
+                     LEFT JOIN nx.v_part_master g ON g.GAGONG_PROC_CODE=d.GAGONG_PROC_CODE
+                     LEFT JOIN nx.v_work_single w ON w.S_WORK_CODE=d.S_WORK_CODE
                     WHERE d.ITEM_CODE=? ORDER BY d.PROC_SEQ""", jado)
     r = cur.fetchone()
     return ((r[0] or '') if r else '', (r[1] or '') if r else '')
@@ -886,7 +886,7 @@ def gagong_sheet_lookup(jado: str = Query("")):
         up = cur.fetchone()
         upper = up[0] if up else ''
         # 작업처명
-        cur.execute("""SELECT TOP 1 ISNULL(w.WORK_DESC,'') FROM nx.PR_M_WORK w WHERE w.WORK_CODE=?""", m[5])
+        cur.execute("""SELECT TOP 1 ISNULL(w.WORK_DESC,'') FROM nx.v_work_place w WHERE w.WORK_CODE=?""", m[5])
         w = cur.fetchone()
         wcd = (w[0] if w and w[0] else '')
         if not wcd and m[6]:
@@ -1038,7 +1038,7 @@ def gagong_matplan070(ymd: str = Query(""), line: str = Query(""), item: str = Q
                 for r in cur.fetchall()}
         stop = set(k for k, v in imap.items() if v[0] == wcp)     # ★전개 정지집합
         cur.execute("""SELECT RTRIM(WORK_CODE), RTRIM(ISNULL(WORK_DESC,''))
-                         FROM nx.PR_M_WORK WITH(NOLOCK)""")
+                         FROM nx.v_work_place WITH(NOLOCK)""")
         wmap = {r[0]: r[1] for r in cur.fetchall()}
         mb = _mp070_modelbom(cur)
 

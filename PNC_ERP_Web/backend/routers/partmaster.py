@@ -8,38 +8,28 @@ from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _IT
 
 router = APIRouter()
 
-# ================= 파트MASTER (기준정보, w_pr_master_280) — PR_M_PROC_GAGONG 라이브 CRUD =================
-# 파트(가공공정)마스터. PROD_RATE=생산효율(=키팅 회수율). 공유마스터라 라이브 직접편집(원가·계획·키팅 즉시 일관). 권한게이트=프론트.
+# ================= 파트MASTER (기준정보, w_pr_master_280) — nx.part_master CRUD =================
+# 파트(가공공정)마스터. PROD_RATE=생산효율(=키팅 회수율). 원가·계획·키팅이 함께 읽는 공유마스터.
+# 권한게이트=프론트.
+#
+# ★2026-09-09 미러 → 클린 전환 (§1-9-1 컷오버 후 단일 테이블)
+#   쓰기 = nx.part_master (실테이블, 소문자)
+#   조회 = nx.v_part_master (호환뷰 — 미러 컬럼명 그대로 노출해 나머지 80곳 SQL 무수정)
+#
+#   ★왜 옮겼나 — 미러(nx.PR_M_PROC_GAGONG)에 ALTER 로 얹었던 웹 고유 컬럼이
+#     레거시 재적재 때 **값째로** 날아갔다. 실제로 두 번 겪었다:
+#       2026-08-30 컬럼 소실 → 화면 "백엔드 연결 실패", 드래그 실적 전면 불가
+#       2026-09-09 값 전멸  → S8·S10 준비재고 설정을 대표님이 다시 입력
+#     예전 _ensure_result_cols() 는 컬럼만 되살릴 뿐 **값은 복구하지 못했다**.
+#     클린 테이블은 재적재 대상이 아니라 이 사고가 구조적으로 사라진다.
+#     (이관 = _migration/seed_part_master_260909.py, 코드 = switch_part_master_260909.py)
 _GC_GUBUN = {'W': '자재창고', 'P': '생산파트', 'V': '생산창고', 'Q': '가공파트'}
-
-
-def _ensure_result_cols(cur):
-    """★실적처리방법 컬럼 멱등 보장 (2026-08-31 신설).
-
-       nx.PR_M_PROC_GAGONG 은 **대문자 미러**라 레거시 동기화·재이관이 돌면
-       우리가 추가한 컬럼이 통째로 날아간다(2026-08-30 실측: nx 초기화 후 2컬럼 소실
-       → 파트마스터 화면 "백엔드 연결 실패", 파트별 생산계획 드래그 실적 전면 불가).
-       조회·저장 진입마다 확인해 없으면 다시 만든다. 있으면 아무 일도 하지 않는다.
-
-         BARCODE_FLAG     '1'=바코드실적 허용(기본). 독립 플래그.
-         PROD_RESULT_TYPE ''=미지정 / 'R'=생산실적(준비재고) / 'W'=생산실적(자재창고출고). 택1.
-    """
-    try:
-        cur.execute("""IF COL_LENGTH('PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG','BARCODE_FLAG') IS NULL
-                         ALTER TABLE PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG ADD BARCODE_FLAG varchar(1) NULL""")
-        cur.execute("""IF COL_LENGTH('PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG','PROD_RESULT_TYPE') IS NULL
-                         ALTER TABLE PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG ADD PROD_RESULT_TYPE varchar(1) NULL""")
-        cur.execute("""UPDATE PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG SET BARCODE_FLAG='1'
-                        WHERE ISNULL(BARCODE_FLAG,'')=''""")
-    except Exception:
-        pass   # 권한 등으로 실패해도 조회 자체는 막지 않는다(ISNULL 로 방어됨)
 
 
 @router.get("/api/partmaster/list")
 def partmaster_list(q: str = Query(""), grp: str = Query("")):
     cn = _conn(); cur = cn.cursor()
     try:
-        _ensure_result_cols(cur)
         w = ["1=1"]; p = []
         if q.strip():   w.append("(g.GAGONG_PROC_CODE LIKE ? OR g.GAGONG_PROC_DESC LIKE ?)"); p += [f"%{q.strip()}%", f"%{q.strip()}%"]
         if grp.strip(): w.append("ISNULL(g.PART_GROUP_CODE,'')=?"); p.append(grp.strip())
@@ -52,8 +42,8 @@ def partmaster_list(q: str = Query(""), grp: str = Query("")):
               --   pt = 생산실적 방식  ''없음 / 'R'준비재고 / 'W'자재창고출고  · 한 컬럼이라 택1 강제
               ISNULL(g.BARCODE_FLAG,'1') bc, ISNULL(g.PROD_RESULT_TYPE,'') pt,
               ISNULL(g.UPDATE_USER_ID,'') uid, g.UPDATE_DATETIME udt
-            FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE=g.WORK_CODE
+            FROM PARTNER_ERP_TEST3.nx.v_part_master g
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_work_place w ON w.WORK_CODE=g.WORK_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=g.IN_CUST_CODE
             WHERE {' AND '.join(w)} ORDER BY g.WORK_CODE, g.SORT_KEY, g.GAGONG_PROC_CODE""", *p)
         cols = [d[0] for d in cur.description]; rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -70,10 +60,9 @@ def partmaster_save(payload: dict = Body(...)):
     r = payload.get('row', {}); user = (payload.get('user') or '웹')[:20]
     code = (r.get('code') or '').strip()
     if not code: return {"ok": False, "detail": "파트코드 필수"}
-    cn = _nx(); cur = cn.cursor()   # ★nx전환: 가공공정 마스터 편집=nx.PR_M_PROC_GAGONG 복제본에 쓰기
+    cn = _nx(); cur = cn.cursor()   # ★클린 쓰기 — nx.part_master (뷰가 아니라 실테이블)
     try:
-        _ensure_result_cols(cur)    # ★미러 재이관으로 컬럼이 날아갔으면 다시 만든다
-        cur.execute("SELECT COUNT(*) FROM nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE=?", code)
+        cur.execute("SELECT COUNT(*) FROM nx.part_master WHERE part_code=?", code)
         exists = cur.fetchone()[0] > 0
         # ★실적처리방법 — bc(바코드) 는 독립, pt(생산실적)는 R/W 택1
         _bc = '1' if str(r.get('bc', '1')) in ('1', 'true', 'True', 'Y') else '0'
@@ -84,16 +73,16 @@ def partmaster_save(payload: dict = Body(...)):
                 (r.get('wh', '') or '')[:10], int(r.get('sortkey') or 0), float(r.get('rate') or 0),
                 (r.get('ip', '') or '')[:30], int(r.get('rack') or 0), _bc, _pt, user)
         if exists:
-            cur.execute("""UPDATE nx.PR_M_PROC_GAGONG SET GAGONG_PROC_DESC=?, GC_GUBUN=?, PART_GROUP_CODE=?, WORK_CODE=?,
-                  IN_CUST_CODE=?, SORT_KEY=?, PROD_RATE=?, WH_IP_ADDRESS=?, RACK_NUMBER=?,
-                  BARCODE_FLAG=?, PROD_RESULT_TYPE=?,
-                  UPDATE_USER_ID=?, UPDATE_DATETIME=getdate(), UPDATE_WINDOW='web_partmaster'
-                WHERE GAGONG_PROC_CODE=?""", *args, code)
+            cur.execute("""UPDATE nx.part_master SET part_name=?, gc_gubun=?, part_group=?, work_code=?,
+                  wh_cust_code=?, sort_key=?, prod_rate=?, wh_ip=?, rack_no=?,
+                  barcode_flag=?, prod_result_type=?,
+                  upd_user=?, upd_dt=getdate()
+                WHERE part_code=?""", *args, code)
         else:
-            cur.execute("""INSERT INTO nx.PR_M_PROC_GAGONG(GAGONG_PROC_CODE, GAGONG_PROC_DESC, GC_GUBUN, PART_GROUP_CODE, WORK_CODE,
-                  IN_CUST_CODE, SORT_KEY, PROD_RATE, WH_IP_ADDRESS, RACK_NUMBER,
-                  BARCODE_FLAG, PROD_RESULT_TYPE, UPDATE_USER_ID, UPDATE_DATETIME, UPDATE_WINDOW)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,getdate(),'web_partmaster')""", code, *args)
+            cur.execute("""INSERT INTO nx.part_master(part_code, part_name, gc_gubun, part_group, work_code,
+                  wh_cust_code, sort_key, prod_rate, wh_ip, rack_no,
+                  barcode_flag, prod_result_type, upd_user, upd_dt, use_yn)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,getdate(),'1')""", code, *args)
         cn.commit()
         return {"ok": True, "mode": "update" if exists else "insert"}
     except Exception as e:
@@ -105,9 +94,9 @@ def partmaster_save(payload: dict = Body(...)):
 def partmaster_delete(payload: dict = Body(...)):
     code = (payload.get('code') or '').strip()
     if not code: return {"ok": False, "detail": "코드 필수"}
-    cn = _nx(); cur = cn.cursor()   # ★nx전환: 마스터 삭제=nx 복제본
+    cn = _nx(); cur = cn.cursor()   # ★클린 쓰기 — nx.part_master
     try:
-        cur.execute("DELETE FROM nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE=?", code); cn.commit()
+        cur.execute("DELETE FROM nx.part_master WHERE part_code=?", code); cn.commit()
         return {"ok": True}
     except Exception as e:
         return {"ok": False, "detail": str(e)[:200]}
@@ -116,18 +105,21 @@ def partmaster_delete(payload: dict = Body(...)):
 
 @router.get("/api/partmaster/workers")
 def partmaster_workers(part: str = Query(..., description="파트코드(GAGONG_PROC_CODE)")):
-    """파트별 작업자 목록 (레거시 w_pr_master_350 하단그리드). 원천 PR_M_PROC_GAGONG_WORKER.
-       WORKER_CODE=작업자명, WORK_FLAG='1'=실작업자. 실작업자 우선·이름순."""
+    """파트별 작업자 목록 (레거시 w_pr_master_350 하단그리드). 원천 nx.part_worker(클린).
+       worker_name=작업자명(코드가 아니다), work_flag='1'=실작업자. 실작업자 우선·이름순.
+
+       ★2026-09-09 미러 → 클린 — 파트마스터(nx.part_master)의 짝인데 여기만 미러로 남아
+         한 화면이 두 계보로 갈려 있었다. 쓰기가 있는 그리드라 컷오버에 그대로 죽는다(§1-9-1)."""
     part = (part or '').strip()
     if not part:
         return {"part": part, "rows": [], "cnt": 0}
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("""SELECT ISNULL(WORKER_CODE,''), ISNULL(WORK_FLAG,''),
-              ISNULL(INSERT_USER_ID,''), CONVERT(varchar(19),INSERT_DATETIME,120),
-              ISNULL(UPDATE_USER_ID,''), CONVERT(varchar(19),UPDATE_DATETIME,120)
-            FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG_WORKER WHERE GAGONG_PROC_CODE=?
-            ORDER BY WORK_FLAG DESC, WORKER_CODE""", part)
+        cur.execute("""SELECT ISNULL(worker_name,''), ISNULL(work_flag,''),
+              ISNULL(ins_user,''), CONVERT(varchar(19),ins_dt,120),
+              ISNULL(upd_user,''), CONVERT(varchar(19),upd_dt,120)
+            FROM PARTNER_ERP_TEST3.nx.part_worker WHERE part_code=?
+            ORDER BY work_flag DESC, worker_name""", part)
         rows = [{"worker": str(r[0]).strip(), "real": str(r[1]).strip() == '1',
                  "ins_user": str(r[2] or '').strip(), "ins_dt": str(r[3] or '').strip(),
                  "upd_user": str(r[4] or '').strip(), "upd_dt": str(r[5] or '').strip()} for r in cur.fetchall()]
@@ -138,8 +130,8 @@ def partmaster_workers(part: str = Query(..., description="파트코드(GAGONG_P
 @router.post("/api/partmaster/worker_save")
 def partmaster_worker_save(payload: dict = Body(...)):
     """파트별 작업자 추가/수정 (레거시 w_pr_master_350 하단그리드 추가·수정 버튼).
-       PK=(GAGONG_PROC_CODE, WORKER_CODE). orig≠worker면 이름변경(=PK변경) → 기존삭제+신규.
-       WORK_FLAG='1'=실작업자. nx.PR_M_PROC_GAGONG_WORKER 쓰기."""
+       PK=(part_code, worker_name). orig≠worker면 이름변경(=PK변경) → 기존삭제+신규.
+       work_flag='1'=실작업자. ★클린 nx.part_worker 쓰기(2026-09-09 전환)."""
     part = (payload.get('part') or '').strip()
     worker = (payload.get('worker') or '').strip()
     orig = (payload.get('orig') or '').strip()   # 수정 전 이름(''=신규)
@@ -148,22 +140,21 @@ def partmaster_worker_save(payload: dict = Body(...)):
     if not part:   return {"ok": False, "detail": "파트 선택 필수"}
     if not worker: return {"ok": False, "detail": "작업자명 필수"}
     if len(worker) > 30: return {"ok": False, "detail": "작업자명 30자 이내"}
-    cn = _nx(); cur = cn.cursor()   # ★nx전환: 작업자 마스터 편집=nx 복제본
+    cn = _nx(); cur = cn.cursor()   # ★클린 쓰기 — nx.part_worker
     try:
         # 이름변경(PK변경): 기존 (part, orig) 제거
         if orig and orig != worker:
-            cur.execute("DELETE FROM nx.PR_M_PROC_GAGONG_WORKER WHERE GAGONG_PROC_CODE=? AND WORKER_CODE=?", part, orig)
-        cur.execute("SELECT COUNT(*) FROM nx.PR_M_PROC_GAGONG_WORKER WHERE GAGONG_PROC_CODE=? AND WORKER_CODE=?", part, worker)
+            cur.execute("DELETE FROM nx.part_worker WHERE part_code=? AND worker_name=?", part, orig)
+        cur.execute("SELECT COUNT(*) FROM nx.part_worker WHERE part_code=? AND worker_name=?", part, worker)
         exists = cur.fetchone()[0] > 0
         if exists:
-            cur.execute("""UPDATE nx.PR_M_PROC_GAGONG_WORKER SET WORK_FLAG=?,
-                  UPDATE_USER_ID=?, UPDATE_DATETIME=getdate(), UPDATE_WINDOW='web_partmaster'
-                WHERE GAGONG_PROC_CODE=? AND WORKER_CODE=?""", real, user, part, worker)
+            cur.execute("""UPDATE nx.part_worker SET work_flag=?, upd_user=?, upd_dt=getdate()
+                WHERE part_code=? AND worker_name=?""", real, user, part, worker)
             mode = "update"
         else:
-            cur.execute("""INSERT INTO nx.PR_M_PROC_GAGONG_WORKER(GAGONG_PROC_CODE, WORKER_CODE, WORK_FLAG,
-                  INSERT_USER_ID, INSERT_DATETIME, INSERT_WINDOW, UPDATE_USER_ID, UPDATE_DATETIME, UPDATE_WINDOW)
-                VALUES(?,?,?,?,getdate(),'web_partmaster',?,getdate(),'web_partmaster')""", part, worker, real, user, user)
+            cur.execute("""INSERT INTO nx.part_worker(part_code, worker_name, work_flag,
+                  ins_user, ins_dt, upd_user, upd_dt)
+                VALUES(?,?,?,?,getdate(),?,getdate())""", part, worker, real, user, user)
             mode = "insert"
         cn.commit()
         return {"ok": True, "mode": mode}
@@ -189,22 +180,21 @@ def partmaster_worker_save_all(payload: dict = Body(...)):
         seen.add(w); norm.append((w, '1' if r.get('real') else '0'))
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute("SELECT WORKER_CODE, ISNULL(WORK_FLAG,'') FROM nx.PR_M_PROC_GAGONG_WORKER WHERE GAGONG_PROC_CODE=?", part)
+        cur.execute("SELECT worker_name, ISNULL(work_flag,'') FROM nx.part_worker WHERE part_code=?", part)
         existing = {str(r[0]).strip(): str(r[1]).strip() for r in cur.fetchall()}
         newset = {w for w, _ in norm}
         ndel = nins = nupd = 0
         for w in (set(existing) - newset):
-            cur.execute("DELETE FROM nx.PR_M_PROC_GAGONG_WORKER WHERE GAGONG_PROC_CODE=? AND WORKER_CODE=?", part, w); ndel += 1
+            cur.execute("DELETE FROM nx.part_worker WHERE part_code=? AND worker_name=?", part, w); ndel += 1
         for w, flag in norm:
             if w in existing:
                 if existing[w] != flag:
-                    cur.execute("""UPDATE nx.PR_M_PROC_GAGONG_WORKER SET WORK_FLAG=?,
-                          UPDATE_USER_ID=?, UPDATE_DATETIME=getdate(), UPDATE_WINDOW='web_partmaster'
-                        WHERE GAGONG_PROC_CODE=? AND WORKER_CODE=?""", flag, user, part, w); nupd += 1
+                    cur.execute("""UPDATE nx.part_worker SET work_flag=?, upd_user=?, upd_dt=getdate()
+                        WHERE part_code=? AND worker_name=?""", flag, user, part, w); nupd += 1
             else:
-                cur.execute("""INSERT INTO nx.PR_M_PROC_GAGONG_WORKER(GAGONG_PROC_CODE, WORKER_CODE, WORK_FLAG,
-                      INSERT_USER_ID, INSERT_DATETIME, INSERT_WINDOW, UPDATE_USER_ID, UPDATE_DATETIME, UPDATE_WINDOW)
-                    VALUES(?,?,?,?,getdate(),'web_partmaster',?,getdate(),'web_partmaster')""", part, w, flag, user, user); nins += 1
+                cur.execute("""INSERT INTO nx.part_worker(part_code, worker_name, work_flag,
+                      ins_user, ins_dt, upd_user, upd_dt)
+                    VALUES(?,?,?,?,getdate(),?,getdate())""", part, w, flag, user, user); nins += 1
         cn.commit()
         return {"ok": True, "ins": nins, "upd": nupd, "del": ndel, "cnt": len(norm)}
     except Exception as e:
@@ -214,13 +204,13 @@ def partmaster_worker_save_all(payload: dict = Body(...)):
 
 @router.post("/api/partmaster/worker_delete")
 def partmaster_worker_delete(payload: dict = Body(...)):
-    """파트별 작업자 삭제. PK=(GAGONG_PROC_CODE, WORKER_CODE)."""
+    """파트별 작업자 삭제. PK=(part_code, worker_name)."""
     part = (payload.get('part') or '').strip()
     worker = (payload.get('worker') or '').strip()
     if not part or not worker: return {"ok": False, "detail": "파트/작업자 필수"}
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute("DELETE FROM nx.PR_M_PROC_GAGONG_WORKER WHERE GAGONG_PROC_CODE=? AND WORKER_CODE=?", part, worker); cn.commit()
+        cur.execute("DELETE FROM nx.part_worker WHERE part_code=? AND worker_name=?", part, worker); cn.commit()
         return {"ok": True}
     except Exception as e:
         return {"ok": False, "detail": str(e)[:200]}

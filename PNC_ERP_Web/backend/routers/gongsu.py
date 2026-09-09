@@ -62,8 +62,8 @@ def _gongsu_web_rows(from_ymd, to_ymd, dept, gubun, user):
               ISNULL(h.support_start,'') sup_st, ISNULL(h.support_end,'') sup_et,
               COALESCE(NULLIF(GS.GAGONG_PROC_DESC,''), h.support_line, '') sup_part_nm,
               ISNULL(h.remarks,'') remarks FROM nx.hr_work_info h
-              LEFT JOIN nx.PR_M_PROC_GAGONG GS ON GS.GAGONG_PROC_CODE COLLATE DATABASE_DEFAULT=h.support_line COLLATE DATABASE_DEFAULT
-              LEFT JOIN nx.PR_M_PROC_GAGONG G ON G.GAGONG_PROC_CODE COLLATE DATABASE_DEFAULT=h.dept_code COLLATE DATABASE_DEFAULT
+              LEFT JOIN nx.v_part_master GS ON GS.GAGONG_PROC_CODE COLLATE DATABASE_DEFAULT=h.support_line COLLATE DATABASE_DEFAULT
+              LEFT JOIN nx.v_part_master G ON G.GAGONG_PROC_CODE COLLATE DATABASE_DEFAULT=h.dept_code COLLATE DATABASE_DEFAULT
             WHERE {' AND '.join(w)}""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -101,8 +101,8 @@ def _gongsu_mirror_rows(from_ymd, to_ymd, dept, gubun, user):
               COALESCE(NULLIF(GS.GAGONG_PROC_DESC,''), A.SUPPORT_LINE, '') sup_part_nm,
               ISNULL(A.REMARKS,'') remarks
             FROM PARTNER_ERP_TEST3.nx.HR_M_WORK_INFO A LEFT JOIN PARTNER_ERP_TEST3.nx.HR_M_DEPT D ON D.DEPT_CODE=A.DEPT_CODE
-              LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG G ON G.GAGONG_PROC_CODE COLLATE DATABASE_DEFAULT=A.DEPT_CODE COLLATE DATABASE_DEFAULT
-              LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG GS ON GS.GAGONG_PROC_CODE COLLATE DATABASE_DEFAULT=A.SUPPORT_LINE COLLATE DATABASE_DEFAULT
+              LEFT JOIN PARTNER_ERP_TEST3.nx.v_part_master G ON G.GAGONG_PROC_CODE COLLATE DATABASE_DEFAULT=A.DEPT_CODE COLLATE DATABASE_DEFAULT
+              LEFT JOIN PARTNER_ERP_TEST3.nx.v_part_master GS ON GS.GAGONG_PROC_CODE COLLATE DATABASE_DEFAULT=A.SUPPORT_LINE COLLATE DATABASE_DEFAULT
             WHERE {' AND '.join(w)} ORDER BY A.WORK_YMD DESC, A.DEPT_CODE, A.MAINT_SEQ""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -148,8 +148,8 @@ def gongsu_persons(part: str = Query("", description="파트(GAGONG_PROC_CODE), 
         if part: w.append("wk.GAGONG_PROC_CODE=?"); p.append(part)
         cur.execute(f"""SELECT wk.GAGONG_PROC_CODE part, ISNULL(g.GAGONG_PROC_DESC,'') part_nm,
               wk.WORKER_CODE worker, ISNULL(wk.WORK_FLAG,'') real_flag
-            FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG_WORKER wk
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE=wk.GAGONG_PROC_CODE
+            FROM PARTNER_ERP_TEST3.nx.v_part_worker wk
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_part_master g ON g.GAGONG_PROC_CODE=wk.GAGONG_PROC_CODE
             WHERE {' AND '.join(w)} ORDER BY wk.GAGONG_PROC_CODE, wk.WORK_FLAG DESC, wk.WORKER_CODE""", *p)
         workers = [{"part": str(r[0]).strip(), "part_nm": str(r[1]).strip(),
                     "worker": str(r[2]).strip(), "real": str(r[3]).strip() == '1'} for r in cur.fetchall()]
@@ -273,8 +273,8 @@ def gongsu_worker_parts(worker: str = Query("", description="작업자명(부분
     try:
         sql = """SELECT wk.WORKER_CODE, wk.GAGONG_PROC_CODE, ISNULL(g.GAGONG_PROC_DESC,''),
                         ISNULL(wk.WORK_FLAG,'')
-                   FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG_WORKER wk
-                   LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g
+                   FROM PARTNER_ERP_TEST3.nx.v_part_worker wk
+                   LEFT JOIN PARTNER_ERP_TEST3.nx.v_part_master g
                           ON g.GAGONG_PROC_CODE=wk.GAGONG_PROC_CODE"""
         p = []
         if w:

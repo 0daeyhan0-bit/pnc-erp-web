@@ -103,7 +103,7 @@ def _nx_derive(point, from6, to6, limit=8000):
     custs = sorted({(r.get("cust") or "").strip() for r in rows if (r.get("cust") or "").strip()})
     gmap, cmap = {}, {}
     if gpcs:
-        _c, gr = _rows(f"SELECT gagong_proc_code cd, gagong_proc_desc nm FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WHERE gagong_proc_code IN ({','.join(_q(x) for x in gpcs)})")
+        _c, gr = _rows(f"SELECT gagong_proc_code cd, gagong_proc_desc nm FROM PARTNER_ERP_TEST3.nx.v_part_master WHERE gagong_proc_code IN ({','.join(_q(x) for x in gpcs)})")
         gmap = {str(x["cd"]).strip(): (x["nm"] or "") for x in gr}
     if custs:
         _c, cr = _rows(f"SELECT cust_code cd, cust_desc nm FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE cust_code IN ({','.join(_q(x) for x in custs)})")
@@ -139,7 +139,7 @@ select t.mat_code cd, max(M.item_name) nm, max(m.item_spec) spec,
   sum(t.stock_qty) sq,  sum(t.stock_amt) sa
 from {tbl} t
 join PARTNER_ERP_TEST3.nx.item m on t.mat_code=m.item_code
-join PARTNER_ERP_TEST3.nx.pr_m_proc_gagong g on t.gagong_proc_code=g.gagong_proc_code
+join PARTNER_ERP_TEST3.nx.v_part_master g on t.gagong_proc_code=g.gagong_proc_code
 left join PARTNER_ERP_TEST3.nx.v_cm_m_cust c on M.in_cust=c.cust_code
 where t.cust_code='Z99990' and t.{col}=?
 group by t.mat_code
@@ -232,7 +232,7 @@ def matclose(dfrom: str = Query(""), dto: str = Query("")):
     LEFT JOIN beg b ON b.cd=k.cd
     LEFT JOIN PARTNER_ERP_TEST3.nx.item m ON UPPER(m.item_code)=k.cd
     LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON UPPER(i.item_code)=k.cd
-    LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL sd ON sd.KIND_CODE='PR006' AND sd.DETAIL_CODE=i.sgroup
+    LEFT JOIN PARTNER_ERP_TEST3.nx.v_code_detail sd ON sd.KIND_CODE='PR006' AND sd.DETAIL_CODE=i.sgroup
     GROUP BY k.cd ORDER BY k.cd
     """
     rows = _nx_rows(sql, fr, to, to, fr)
@@ -935,10 +935,10 @@ def stockissue_view(from_ymd: str = Query(""), to_ymd: str = Query(""), pn: str 
     sz = max(1, min(int(size or 2000), 10000)); off = max(0, (int(page or 1) - 1)) * sz
     sql = f"""
       SELECT a.maint_ymd ymd, a.maint_seq seq,
-        ISNULL((SELECT gagong_proc_desc FROM PARTNER_ERP_TEST3.nx.pr_m_proc_gagong g WHERE g.gagong_proc_code=a.gagong_proc_code),a.gagong_proc_code) from_wh,
+        ISNULL((SELECT gagong_proc_desc FROM PARTNER_ERP_TEST3.nx.v_part_master g WHERE g.gagong_proc_code=a.gagong_proc_code),a.gagong_proc_code) from_wh,
         a.item_code pn, ISNULL((SELECT item_name FROM PARTNER_ERP_TEST3.nx.item i WHERE i.item_code=a.item_code),'') pn_nm,
         CASE ISNULL(a.out_wh_gubun,'') WHEN '1' THEN '생산창고' WHEN '2' THEN '영업창고' ELSE '' END out_wh_nm,
-        ISNULL((SELECT gagong_proc_desc FROM PARTNER_ERP_TEST3.nx.pr_m_proc_gagong g WHERE g.gagong_proc_code=a.to_gagong_proc_code),a.to_gagong_proc_code) to_wh,
+        ISNULL((SELECT gagong_proc_desc FROM PARTNER_ERP_TEST3.nx.v_part_master g WHERE g.gagong_proc_code=a.to_gagong_proc_code),a.to_gagong_proc_code) to_wh,
         a.mat_code mat, (a.maint_qty*-1) qty, ISNULL(a.maint_cost,0) cost, ISNULL(a.maint_amt,0) amt, ISNULL(a.remarks,'') remarks,
         -- ★작성자명 = nx.app_user (2026-09-07 컷오버). 종전엔 스키마 없이 cm_m_users_info 라
         --   기본 스키마(컷오버 후 TEST3.dbo)를 봤는데, 그 복사본은 낡았다.
@@ -949,8 +949,8 @@ def stockissue_view(from_ymd: str = Query(""), to_ymd: str = Query(""), pn: str 
       ORDER BY a.maint_ymd DESC, a.maint_seq ASC
       OFFSET {off} ROWS FETCH NEXT {sz} ROWS ONLY"""
     _c2, rows = _rows(sql)
-    _c3, fw = _rows(f"SELECT DISTINCT a.gagong_proc_code code, ISNULL((SELECT gagong_proc_desc FROM PARTNER_ERP_TEST3.nx.pr_m_proc_gagong g WHERE g.gagong_proc_code=a.gagong_proc_code),a.gagong_proc_code) nm FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE {PW} AND a.gagong_proc_code>'' ORDER BY 2")
-    _c4, tw = _rows(f"SELECT DISTINCT a.to_gagong_proc_code code, ISNULL((SELECT gagong_proc_desc FROM PARTNER_ERP_TEST3.nx.pr_m_proc_gagong g WHERE g.gagong_proc_code=a.to_gagong_proc_code),a.to_gagong_proc_code) nm FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE {PW} AND a.to_gagong_proc_code>'' ORDER BY 2")
+    _c3, fw = _rows(f"SELECT DISTINCT a.gagong_proc_code code, ISNULL((SELECT gagong_proc_desc FROM PARTNER_ERP_TEST3.nx.v_part_master g WHERE g.gagong_proc_code=a.gagong_proc_code),a.gagong_proc_code) nm FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE {PW} AND a.gagong_proc_code>'' ORDER BY 2")
+    _c4, tw = _rows(f"SELECT DISTINCT a.to_gagong_proc_code code, ISNULL((SELECT gagong_proc_desc FROM PARTNER_ERP_TEST3.nx.v_part_master g WHERE g.gagong_proc_code=a.to_gagong_proc_code),a.to_gagong_proc_code) nm FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE {PW} AND a.to_gagong_proc_code>'' ORDER BY 2")
     cnt = int(tot["cnt"] or 0)
     return {"from_ymd": f6, "to_ymd": t6, "rows": rows, "total_cnt": cnt, "total_qty": float(tot["qty"] or 0),
             "page": int(page or 1), "size": sz, "pages": (cnt + sz - 1) // sz if cnt else 1,
@@ -1051,8 +1051,8 @@ def _prodinout(ym, frm=None, to=None, src="nx", inc_zero=False):
     #   품목 정본은 nx.item(25,403건)이다 — CLAUDE.md §1-9.
     #   컬럼 대응: item_desc → item_name · item_sgroup → sgroup.
     _c4, itrows = _rows("SELECT UPPER(item_code) mat, item_name, item_spec, sgroup AS item_sgroup FROM PARTNER_ERP_TEST3.nx.item")
-    _c5, sgrows = _rows("SELECT DETAIL_CODE cd, REPLACE(REPLACE(DETAIL_DESC,CHAR(13),''),CHAR(10),'') nm FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE='PR006'")
-    _c6, pnrows = _rows("SELECT gagong_proc_code code, gagong_proc_desc nm FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG")
+    _c5, sgrows = _rows("SELECT DETAIL_CODE cd, REPLACE(REPLACE(DETAIL_DESC,CHAR(13),''),CHAR(10),'') nm FROM PARTNER_ERP_TEST3.nx.v_code_detail WHERE KIND_CODE='PR006'")
+    _c6, pnrows = _rows("SELECT gagong_proc_code code, gagong_proc_desc nm FROM PARTNER_ERP_TEST3.nx.v_part_master")
     im = {r["mat"]: r for r in itrows}
     sgm = {str(r["cd"]).strip(): str(r["nm"]).strip() for r in sgrows}
     bfm = {(r["part"], r["mat"]): float(r["bf"] or 0) for r in bfrows}
@@ -1221,7 +1221,7 @@ SELECT a.SALE_YMD ymd, a.WORK_ORDER wo, a.SPLIT_WORK_ORDER swo, a.ITEM_CODE item
   a.SALE_QTY qty, a.SALE_COST cost, a.SALE_AMT amt,
   ISNULL((SELECT TOP 1 price FROM PARTNER_ERP_TEST3.nx.price_item WHERE item_code=a.item_code AND apply_ymd<=a.sale_ymd AND price_type='TAGS' AND vendor_code IN ('1010','1020') ORDER BY apply_ymd DESC),0) mcost,
   a.SALE_USER_ID usr, a.SALE_HMS hms,
-  CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
+  CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.v_work_place WHERE work_code=m.work_code)
        ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE cust_code=M.in_cust) END wc,
   M.item_name nm, pi.REMARKS remarks
 FROM PARTNER_ERP_TEST3.nx.sa_t_sale_dtl a JOIN PARTNER_ERP_TEST3.nx.item m ON a.item_code=m.item_code
@@ -1276,7 +1276,7 @@ SELECT t.mat cd, max(M.item_name) nm, max(m.item_spec) spec, max(m.item_class) c
    sum(t.basic) basic, sum(t.inq) inq, sum(t.outq) outq, sum(t.etc) adj,
    sum(t.basic+t.inq-t.etc-t.outq) qty,
    (select top 1 price from PARTNER_ERP_TEST3.nx.price_item where item_code=t.mat and apply_ymd<='{t}' and price_type in ('TAGS','TAGE') order by apply_ymd desc) cost,
-   case when max(m.work_code)>'' then (select work_desc from PARTNER_ERP_TEST3.nx.pr_m_work where work_code=max(m.work_code))
+   case when max(m.work_code)>'' then (select work_desc from PARTNER_ERP_TEST3.nx.v_work_place where work_code=max(m.work_code))
         else (select cust_desc from PARTNER_ERP_TEST3.nx.v_cm_m_cust where cust_code=max(M.in_cust)) end wc
 FROM t JOIN PARTNER_ERP_TEST3.nx.item m ON t.mat=m.item_code
 GROUP BY t.mat
@@ -1322,7 +1322,7 @@ GROUP BY a.item_code, ISNULL(a.mkt,''), a.receiving_ymd""")
     _c2, items = _rows(f"""
 SELECT m.item_code item,
   CASE WHEN m.work_code>'' THEN m.work_code ELSE M.in_cust END wcc,
-  CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
+  CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.v_work_place WHERE work_code=m.work_code)
        ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE cust_code=M.in_cust) END wc
 FROM PARTNER_ERP_TEST3.nx.item m
 WHERE m.item_code IN (SELECT DISTINCT item_code FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL WHERE receiving_ymd BETWEEN '{fr6}' AND '{to6}')""")

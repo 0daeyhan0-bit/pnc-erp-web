@@ -108,9 +108,9 @@ def _pi_proc_rows(cur, item, use_nx=True, route_id=0):
                ISNULL(w.WORK_DESC,''), ISNULL(g.GAGONG_PROC_DESC,''), ISNULL(s.WORK_DESC,''), ISNULL(m.MACH_DESC,''),
                ISNULL(g.PROD_RATE,0), ISNULL(w.PROD_RATE,0)
         FROM {src}
-        LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK        w ON w.WORK_CODE        = a.{C('WORK_CODE')}
-        LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE = a.{C('GAGONG_PROC_CODE')}
-        LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK_SINGLE s ON s.S_WORK_CODE      = a.{C('S_WORK_CODE')}
+        LEFT JOIN PARTNER_ERP_TEST3.nx.v_work_place        w ON w.WORK_CODE        = a.{C('WORK_CODE')}
+        LEFT JOIN PARTNER_ERP_TEST3.nx.v_part_master g ON g.GAGONG_PROC_CODE = a.{C('GAGONG_PROC_CODE')}
+        LEFT JOIN PARTNER_ERP_TEST3.nx.v_work_single s ON s.S_WORK_CODE      = a.{C('S_WORK_CODE')}
         LEFT JOIN PARTNER_ERP_TEST3.nx.QA_M_MACHINE     m ON m.MACH_CODE        = a.{C('MACH_CODE')}
         WHERE a.{C('ITEM_CODE')}=? {('AND a.route_id=?' if use_route else '')} ORDER BY a.{C('PROC_SEQ')}""",
         *([item, int(route_id)] if use_route else [item]))
@@ -170,7 +170,7 @@ def prodinfo_get(item: str = Query(...), assyall: int = Query(0), route_id: int 
                    ISNULL(s.GAGONG_PROC_CODE,''), ISNULL(s.HOUR_PAY,0), ISNULL(s.CUTTING_PROC_FLAG,''),
                    ISNULL(s.SUB_WELD_FLAG,''), ISNULL(s.SORT_SEQ,0),
                    CASE WHEN n.s_work_code IS NOT NULL THEN 1 ELSE 0 END, {stsel}
-            FROM PARTNER_ERP_TEST3.nx.PR_M_WORK_SINGLE s
+            FROM PARTNER_ERP_TEST3.nx.v_work_single s
             LEFT JOIN nx.prodinfo_single n ON n.s_work_code = s.S_WORK_CODE
             ORDER BY s.WORK_CODE, s.SORT_SEQ, s.S_WORK_CODE""")
         single = []
@@ -284,16 +284,16 @@ def prodinfo_opts(work_code: str = Query("")):
     wc = work_code.strip()
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute("SELECT WORK_CODE, ISNULL(WORK_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_WORK ORDER BY WORK_CODE")
+        cur.execute("SELECT WORK_CODE, ISNULL(WORK_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_work_place ORDER BY WORK_CODE")
         works = [{"code": str(r[0]).strip(), "name": str(r[1]).strip()} for r in cur.fetchall()]
         # 파트(PR_M_PROC_GAGONG) — work_code 포함(프론트 캐스케이드용)
         pw = "WHERE WORK_CODE=?" if wc else ""
-        cur.execute(f"""SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,''), ISNULL(WORK_CODE,'') FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG
+        cur.execute(f"""SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,''), ISNULL(WORK_CODE,'') FROM PARTNER_ERP_TEST3.nx.v_part_master
             {pw} ORDER BY SORT_KEY, GAGONG_PROC_CODE""", *( [wc] if wc else [] ))
         parts = [{"code": str(r[0]).strip(), "name": str(r[1]).strip(), "work_code": str(r[2]).strip()} for r in cur.fetchall()]
         # 가공공정(PR_M_WORK_SINGLE, nx우선 명칭)
         cur.execute(f"""SELECT s.S_WORK_CODE, ISNULL(n.work_desc, s.WORK_DESC), ISNULL(s.WORK_CODE,'')
-            FROM PARTNER_ERP_TEST3.nx.PR_M_WORK_SINGLE s LEFT JOIN nx.prodinfo_single n ON n.s_work_code=s.S_WORK_CODE
+            FROM PARTNER_ERP_TEST3.nx.v_work_single s LEFT JOIN nx.prodinfo_single n ON n.s_work_code=s.S_WORK_CODE
             {('WHERE s.WORK_CODE=?' if wc else '')} ORDER BY s.SORT_SEQ, s.S_WORK_CODE""", *( [wc] if wc else [] ))
         singles = [{"code": int(r[0]), "name": (str(r[1] or "").strip() or str(r[0])), "work_code": str(r[2]).strip()} for r in cur.fetchall()]
         # 설비(QA_M_MACHINE) — 작업처 지정 시 해당 작업처 + 미지정 설비 포함
@@ -858,7 +858,7 @@ def linecal_matrix(from_ymd: str = Query(""), weeks: int = Query(4)):
             pass
         if not base:                       # 폴백: 미러 직독(정본이 비었을 때만)
             try:
-                cur.execute("""SELECT SUBSTRING(calendar_yymd,3,6), work_stats FROM nx.HR_M_CALENDAR
+                cur.execute("""SELECT SUBSTRING(calendar_yymd,3,6), work_stats FROM nx.v_cal_work
                                 WHERE work_team='A' AND time_type='A'
                                   AND calendar_yymd BETWEEN ? AND ?""",
                             '20' + start.strftime('%y%m%d'), '20' + end.strftime('%y%m%d'))
@@ -992,7 +992,7 @@ def _wcal_partnames():
     """PART_CODE→이름(PR_M_PROC_GAGONG), 이름 속 'PART'→'파트'."""
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG")
+        cur.execute("SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.v_part_master")
         return {str(r[0]).strip(): str(r[1] or '').strip().replace('PART', '파트') for r in cur.fetchall()}
     finally:
         cn.close()

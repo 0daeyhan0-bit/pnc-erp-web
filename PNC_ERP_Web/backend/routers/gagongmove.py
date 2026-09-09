@@ -13,7 +13,7 @@ router = APIRouter()
 def gagong_move580_opts():
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("""SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG
+        cur.execute("""SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.v_part_master
                        ORDER BY SORT_KEY, GAGONG_PROC_CODE""")
         parts = [{"code": r[0], "nm": r[1] or r[0]} for r in cur.fetchall()]
         cur.execute("""SELECT DISTINCT c.CUST_CODE, c.CUST_DESC FROM PARTNER_ERP_TEST3.nx.item m
@@ -445,7 +445,7 @@ def gagong_move580_sheets(from_ymd: str = Query(""), to_ymd: str = Query(""),
             ) u
             LEFT JOIN PARTNER_ERP_TEST3.nx.item mi ON mi.ITEM_CODE=u.MAT_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB su ON su.ITEM_CODE=u.MAT_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=u.PR_PART_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_part_master pg ON pg.GAGONG_PROC_CODE=u.PR_PART_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cc ON cc.CUST_CODE=u.SAGUB_CUST_CODE
             ORDER BY u.MAINT_GROUP_SEQ DESC, u.MAINT_SEQ""", *p)
         cols = [d[0] for d in cur.description]
@@ -489,7 +489,7 @@ def gagong_move580_print(group_from: int = Query(...), group_to: int = Query(Non
                WHERE m.MAINT_GROUP_SEQ BETWEEN ? AND ? AND m.MAINT_TAG='B'
             ) u
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB su ON su.ITEM_CODE=u.MAT_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=u.PR_PART_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_part_master pg ON pg.GAGONG_PROC_CODE=u.PR_PART_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cc ON cc.CUST_CODE=u.SAGUB_CUST_CODE
             ORDER BY u.MAINT_GROUP_SEQ, u.MAINT_SEQ""", group_from, gt)
         cols = [d[0] for d in cur.description]

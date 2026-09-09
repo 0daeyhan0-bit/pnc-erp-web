@@ -92,7 +92,7 @@ def bom_get(item: str = Query(..., description="품번")):
         pi = cur.fetchone()
         if not pi:
             raise HTTPException(404, f"품목 {item} 없음")
-        cur.execute("""SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG
+        cur.execute("""SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.v_part_master
                        WHERE ISNULL(GAGONG_PROC_CODE,'')<>'' ORDER BY SORT_KEY, GAGONG_PROC_CODE""")
         procs = [{"code": str(r[0]).strip(), "name": (str(r[1]).strip() if r[1] else str(r[0]).strip())} for r in cur.fetchall()]
         cur.execute("SELECT bom_id, version, status FROM nx.bom_header WHERE item_code=?", item)
@@ -178,7 +178,7 @@ def codes():
         out = {}
         for key, grp in _CODE_GROUPS.items():
             cur.execute("""SELECT LTRIM(RTRIM(DETAIL_CODE)), LTRIM(RTRIM(DETAIL_DESC))
-                FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE=? AND ISNULL(USE_FLAG,'1')='1'
+                FROM PARTNER_ERP_TEST3.nx.v_code_detail WHERE KIND_CODE=? AND ISNULL(USE_FLAG,'1')='1'
                 ORDER BY SORT_SEQ, DETAIL_CODE""", grp)
             out[key] = [{"code": r[0], "name": r[1]} for r in cur.fetchall()]
             # nx 전용 확장코드(240 용접봉 등) 병합 — 품목마스터 편집(_kindmap)과 일관, 미러 미등록시 누락 방지

@@ -56,6 +56,42 @@ if _bad:
     print('  정본 = _schema/CUTOVER_MIGRATION_SCOPE.md')
     raise SystemExit(2)
 
+# ★★2차 가드 — **레거시명 테이블 안에 든 웹 산출분**(2026-09-09 신설)
+#   위 PROTECTED 는 소문자 클린 테이블만 담고 있어, 이름이 대문자 레거시명이면
+#   보호 밖이었다. 그런데 아래 둘은 라이브에 없는 **웹이 만든 행**을 품고 있다:
+#     PU_T_MONTH_STOCK_WH  2608 3,692행 = 8월 월마감 산출물(한대윤 2026-09-08 10:16)
+#     CS_M_PROC            21행         = 웹 등록 체결공정 FS01~FS21(assywork.py:38)
+#   DROP+재복사하면 마감 '상태'(period_close)는 확정으로 남고 그 마감이 만든 '값'만
+#   사라진다 — 가장 알아채기 어려운 형태다.
+#   ⟹ 실행 전 **라이브에 없는 행이 있으면 중단**하고, 백업·복구 절차를 밟게 한다.
+#      백업 = _migration/protect_web_outputs_260909.py
+#      복구 = _migration/restore_web_outputs_<STAMP>.py  (r_bulk_copy 직후 실행)
+WEBOUT = {   # 테이블 : 초과분 판정 키
+    'PU_T_MONTH_STOCK_WH': ['STOCK_YYMM', 'CUST_CODE', 'GAGONG_PROC_CODE', 'MAT_CODE'],
+    'CS_M_PROC':           ['PROC_CODE'],
+}
+_risk = []
+for _t, _k in WEBOUT.items():
+    if _t not in TABLES: continue
+    _on = ' AND '.join("RTRIM(ISNULL(CAST(n.[{c}] AS varchar(60)),''))="
+                       "RTRIM(ISNULL(CAST(l.[{c}] AS varchar(60)),''))".format(c=c) for c in _k)
+    try:
+        _n = c.execute("SELECT COUNT(*) FROM nx.[{t}] n WHERE NOT EXISTS"
+                       "(SELECT 1 FROM PARTNER_ERP.dbo.[{t}] l WHERE {on})".format(t=_t, on=_on)).fetchone()[0]
+    except Exception:
+        continue
+    if _n: _risk.append((_t, _n))
+if _risk:
+    print('★중단 — 레거시에 없는 **웹 산출분**을 품은 테이블이 TABLES 에 있다:')
+    for _t, _n in _risk:
+        print('    {:<26s} 웹 전용 {:,}행'.format(_t, _n))
+    print('  DROP+재복사하면 이 행들이 사라진다(마감 상태만 남고 값이 없어진다).')
+    print('  ① python _migration/protect_web_outputs_260909.py --apply   ← 먼저 백업')
+    print('  ② r_bulk_copy 실행')
+    print('  ③ python _migration/restore_web_outputs_<STAMP>.py --apply  ← 직후 복구')
+    print('  (또는 TABLES 에서 위 테이블을 빼고 실행)')
+    raise SystemExit(3)
+
 FAIL=[]; SKIP=0
 for t in TABLES:
     src=f"PARTNER_ERP.dbo.{t}"; nxt=f"nx.{t}"

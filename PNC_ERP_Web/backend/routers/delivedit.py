@@ -12,7 +12,7 @@
              A.SHEET_NO, A.AM_PM, A.PLAN_YMD,
              MAX(A.CONFIRM_FLAG) confirm_flag, SUM(A.INPUT_REQ_QTY) input_req_qty,
              A.MAT_CODE, MAX(A.USE_QTY) use_qty, SUM(A.MAT_QTY) mat_qty
-        FROM PU_T_SET_INPUT_REQ_DTL A
+        FROM nx.PU_T_SET_INPUT_REQ_DTL A
        WHERE A.INPUT_YMD BETWEEN ? AND ? AND A.ITEM_CODE LIKE ?
          AND A.IN_CUST_CODE = ? AND A.MAT_CODE LIKE ?
        GROUP BY ...

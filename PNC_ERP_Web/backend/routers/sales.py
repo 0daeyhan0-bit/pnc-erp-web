@@ -1096,8 +1096,8 @@ def saleout_sagubflag(item: str = Query(...), cust: str = Query(...)):
 
     원문(사용자 제공):
         select isnull(max(sagub_flag),'0') into :ls_sagub_flag
-          from pr_m_item_bom a
-          join pr_m_item b on a.item_code = b.item_code
+          from nx.PR_M_ITEM_BOM a
+          join nx.PR_M_ITEM b on a.item_code = b.item_code
          where a.mat_code   = :ls_item_code     -- 출고하려는 자재
            and b.in_cust_code = :ls_cust_code;  -- 그 거래처가 납품처인 도번
         dw_data.setitem(ai_row, 'sagub_flag', ls_sagub_flag)
@@ -1453,7 +1453,7 @@ def sale040_lines(src: str = Query("nx")):
     cur = cn.cursor()
     try:
         cur.execute(f"""SELECT DETAIL_CODE, REPLACE(REPLACE(ISNULL(DETAIL_DESC,''),CHAR(13),''),CHAR(10),'')
-                         FROM {SCH}.CM_M_MASTER_DETAIL WHERE KIND_CODE='PR003' ORDER BY DETAIL_CODE""")
+                         FROM {SCH}.v_code_detail WHERE KIND_CODE='PR003' ORDER BY DETAIL_CODE""")
         nm = {str(a).strip(): str(b).strip() for a, b in cur.fetchall()}
         cur.execute(f"""SELECT DISTINCT LINE_NO FROM {SCH}.PR_T_PLAN_ITEM_DTL
                         WHERE ISNULL(LINE_NO,'')<>'' AND PLAN_YMD>=CONVERT(varchar(6),DATEADD(month,-3,getdate()),12)""")
@@ -1543,12 +1543,12 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
         #   화면 '작업처' 컬럼이 05라인/MTS/이젠터/대원산업 으로 나오는 근거.
         def WCTR(itemcol):
             return ("ISNULL((CASE WHEN c.in_cust>'' THEN"
-                    " (SELECT cust_desc FROM {SCH}.CM_M_CUST WHERE cust_code=c.in_cust)"
-                    " ELSE (SELECT work_desc FROM {SCH}.PR_M_WORK"
+                    " (SELECT cust_desc FROM {SCH}.v_cm_m_cust WHERE cust_code=c.in_cust)"
+                    " ELSE (SELECT work_desc FROM {SCH}.v_work_place"
                     " WHERE work_code=c.WORK_CODE AND c.WORK_CODE<>'P1') END),"
                     " (SELECT TOP 1 B1.GAGONG_PROC_DESC"
                     " FROM {SCH}.prodinfo_proc A1"  # ★R01 클린(미러 직독 은퇴 260909·SCH 항상 nx)
-                    " JOIN {SCH}.PR_M_PROC_GAGONG B1 ON A1.GAGONG_PROC_CODE=B1.GAGONG_PROC_CODE"
+                    " JOIN {SCH}.v_part_master B1 ON A1.GAGONG_PROC_CODE=B1.GAGONG_PROC_CODE"
                     " WHERE A1.ITEM_CODE=" + itemcol + " ORDER BY A1.PROC_SEQ ASC))")
         # 계획수량식(레거시 ceiling)
         def QEXP(q, u):

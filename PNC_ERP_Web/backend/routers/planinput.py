@@ -148,7 +148,7 @@ def planinput_lines():
     try:
         cn = _conn(); c = cn.cursor()
         try:
-            c.execute("""SELECT DETAIL_CODE, DETAIL_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL
+            c.execute("""SELECT DETAIL_CODE, DETAIL_DESC FROM PARTNER_ERP_TEST3.nx.v_code_detail
                           WHERE KIND_CODE='PR003' AND ISNULL(USE_FLAG,'1')<>'0'
                           ORDER BY SORT_SEQ, DETAIL_CODE""")
             for r in c.fetchall():
@@ -385,7 +385,7 @@ def readystock_list(q: str = Query(""), proc: str = Query(""), limit: int = Quer
               ISNULL(r.CUST_CODE,'') cust_code, ISNULL(c.CUST_DESC,'') cust_nm, r.STOCK_QTY, r.UPDATE_DATETIME
             FROM PARTNER_ERP_TEST3.nx.PU_T_READY_STOCK r
             LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=r.ITEM_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE=r.PROC_GUBUN
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_part_master g ON g.GAGONG_PROC_CODE=r.PROC_GUBUN
             LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=r.CUST_CODE
             WHERE {' AND '.join(w)} ORDER BY r.ITEM_CODE, r.PROC_GUBUN""", *p)
         rows = []
@@ -397,7 +397,7 @@ def readystock_list(q: str = Query(""), proc: str = Query(""), limit: int = Quer
                          "upd_dt": (r[8].isoformat() if hasattr(r[8], "isoformat") else "")})
         # 공정 필터 목록(코드→이름)
         cur.execute("""SELECT DISTINCT r.PROC_GUBUN, ISNULL(g.GAGONG_PROC_DESC,'')
-            FROM PARTNER_ERP_TEST3.nx.PU_T_READY_STOCK r LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE=r.PROC_GUBUN
+            FROM PARTNER_ERP_TEST3.nx.PU_T_READY_STOCK r LEFT JOIN PARTNER_ERP_TEST3.nx.v_part_master g ON g.GAGONG_PROC_CODE=r.PROC_GUBUN
             WHERE ISNULL(r.STOCK_QTY,0)<>0 AND r.PROC_GUBUN>'' ORDER BY r.PROC_GUBUN""")
         procs = [{"code": str(a).strip(), "nm": (str(b).strip() or str(a).strip())} for a, b in cur.fetchall()]
         return {"rows": rows, "cnt": len(rows), "procs": procs,

@@ -188,7 +188,7 @@ def _step6_sql(cur):
        AND b.route_id = CASE WHEN pra.route_id IS NOT NULL
              AND EXISTS(SELECT 1 FROM nx.route_proc_gagong x WHERE x.route_id=pra.route_id AND x.item_code=a.mat_code)
            THEN pra.route_id ELSE 0 END
-    JOIN {P}PR_M_WORK_SINGLE s ON b.s_work_code=s.s_work_code JOIN {P}PR_M_PROC_GAGONG g ON s.gagong_proc_code=g.gagong_proc_code
+    JOIN {P}v_work_single s ON b.s_work_code=s.s_work_code JOIN {P}v_part_master g ON s.gagong_proc_code=g.gagong_proc_code
     WHERE a.vir_item_flag='0' AND ISNULL(a.in_cust_code,'') IN ('','2228')""").replace("{P}", P))
     # ★검토본 변경(2026-08-26): 레거시 SP 원문대로 **가상품목도 행으로 넣는다**(PROC_SEQ=0·LT_HR=0).
     #   그래야 SUB-1/SUB-2 같은 가상 중간노드가 남아 CUM_LT_HR 누적 경로가 이어진다.
@@ -347,7 +347,7 @@ def _step7_sql(cur):
     #   근무일 = 공통달력(HR_M_CALENDAR 팀A·주간, work_stats 1/2/5/6/7). 직납품은 파트가 없으므로 공통 사용.
     cur.execute("IF OBJECT_ID('tempdb..#wd') IS NOT NULL DROP TABLE #wd")
     cur.execute("""SELECT ymd6, ROW_NUMBER() OVER(ORDER BY ymd6) rn INTO #wd FROM
-        (SELECT SUBSTRING(calendar_yymd,3,6) ymd6, work_stats FROM nx.HR_M_CALENDAR
+        (SELECT SUBSTRING(calendar_yymd,3,6) ymd6, work_stats FROM nx.v_cal_work
           WHERE work_team='A' AND time_type='A') c
         WHERE work_stats IN ('1','2','5','6','7')""")
     cur.execute("CREATE INDEX ix_wd ON #wd(ymd6)")
@@ -900,7 +900,22 @@ def _stepH_history(cur, base_ymd=""):
     #           6IPRG078 : 웹 TOTAL_QTY 150 · REMAIN_QTY 6 / 레거시 LOT_QTY 6
     #     TOTAL_QTY 를 쓰면 040 화면 LOT합이 +3,237 부풀었다(84,569 → 87,806).
     #     같은 대응이 STEP5 에도 기록돼 있다(planrev.py:510 — "DTL.LOT_QTY = REMAIN_QTY 100%").
-    cur.execute("DELETE FROM nx.sale_plan")
+    # ★삭제범위 = 레거시와 동일하게 "기준일 이후만"(2026-09-09 교정).
+    #   레거시(PowerBuilder)는 `delete from sa_t_plan_item_dtl where plan_ymd >= :ls_plan_ymd`,
+    #   `ls_plan_ymd` = **무조건 당일**(대표 확정) — 계획은 당일만 업로드되므로
+    #   결국 "업로드일 이후만 지우고 다시 넣는다". 그 이전 과거는 그대로 남는다.
+    #
+    #   종전 웹은 `DELETE FROM nx.sale_plan_item`(조건 없음)이라 **과거가 매번 사라졌다.**
+    #     실측: 미러 SA_T_PLAN_ITEM_DTL 231016~261009 346,670행(누적)
+    #           클린 nx.sale_plan_item  260909~261009   8,646행(현재분만)
+    #     그래서 영업예상매출·예상 LG사급금액(soyo.py)이 아직 미러를 읽고 있었다.
+    #
+    #   ⚠두 표의 성격이 다르다(실측) —
+    #     sa_t_plan_dtl      라이브 260909~261009  4,907행  = 누적 아님
+    #                        (업로드 원본이 당일 이후만 담아 과거가 애초에 안 쌓인다)
+    #     sa_t_plan_item_dtl 라이브 231016~261009 346,390행 = ★누적
+    #     같은 조건인데 결과가 다른 이유가 이것이다. 조건은 양쪽 동일하게 둔다.
+    cur.execute("DELETE FROM nx.sale_plan WHERE plan_ymd >= ?", base_ymd)
     cur.execute("""INSERT INTO nx.sale_plan(plan_ymd, work_order, split_work_order, model_no, line_no,
             output_hm, lot_qty, plan_qty, cr_flag, from_seq, to_seq, tool, org_plan_ymd, org_output_hm)
         SELECT ISNULL(NULLIF(ORG_PLAN_YMD,''),PLAN_YMD), WORK_ORDER, WORK_ORDER, MODEL_NO, LINE_NO,
@@ -908,7 +923,7 @@ def _stepH_history(cur, base_ymd=""):
                REMAIN_QTY, PLAN_QTY, CR_FLAG, FROM_SEQ, TO_SEQ, TOOL,
                ISNULL(NULLIF(ORG_PLAN_YMD,''),PLAN_YMD),
                ISNULL(NULLIF(ORG_OUTPUT_HM,''),ISNULL(NULLIF(START_HM,''),'0800'))
-          FROM nx.plan_dtl""")
+          FROM nx.plan_dtl WHERE PLAN_YMD >= ?""", base_ymd)
     cur.execute("SELECT COUNT(*) FROM nx.sale_plan")
     n_sale = int(cur.fetchone()[0] or 0)
     # ── ★도번단위 LG계획(040·050 원천) — nx.sale_plan 에서 **모델BOM 직접 전개** ──
@@ -938,7 +953,8 @@ def _stepH_history(cur, base_ymd=""):
     n_item = 0
     cur.execute("SELECT CASE WHEN OBJECT_ID('nx.sale_plan','U') IS NULL THEN 0 ELSE 1 END")
     if int(cur.fetchone()[0] or 0):
-        cur.execute("DELETE FROM nx.sale_plan_item")
+        # ★삭제범위 = 기준일 이후만(위 sale_plan 과 동일 근거). 조건 없이 지우면 과거가 사라진다.
+        cur.execute("DELETE FROM nx.sale_plan_item WHERE PLAN_YMD >= ?", base_ymd)
         cur.execute("""INSERT INTO nx.sale_plan_item(PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_CODE,
                 MODEL_NO, LINE_NO, OUTPUT_HM, USE_QTY, LOT_QTY, PLAN_QTY,
                 FROM_SEQ, TO_SEQ, TOOLS_DESC, CHANGE_DAY, CR_FLAG, ORG_PLAN_YMD, ORG_OUTPUT_HM)
@@ -955,10 +971,12 @@ def _stepH_history(cur, base_ymd=""):
               JOIN nx.PR_M_MODEL_BOM b WITH(NOLOCK)
                      ON RTRIM(b.MODEL_NO)=RTRIM(a.model_no)
                     AND a.plan_ymd BETWEEN RTRIM(b.MAKE_YMD) AND RTRIM(b.TO_APPLY_YMD)
-             WHERE b.MAKE_YMD = (SELECT MAX(t.MAKE_YMD) FROM nx.PR_M_MODEL_BOM t WITH(NOLOCK)
+             WHERE a.plan_ymd >= ?
+               AND b.MAKE_YMD = (SELECT MAX(t.MAKE_YMD) FROM nx.PR_M_MODEL_BOM t WITH(NOLOCK)
                                   WHERE RTRIM(t.MODEL_NO)=RTRIM(a.model_no)
                                     AND RTRIM(t.C_ITEM_CODE)=RTRIM(b.C_ITEM_CODE)
-                                    AND a.plan_ymd BETWEEN RTRIM(t.MAKE_YMD) AND RTRIM(t.TO_APPLY_YMD))""")
+                                    AND a.plan_ymd BETWEEN RTRIM(t.MAKE_YMD) AND RTRIM(t.TO_APPLY_YMD))""",
+                    base_ymd)
         cur.execute("SELECT COUNT(*) FROM nx.sale_plan_item")
         n_item = int(cur.fetchone()[0] or 0)
     # ── 이력 스냅샷: 당일 재실행 멱등 ──
@@ -1316,7 +1334,7 @@ def _coop_check(cur):
     cur.execute("""SELECT TOP 30 ISNULL(a.mat_work_center_code,'') wc, COUNT(*) n
                      FROM nx.plan_part_mat a
                     WHERE ISNULL(a.mat_work_center_code,'')<>''
-                      AND NOT EXISTS(SELECT 1 FROM nx.PR_M_WORK w WHERE w.WORK_CODE=a.mat_work_center_code)
+                      AND NOT EXISTS(SELECT 1 FROM nx.v_work_place w WHERE w.WORK_CODE=a.mat_work_center_code)
                       AND NOT EXISTS(SELECT 1 FROM nx.v_cm_m_cust c WHERE c.CUST_CODE=a.mat_work_center_code)
                     GROUP BY ISNULL(a.mat_work_center_code,'') ORDER BY 2 DESC""")
     unmapped = [{"wc": r[0], "n": int(r[1])} for r in cur.fetchall()]
@@ -1475,7 +1493,7 @@ def planrev_modelbom_hist(ymd: str = Query(""), model: str = Query(""), item: st
               ISNULL(RTRIM(i.item_name),'')
             FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM a WITH(NOLOCK)
             LEFT JOIN PARTNER_ERP_TEST3.nx.item i WITH(NOLOCK) ON i.item_code=a.C_ITEM_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w WITH(NOLOCK) ON w.WORK_CODE=i.WORK_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_work_place w WITH(NOLOCK) ON w.WORK_CODE=i.WORK_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cu WITH(NOLOCK) ON cu.CUST_CODE=i.in_cust
             {} ORDER BY a.INSERT_DATETIME DESC, a.MODEL_NO, a.C_ITEM_CODE""".format(
             max(1, min(int(limit or 300), 3000)), wh), *p)
@@ -1598,9 +1616,9 @@ def _ensure_workday_tbl(cur):
     cur.execute("""
     WITH cal AS (   -- 공통 근무달력(팀A·주간) : work_stats 1,2,5,6,7 = 근무 / 3,4 = 휴무·휴일
       SELECT SUBSTRING(calendar_yymd,3,6) ymd6, work_stats
-        FROM nx.HR_M_CALENDAR WHERE work_team='A' AND time_type='A'),
+        FROM nx.v_cal_work WHERE work_team='A' AND time_type='A'),
     part AS (       -- 파트별 달력(있으면 공통을 덮어씀)
-      SELECT RTRIM(part_code) part_code, calendar_ymd ymd6, work_stats FROM nx.PR_M_PART_CALENDAR),
+      SELECT RTRIM(part_code) part_code, calendar_ymd ymd6, work_stats FROM nx.v_cal_part),
     parts AS (SELECT DISTINCT RTRIM(gagong_proc_code) part_code FROM nx.plan_part_dtl
                WHERE ISNULL(gagong_proc_code,'')<>''),
     merged AS (
@@ -1678,7 +1696,7 @@ def _ensure_line_pull(cur):
     except Exception:
         pass
     if not _co:                        # 폴백: 미러 직독(정본이 비었을 때만)
-        cur.execute("""SELECT SUBSTRING(calendar_yymd,3,6), work_stats FROM nx.HR_M_CALENDAR
+        cur.execute("""SELECT SUBSTRING(calendar_yymd,3,6), work_stats FROM nx.v_cal_work
                         WHERE work_team='A' AND time_type='A' ORDER BY calendar_yymd""")
         _co = [(r[0], r[1]) for r in cur.fetchall()]
     # ※근무달력(HR_M_CALENDAR) 반영은 **여기가 아니다**(2026-09-04 사용자 확인).
@@ -1705,7 +1723,7 @@ def _ensure_line_pull(cur):
     except Exception:
         pass
     if not _lncal:                     # 폴백: 미러 직독
-        cur.execute("SELECT RTRIM(LINE_NO), CALENDAR_YMD, WORK_STATS FROM nx.PR_M_LINE_CALENDAR")
+        cur.execute("SELECT RTRIM(LINE_NO), CALENDAR_YMD, WORK_STATS FROM nx.v_cal_line")
         for _ln, _y, _w in cur.fetchall():
             _lncal.setdefault(str(_ln).strip(), {})[str(_y).strip()] = str(_w or '').strip()
     _WORKING = ('1', '2', '5', '6', '7')
@@ -2172,7 +2190,7 @@ def _stepL_pull(cur):
       FROM nx.plan_part_dtl WHERE ISNULL(part_plan_ymd,'')<>''""")
     n, pulled, same, mx = cur.fetchone()
     cur.execute("""SELECT COUNT(*) FROM nx.plan_part_dtl p
-                     JOIN nx.HR_M_CALENDAR c ON c.calendar_yymd='20'+p.part_plan_ymd
+                     JOIN nx.v_cal_work c ON c.calendar_yymd='20'+p.part_plan_ymd
                           AND c.work_team='A' AND c.time_type='A'
                     WHERE c.work_stats IN ('3','4')""")
     holi = int(cur.fetchone()[0] or 0)

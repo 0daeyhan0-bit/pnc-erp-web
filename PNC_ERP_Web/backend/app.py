@@ -138,6 +138,10 @@ from routers import stockval as _r_stockval
 app.include_router(_r_stockval.router)
 from routers import basemaster as _r_basemaster
 app.include_router(_r_basemaster.router)
+# 시스템코드관리 — 레거시 CM_M_MASTER_DETAIL(코드분류·상세) 클린 이관분(2026-09-09).
+#   종전엔 웹에 등록화면이 없어 컷오버 후 코드 하나 늘려도 손댈 방법이 없었다(§1-9-1).
+from routers import syscode as _r_syscode
+app.include_router(_r_syscode.router)
 from routers import cust as _r_cust
 app.include_router(_r_cust.router)
 from routers import prodinfo as _r_prodinfo
@@ -373,8 +377,8 @@ def _warmup_heavy_queries():
             """select t.mat_code, max(m.item_name), isnull(max(c.cust_desc),''), sum(t.stock_qty)
                  from PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH_DAILY t
                  join PARTNER_ERP_TEST3.nx.item m on t.mat_code=m.item_code
-                 join PARTNER_ERP_TEST3.nx.pr_m_proc_gagong g on t.gagong_proc_code=g.gagong_proc_code
-                 left join PARTNER_ERP_TEST3.nx.cm_m_cust c on m.in_cust=c.cust_code
+                 join PARTNER_ERP_TEST3.nx.v_part_master g on t.gagong_proc_code=g.gagong_proc_code
+                 left join PARTNER_ERP_TEST3.nx.v_cm_m_cust c on m.in_cust=c.cust_code
                  where t.cust_code='Z99990' and t.STOCK_YMD=(SELECT MAX(STOCK_YMD) FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH_DAILY WHERE cust_code='Z99990')
                  group by t.mat_code""",
             """select t.mat_code, max(m.item_name), sum(t.stock_qty)

@@ -28,7 +28,7 @@ def _part_conf(cur, part):
     """파트마스터의 실적처리방법."""
     cur.execute("""SELECT ISNULL(BARCODE_FLAG,'1'), ISNULL(PROD_RESULT_TYPE,''),
                           ISNULL(GAGONG_PROC_DESC,'')
-                     FROM nx.PR_M_PROC_GAGONG WITH(NOLOCK)
+                     FROM nx.v_part_master WITH(NOLOCK)
                     WHERE GAGONG_PROC_CODE=?""", part)
     r = cur.fetchone()
     if not r:

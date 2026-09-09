@@ -34,7 +34,7 @@ def _basemaster_partner(q):
     """거래처MASTER(라이브 CM_M_CUST). 레거시 w_cm_master_055. 코드→이름: CUST_TYPE=PR011 거래처구분, 역할=IN/OUT/OUTSIDE 플래그."""
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE='PR011'")
+        cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM PARTNER_ERP_TEST3.nx.v_code_detail WHERE KIND_CODE='PR011'")
         dec = {str(r[0]).strip(): str(r[1]).strip() for r in cur.fetchall()}
         w = ""; p = []
         if q.strip():
@@ -179,9 +179,9 @@ def procmaster_delete(payload: dict = Body(...)):
 # ---- 달력 마스터(근무/라인별/파트별) — 엔티티+기간 필터, 요일/근무 파생 ----
 # 소스근거(w_pr_plan_020): work_stats in('1','2','5','6')=근무일, '4'=제외(비근무). WEEKLY 1=일~7=토.
 _CAL = {
-    "cal_work": {"t": "HR_M_CALENDAR", "title": "근무달력MASTER", "ent": "WORK_TEAM", "entlbl": "근무팀", "date": "CALENDAR_YYMD", "d8": True},
-    "cal_line": {"t": "PR_M_LINE_CALENDAR", "title": "라인별 달력관리", "ent": "LINE_NO", "entlbl": "라인", "date": "CALENDAR_YMD", "d8": False},
-    "cal_part": {"t": "PR_M_PART_CALENDAR", "title": "파트별 달력관리", "ent": "PART_CODE", "entlbl": "파트", "date": "CALENDAR_YMD", "d8": False},
+    "cal_work": {"t": "nx.v_cal_work", "title": "근무달력MASTER", "ent": "WORK_TEAM", "entlbl": "근무팀", "date": "CALENDAR_YYMD", "d8": True},
+    "cal_line": {"t": "nx.v_cal_line", "title": "라인별 달력관리", "ent": "LINE_NO", "entlbl": "라인", "date": "CALENDAR_YMD", "d8": False},
+    "cal_part": {"t": "nx.v_cal_part", "title": "파트별 달력관리", "ent": "PART_CODE", "entlbl": "파트", "date": "CALENDAR_YMD", "d8": False},
 }
 _WEEKDAY = ["", "일", "월", "화", "수", "목", "금", "토"]
 def _wstats(v):
