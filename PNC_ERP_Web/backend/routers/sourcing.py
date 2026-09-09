@@ -763,8 +763,24 @@ def sourcing_routes(item: str = Query(...), show_unapproved: int = Query(1), for
             fr = [dict(r, readonly=(not r["approve_flag"])) for r in routes if keep(r)]
             routes = fr
         next_no = _peek_route_no(cur, item)   # 단조증가 다음 번호(자동라벨 표시용)
+        # ★최상위 ASSY 의 레거시 지정(2026-09-09) — 레거시 견적원가조회(w_cs_esti_010)가
+        #   최상위 행에 보여주는 생산구분·구매업체명이다(실측 AJJ30041801 = 2:외주 · 대원산업).
+        #   출처 = 품목마스터(make_type·in_cust). R01(현행)은 저장 헤더가 없는 파생이라
+        #   이 값이 없으면 상위 행을 그릴 수가 없다. 화면(R01 상세·후보 상세)이 공통으로 쓴다.
+        _MK5 = {'1': '제작', '2': '외주', '3': '구매', '4': '사급', '5': '외주직납'}
+        _tg = _tv = _tvn = _tmk = ''
+        try:
+            cur.execute("SELECT ISNULL(make_type,''), ISNULL(in_cust,'') FROM nx.item WHERE item_code=?", item)
+            _tr = cur.fetchone()
+            if _tr:
+                _tmk = str(_tr[0]).strip(); _tv = str(_tr[1]).strip()
+                _tg = _MK5.get(_tmk, '')
+                _tvn = _custnm_map(cur, {_tv}).get(_tv, _tv) if _tv else ''
+        except Exception:
+            pass
         return {"item": item, "item_name": nm, "nx_new": _nxnew, "gubun_opts": _ROUTE_GUBUN, "line_gubun_opts": _LINE_GUBUN,
-                "routes": routes, "next_route_no": next_no}
+                "routes": routes, "next_route_no": next_no,
+                "top_gubun": _tg, "top_make_type": _tmk, "top_vendor": _tv, "top_vendor_name": _tvn}
     finally:
         nx.close()
 
@@ -2469,6 +2485,10 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
         if not agg:
             return {"item": item, "asof": asof, "rows": [], "n": 0, "note": "현행 BOM 구성 없음"}
         codes = [c for c in agg if not c.upper().startswith("RAC")]   # 용접봉 제외
+        # ★최상위 ASSY 자신도 조회 대상에 넣는다(2026-09-09) — 품명·매입처·단가를 아래 공통 로직이 채우도록.
+        #   안 넣으면 ASSY 행만 품명·업체가 빈칸으로 나온다(실측).
+        if item not in codes:
+            codes.append(item)
         info = {}
         for i in range(0, len(codes), 900):
             ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
@@ -2489,7 +2509,18 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
                 WHERE ITEM_CODE IN ({ph}) AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
                   AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1' AND ISNULL(EXCEPT_FLAG,'0')<>'1' AND UPPER(LTRIM(RTRIM(MAT_CODE))) NOT LIKE 'RAC%'""", *ch)
             for r in cur.fetchall(): maker_parents.add(str(r[0]).strip())
-        order_items = {c: agg[c] for c in codes if c not in maker_parents}
+        order_items = {c: agg[c] for c in codes if c not in maker_parents and c in agg}
+        # ★★최상위 ASSY 자신을 목록에 넣는다 (2026-09-09 대표 지시).
+        #   종전엔 `order_soyo(품번)` 이 **자식만** 돌려주어 이 팝업에 ASSY 행이 없었다.
+        #   그래서 "이 완제품 자체를 대원산업이 만들어 직납한다" 를 지정할 자리가 없었고,
+        #   대표 지적 그대로 **"대원산업을 등록하고 싶어도 등록할 수가 없다"** 였다.
+        #   레거시 견적원가조회(w_cs_esti_010)는 최상위 행에 생산구분·구매업체명을 갖고 있다
+        #   (실측 AJJ30041801 = 2:외주 · 대원산업 = nx.item make_type=2 · in_cust=2148).
+        #   ⟹ 소요량 1 로 맨 위에 세우고, 아래 기존 로직(매입처 시드·단가·배분)을 그대로 태운다.
+        #      `is_top` 로 표시해 화면이 구분해 그릴 수 있게 한다.
+        _TOP = item
+        if _TOP not in order_items:
+            order_items[_TOP] = 1.0
         oc = list(order_items.keys())
         price = {}
         for i in range(0, len(oc), 900):
@@ -2544,7 +2575,10 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
         finally:
             cn2.close()
     rows = []
-    for c in sorted(oc, key=lambda x: (-order_items[x], x)):
+    # ★최상위 ASSY 는 항상 맨 앞. 나머지 부품은 종전 정렬(소요량 내림차순·품번) 유지.
+    _order = ([item] if item in order_items else []) \
+             + sorted([x for x in oc if x != item], key=lambda x: (-order_items[x], x))
+    for c in _order:
         ii = info.get(c, {}); pp = price.get(c, {})
         cur_vc = ii.get("cust", ""); cur_vn = ii.get("custnm", "")
         lst = alloc.get(c)
@@ -2568,6 +2602,7 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
         rows.append({"item_code": c, "item_name": ii.get("nm", ""), "spec": ii.get("spec", ""), "qty": round(order_items[c], 4),
             "make_type": ii.get("mk", ""), "make_label": _MK_LABEL.get(ii.get("mk", ""), ii.get("mk", "")),
             "sagub": bool(sagub.get(c, 0)),
+            "is_top": (c == item),      # ★최상위 ASSY 행 — 화면이 구분해 그린다(직납 업체 지정 자리)
             "cur_vendor_code": cur_vc, "cur_vendor_name": cur_vn, "has_override": bool(lst), "vendors": vends,
             "eff_vendor_code": prim["vendor_code"], "eff_vendor_name": prim["vendor_name"],
             "master_price": pp.get("cost"), "price_apply": pp.get("apply", ""), "currency": pp.get("curr", "")})

@@ -2800,7 +2800,10 @@ SCREEN.subvariant=(c)=>{
       if(j.error){st.matErr=j.error;st.mat=[];}else{st.mat=j.rows||[];if(!st.selNm)st.selNm=j.item||'';}}catch(e){st.matErr='내부원가 조회 실패';st.mat=[];}
     st.routeTarget=item;st.routeTargetNm=st.selNm;await loadRoutes();st.loading=false;draw();};
   const loadRoutes=async()=>{try{const r=await fetch(`${API}/api/sourcing/routes?item=${encodeURIComponent(st.routeTarget)}&show_unapproved=1&for_profile=0`);
-      const j=await r.json();st.routes=j.routes||[];st.gopts=j.gubun_opts||[];st.lgopts=j.line_gubun_opts||[];st.nextNo=j.next_route_no||null;st.nxNew=!!j.nx_new;}catch(e){st.routes=[];}};   // ★nxNew=웹 신규 품목 → R01 수정가능
+      const j=await r.json();st.routes=j.routes||[];st.gopts=j.gubun_opts||[];st.lgopts=j.line_gubun_opts||[];st.nextNo=j.next_route_no||null;st.nxNew=!!j.nx_new;
+      // ★최상위 ASSY 의 레거시 지정(구분·업체) — R01/후보 상세의 맨 위 행에 쓴다(2026-09-09)
+      st.top={gubun:j.top_gubun||'',make_type:j.top_make_type||'',vendor:j.top_vendor||'',vendor_name:j.top_vendor_name||''};
+      }catch(e){st.routes=[];st.top=null;}};   // ★nxNew=웹 신규 품목 → R01 수정가능
   const vSearch=t=>{clearTimeout(st.acT);st.acT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/item/vendorsearch?q=${encodeURIComponent(t)}`);
       st.vopts=(await r.json()).rows||[];const dl=c.querySelector('#sv-vdl');if(dl)dl.innerHTML=st.vopts.map(v=>`<option value="${esc(v.code)}">${esc(v.code)} · ${esc(v.name)}</option>`).join('');}catch(e){}},180);};
   const routeById=id=>st.routes.find(r=>r.route_id===id)||(id===0?st.routes.find(r=>r.baseline):null);
@@ -3037,6 +3040,15 @@ SCREEN.subvariant=(c)=>{
           <span style="color:#8a94a6;font-size:11px">저장 시 용접봉 소요량(재료)·용접ST 기록 · 후보 미승인 리셋</span>
           <span><button class="btn" id="wm-apply" style="background:#8e44ad;color:#fff">💾 저장 + ST ${nfq(tSt)} → [${esc(_pmap[w.wproc]||w.wproc)}]공정 적용</button> <button class="btn" id="wm-cancel">닫기</button></span></div>
       </div></div>`;};
+  // ★구성 라인 표 맨 위의 **최상위 ASSY 행**(2026-09-09).
+  //   종전엔 자식 라인만 나와서, 레거시 견적원가조회가 최상위에 갖고 있는
+  //   생산구분·구매업체명(예 2:외주 · 대원산업)을 신규에서는 볼 수가 없었다.
+  //   값 = 품목마스터(make_type·in_cust) = 레거시와 같은 출처. 회색 배경으로 자식과 구분한다.
+  const topRow=()=>{const t=st.top;if(!t||!st.sel)return '';
+    return `<tr style="background:#f3f7ff;font-weight:600" title="최상위 제품 — 레거시 견적원가조회의 생산구분·구매업체명(품목마스터)">
+      <td>${esc(st.sel)}</td><td>${esc(st.selNm||'')}</td><td class="num">1</td>
+      <td>${esc(t.gubun||'')}</td><td>${esc(t.vendor_name||'')}</td>
+      <td style="color:#8aa0bd">최상위 제품</td></tr>`;};
   const detailModal=()=>{const d=st.detail;if(!d)return '';const R=routeById(d.route_id);if(!R)return '';
     const ed=d.mode==='edit'&&canW&&!R.baseline, h=d.hdr||{};
     const hdrView=`<div style="color:#5a6b82;font-size:12.5px">${R.note?esc(R.note):'<span style="color:#8aa0bd">경로 비고 없음</span>'}</div>`;
@@ -3072,7 +3084,7 @@ SCREEN.subvariant=(c)=>{
           ${!ed?`<div style="font-weight:700;color:#334;margin:10px 0 4px">구성 라인 (${(R.lines||[]).length})</div>
           <div class="grid-wrap" style="max-height:38vh;overflow:auto"><table class="tbl" style="font-size:11.5px"><thead><tr>
             <th>하위품번</th><th>품명</th><th class="num">소요량</th><th>구분</th><th>공급처</th><th>소재(외경×두께×길이·재질)</th></tr></thead>
-            <tbody>${(R.lines||[]).length?R.lines.map(l=>lineRow(l,false)).join(''):`<tr><td colspan="6" class="empty">라인 없음</td></tr>`}</tbody></table></div>`:''}
+            <tbody>${topRow()}${(R.lines||[]).length?R.lines.map(l=>lineRow(l,false)).join(''):`<tr><td colspan="6" class="empty">라인 없음</td></tr>`}</tbody></table></div>`:''}
           ${ed?subPanel(R):''}
           ${(!R.baseline)?`<div style="margin-top:10px;color:#8aa0bd;font-size:11.5px;border-top:1px dashed #e2e8f2;padding-top:8px">🏭 업체(매입처) 지정은 여기서 하지 않습니다 — <b>승인</b> 후 <b>조달 프로파일</b> 화면에서 이 경로를 활성 지정하고 <b>[✎ 매입처 수정]</b>에서 지정합니다(R01 매입처 자동 시드).</div>`:''}
         </div>
