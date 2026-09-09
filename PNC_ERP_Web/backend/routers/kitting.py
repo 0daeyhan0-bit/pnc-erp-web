@@ -56,16 +56,16 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             try:
                 cur.execute("""SELECT SUBSTRING(MAX(calendar_yymd),3,6) FROM
                     (SELECT ROW_NUMBER() OVER (ORDER BY calendar_yymd) rn, calendar_yymd
-                       FROM PARTNER_ERP_TEST3.nx.HR_M_CALENDAR a WITH(NOLOCK)
+                       FROM PARTNER_ERP_TEST3.nx.v_cal_work a WITH(NOLOCK)
                       WHERE work_team='A' AND calendar_yymd > ? AND time_type='A' AND work_stats IN ('1','2','5','6')
-                        AND EXISTS (SELECT 1 FROM PARTNER_ERP_TEST3.nx.pr_m_line_calendar b WITH(NOLOCK)
+                        AND EXISTS (SELECT 1 FROM PARTNER_ERP_TEST3.nx.v_cal_line b WITH(NOLOCK)
                                     WHERE b.calendar_ymd=SUBSTRING(a.calendar_yymd,3,6) AND b.work_stats<>'4')) t
                     WHERE rn = ?""", '20' + d6a, gigan_n - 1)
                 _r = cur.fetchone()
                 if _r and _r[0]: d6b = str(_r[0])
             except Exception: pass
         try:   # 표시 컬럼 = base~to 전체 달력일(주말/휴일 포함)
-            cur.execute("""SELECT CALENDAR_YYMD FROM PARTNER_ERP_TEST3.nx.HR_M_CALENDAR
+            cur.execute("""SELECT CALENDAR_YYMD FROM PARTNER_ERP_TEST3.nx.v_cal_work
                 WHERE WORK_TEAM='A' AND CALENDAR_YYMD>=? AND CALENDAR_YYMD<=? ORDER BY CALENDAR_YYMD""", '20' + d6a, '20' + d6b)
             for (_cy,) in cur.fetchall(): dates.append(str(_cy)[2:])
         except Exception: pass
@@ -120,8 +120,8 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             FROM {PLAN_T} a WITH(NOLOCK)
             JOIN PARTNER_ERP_TEST3.nx.item b WITH(NOLOCK) ON a.ASSY_ITEM_CODE=b.ITEM_CODE
             JOIN PARTNER_ERP_TEST3.nx.item ib WITH(NOLOCK) ON a.ITEM_CODE=ib.ITEM_CODE
-            JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg WITH(NOLOCK) ON a.GAGONG_PROC_CODE=pg.GAGONG_PROC_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK wk WITH(NOLOCK) ON wk.WORK_CODE=a.WORK_CODE
+            JOIN PARTNER_ERP_TEST3.nx.v_part_master pg WITH(NOLOCK) ON a.GAGONG_PROC_CODE=pg.GAGONG_PROC_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.v_work_place wk WITH(NOLOCK) ON wk.WORK_CODE=a.WORK_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cu WITH(NOLOCK) ON cu.CUST_CODE=pg.IN_CUST_CODE
             LEFT JOIN (SELECT ITEM_CODE, SUM(CAST(ISNULL(TOT_ST,0) AS float)) st FROM PARTNER_ERP_TEST3.nx.prodinfo_proc GROUP BY ITEM_CODE) st ON st.ITEM_CODE=a.ITEM_CODE
             LEFT JOIN (SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,'') swo, MIN(ORG_PLAN_YMD + ORG_OUTPUT_HM) lgh FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_DTL GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,'')) lg ON lg.WORK_ORDER=a.WORK_ORDER AND lg.swo=ISNULL(a.SPLIT_WORK_ORDER,'')
@@ -542,7 +542,7 @@ def plan_part410_lines(src: str = Query("new")):
         nm_map = {}; seq_map = {}
         try:
             cur.execute("""SELECT DETAIL_CODE, DETAIL_DESC, SORT_SEQ
-                             FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WITH(NOLOCK)
+                             FROM PARTNER_ERP_TEST3.nx.v_code_detail WITH(NOLOCK)
                             WHERE KIND_CODE='PR003' AND ISNULL(USE_FLAG,'1')<>'0'""")
             for _c, _d, _q in cur.fetchall():
                 _c = str(_c or "").strip()
@@ -621,16 +621,16 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             try:
                 cur.execute("""SELECT SUBSTRING(MAX(calendar_yymd),3,6) FROM
                     (SELECT ROW_NUMBER() OVER (ORDER BY calendar_yymd) rn, calendar_yymd
-                       FROM PARTNER_ERP_TEST3.nx.HR_M_CALENDAR a WITH(NOLOCK)
+                       FROM PARTNER_ERP_TEST3.nx.v_cal_work a WITH(NOLOCK)
                       WHERE work_team='A' AND calendar_yymd > ? AND time_type='A' AND work_stats IN ('1','2','5','6')
-                        AND EXISTS (SELECT 1 FROM PARTNER_ERP_TEST3.nx.pr_m_line_calendar b WITH(NOLOCK)
+                        AND EXISTS (SELECT 1 FROM PARTNER_ERP_TEST3.nx.v_cal_line b WITH(NOLOCK)
                                     WHERE b.calendar_ymd=SUBSTRING(a.calendar_yymd,3,6) AND b.work_stats<>'4')) t
                     WHERE rn = ?""", '20' + d6a, gigan_n - 1)
                 _r = cur.fetchone()
                 if _r and _r[0]: d6b = str(_r[0])
             except Exception: pass
         try:   # 표시 컬럼 = base~to 전체 달력일(주말/휴일 포함)
-            cur.execute("""SELECT CALENDAR_YYMD FROM PARTNER_ERP_TEST3.nx.HR_M_CALENDAR
+            cur.execute("""SELECT CALENDAR_YYMD FROM PARTNER_ERP_TEST3.nx.v_cal_work
                 WHERE WORK_TEAM='A' AND CALENDAR_YYMD>=? AND CALENDAR_YYMD<=? ORDER BY CALENDAR_YYMD""", '20' + d6a, '20' + d6b)
             for (_cy,) in cur.fetchall(): dates.append(str(_cy)[2:])
         except Exception: pass
@@ -667,9 +667,9 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             --   {SCH}.item 으로 두면 src=live 에서 PARTNER_ERP_TEST3.nx.item(미존재) 을 찾아 500.
             JOIN PARTNER_ERP_TEST3.nx.item b WITH(NOLOCK) ON a.ASSY_ITEM_CODE=b.ITEM_CODE
             JOIN PARTNER_ERP_TEST3.nx.item ib WITH(NOLOCK) ON a.ITEM_CODE=ib.ITEM_CODE
-            JOIN {SCH}.PR_M_PROC_GAGONG pg WITH(NOLOCK) ON a.GAGONG_PROC_CODE=pg.GAGONG_PROC_CODE
-            LEFT JOIN {SCH}.PR_M_WORK wk WITH(NOLOCK) ON wk.WORK_CODE=a.WORK_CODE
-            LEFT JOIN {SCH}.CM_M_CUST cu WITH(NOLOCK) ON cu.CUST_CODE=pg.IN_CUST_CODE
+            JOIN {SCH}.v_part_master pg WITH(NOLOCK) ON a.GAGONG_PROC_CODE=pg.GAGONG_PROC_CODE
+            LEFT JOIN {SCH}.v_work_place wk WITH(NOLOCK) ON wk.WORK_CODE=a.WORK_CODE
+            LEFT JOIN {SCH}.v_cm_m_cust cu WITH(NOLOCK) ON cu.CUST_CODE=pg.IN_CUST_CODE
             LEFT JOIN (SELECT ITEM_CODE, GAGONG_PROC_CODE, SUM(CAST(ISNULL(TOT_ST,0) AS float)) st FROM {SCH}.prodinfo_proc GROUP BY ITEM_CODE, GAGONG_PROC_CODE) st ON st.ITEM_CODE=a.ITEM_CODE AND st.GAGONG_PROC_CODE=a.GAGONG_PROC_CODE
             LEFT JOIN (SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,'') swo, MIN(ORG_PLAN_YMD + ORG_OUTPUT_HM) lgh FROM {SCH}.PR_T_PLAN_DTL GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,'')) lg ON lg.WORK_ORDER=a.WORK_ORDER AND lg.swo=ISNULL(a.SPLIT_WORK_ORDER,'')
             WHERE {' AND '.join(w)}
@@ -1098,12 +1098,12 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
         inwon_by = {}
         try:
             gp = (part.strip() or '%')
-            cur.execute(f"""SELECT COUNT(*) FROM {SCH}.PR_M_PROC_GAGONG a
-                JOIN {SCH}.PR_M_PROC_GAGONG_WORKER b ON a.GAGONG_PROC_CODE=b.GAGONG_PROC_CODE
+            cur.execute(f"""SELECT COUNT(*) FROM {SCH}.v_part_master a
+                JOIN {SCH}.v_part_worker b ON a.GAGONG_PROC_CODE=b.GAGONG_PROC_CODE
                 WHERE b.WORK_FLAG='1' AND a.GAGONG_PROC_CODE LIKE ?""", gp)
             inwon = int(cur.fetchone()[0] or 0)
-            cur.execute(f"""SELECT a.GAGONG_PROC_CODE, COUNT(*) FROM {SCH}.PR_M_PROC_GAGONG a
-                JOIN {SCH}.PR_M_PROC_GAGONG_WORKER b ON a.GAGONG_PROC_CODE=b.GAGONG_PROC_CODE
+            cur.execute(f"""SELECT a.GAGONG_PROC_CODE, COUNT(*) FROM {SCH}.v_part_master a
+                JOIN {SCH}.v_part_worker b ON a.GAGONG_PROC_CODE=b.GAGONG_PROC_CODE
                 WHERE b.WORK_FLAG='1' GROUP BY a.GAGONG_PROC_CODE""")
             inwon_by = {str(r[0]).strip(): int(r[1] or 0) for r in cur.fetchall()}
         except Exception: pass

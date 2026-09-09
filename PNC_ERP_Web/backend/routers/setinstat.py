@@ -16,7 +16,7 @@
    · 소요     = nx.plan_part_mat  (제번×도번×자도번×일자, part_plan_qty)
    · 자도번작업처 = plan_part_mat.mat_work_center_code   ← 레거시 '자도번작업처'
    · 계획     = nx.plan_part_dtl  (라인 line_no · LG INPUT output_hm · LOT lot_qty)
-   · 근무일   = nx.HR_M_CALENDAR  (010 과 동일 규칙)
+   · 근무일   = nx.v_cal_work  (010 과 동일 규칙)
    · 세트재고 = nx.set_stock_maint 잔액 SUM (도번×거래처)
   ※「자재세트바코드입고」 버튼은 넣지 않는다 — 입고관리 화면에 이미 있음(사용자 지정).
 """
@@ -119,7 +119,7 @@ def _workdays(cur, base, days):
     from datetime import datetime, timedelta
     n = max(1, min(int(days or 4), 31))
     cur.execute("""SELECT SUBSTRING(calendar_yymd,3,6), work_stats
-                     FROM nx.HR_M_CALENDAR WITH(NOLOCK)
+                     FROM nx.v_cal_work WITH(NOLOCK)
                     WHERE work_team='A' AND time_type='A'
                       AND calendar_yymd BETWEEN '20'+? AND '20'+?
                     ORDER BY calendar_yymd""",
@@ -181,7 +181,7 @@ def setinstat_opts():
         cur.execute("""SELECT mi.IN_CUST_CODE cd, ISNULL(c.CUST_DESC,'') nm
                          FROM nx.plan_part_mat m WITH(NOLOCK)
                          JOIN nx.pr_m_item mi WITH(NOLOCK) ON mi.ITEM_CODE=m.mat_code
-                         LEFT JOIN nx.CM_M_CUST c WITH(NOLOCK) ON c.CUST_CODE=mi.IN_CUST_CODE
+                         LEFT JOIN nx.v_cm_m_cust c WITH(NOLOCK) ON c.CUST_CODE=mi.IN_CUST_CODE
                         WHERE ISNULL(mi.IN_CUST_CODE,'')<>''
                         GROUP BY mi.IN_CUST_CODE, c.CUST_DESC
                         ORDER BY ISNULL(c.CUST_DESC,'')""")
@@ -645,7 +645,7 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
         gmap = {}
         try:
             cur.execute("""SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'')
-                             FROM nx.PR_M_PROC_GAGONG WITH(NOLOCK)""")
+                             FROM nx.v_part_master WITH(NOLOCK)""")
             gmap = {str(a).strip(): (b or "").strip() for a, b in cur.fetchall()}
         except Exception:
             pass
@@ -675,11 +675,11 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
                                 WHERE bom_level=0 AND ISNULL(gagong_proc_code,'')<>''
                                 GROUP BY assy_item_code) ap
                            ON RTRIM(ap.assy_item_code)=RTRIM(i.ITEM_CODE)
-                    LEFT JOIN nx.PR_M_PROC_GAGONG pg WITH(NOLOCK)
+                    LEFT JOIN nx.v_part_master pg WITH(NOLOCK)
                            ON RTRIM(pg.GAGONG_PROC_CODE)=RTRIM(ap.pc)
-                    LEFT JOIN nx.PR_M_WORK wi WITH(NOLOCK)
+                    LEFT JOIN nx.v_work_place wi WITH(NOLOCK)
                            ON RTRIM(wi.WORK_CODE)=RTRIM(ISNULL(i.work_code,''))
-                    LEFT JOIN nx.CM_M_CUST ci WITH(NOLOCK)
+                    LEFT JOIN nx.v_cm_m_cust ci WITH(NOLOCK)
                            ON RTRIM(ci.CUST_CODE)=RTRIM(ISNULL(i.in_cust,''))
                    WHERE i.ITEM_CODE IN ({ph})""", *ch)
                 for a, b in cur.fetchall():
@@ -731,7 +731,7 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
         cmap = {}
         if custs:
             ph = ",".join("?" * len(custs))
-            cur.execute(f"""SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM nx.CM_M_CUST WITH(NOLOCK)
+            cur.execute(f"""SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM nx.v_cm_m_cust WITH(NOLOCK)
                              WHERE CUST_CODE IN ({ph})""", *custs)
             cmap = {str(a).strip(): (b or "").strip() for a, b in cur.fetchall()}
 

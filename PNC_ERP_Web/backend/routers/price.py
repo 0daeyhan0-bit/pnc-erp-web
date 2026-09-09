@@ -168,7 +168,7 @@ def price_item(item: str = Query("")):
 _ITEM_MAKE = {"": "", "1": "자체생산", "2": "외주가공", "3": "매입", "4": "사급가공", "5": "외주완성"}
 _ITEM_WORK = {"": "", "P1": "용접", "P2": "가공", "D1": "직납"}
 def _kindmap(cur, kind):
-    cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE=?", kind)
+    cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM PARTNER_ERP_TEST3.nx.v_code_detail WHERE KIND_CODE=?", kind)
     return {str(r[0]).strip(): str(r[1] or "").strip() for r in cur.fetchall()}
 
 _MAT_SGROUP = ('210', '220', '230', '240', '310', '910', '991', '992', '993')  # 자재(원소재/원자재/부자재/용접봉/사급/잡자재/소모품). 240=용접봉(2026-08-27)

@@ -32,7 +32,7 @@ def wr_parts():
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute("""SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') nm
-                         FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WITH(NOLOCK)
+                         FROM PARTNER_ERP_TEST3.nx.v_part_master WITH(NOLOCK)
                         WHERE ISNULL(GAGONG_PROC_CODE,'')<>''
                         ORDER BY GAGONG_PROC_CODE""")
         rows = [{"code": str(r[0]).strip(), "nm": str(r[1] or '').strip()} for r in cur.fetchall()]
@@ -45,7 +45,7 @@ def wr_works():
     """작업장 목록 (PR_M_WORK)"""
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("SELECT WORK_CODE, ISNULL(WORK_DESC,'') nm FROM PARTNER_ERP_TEST3.nx.PR_M_WORK ORDER BY WORK_CODE")
+        cur.execute("SELECT WORK_CODE, ISNULL(WORK_DESC,'') nm FROM PARTNER_ERP_TEST3.nx.v_work_place ORDER BY WORK_CODE")
         return {"rows": [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]}
     finally:
         cn.close()
@@ -184,10 +184,10 @@ def stockmaint_save(payload: dict = Body(...)):
         # ★파트는 반드시 코드여야 한다 — 표시명('04라인')이 들어가면 그 파트에 재고가
         #   쌓여 실제 파트(S4)에서 안 보인다(2026-08-25 실사고).
         if part:
-            cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG
+            cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM PARTNER_ERP_TEST3.nx.v_part_master
                             WITH(NOLOCK) WHERE GAGONG_PROC_CODE=?""", part)
             if not cur.fetchone():
-                cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG
+                cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM PARTNER_ERP_TEST3.nx.v_part_master
                                 WITH(NOLOCK) WHERE ISNULL(GAGONG_PROC_DESC,'')=?""", part)
                 _alt = cur.fetchone()
                 raise HTTPException(400,

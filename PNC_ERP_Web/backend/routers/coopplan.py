@@ -35,7 +35,7 @@ def partner_workcenters(request: Request, src: str = Query("nx")):
         try:
             cur.execute("""SELECT pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE) nm, COUNT(*) n
                 FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT pp
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE=pp.MAT_WORK_CENTER_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.v_work_place w ON w.WORK_CODE=pp.MAT_WORK_CENTER_CODE
                 LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cu ON cu.CUST_CODE=pp.MAT_WORK_CENTER_CODE
                 WHERE pp.MAT_WORK_CENTER_CODE>'' GROUP BY pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE)
                 ORDER BY COUNT(*) DESC""")
@@ -49,7 +49,7 @@ def partner_workcenters(request: Request, src: str = Query("nx")):
         try:
             cur.execute(f"""SELECT pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE) nm, COUNT(*) n
                 FROM PARTNER_ERP_TEST3.nx.plan_part_mat pp
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE{C}=pp.MAT_WORK_CENTER_CODE{C}
+                LEFT JOIN PARTNER_ERP_TEST3.nx.v_work_place w ON w.WORK_CODE{C}=pp.MAT_WORK_CENTER_CODE{C}
                 LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cu ON cu.CUST_CODE{C}=pp.MAT_WORK_CENTER_CODE{C}
                 WHERE pp.MAT_WORK_CENTER_CODE>'' GROUP BY pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE)
                 ORDER BY COUNT(*) DESC""")
@@ -509,21 +509,21 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
                 for rr in cur.fetchall(): m[str(rr[0]).strip()] = rr
             return m
         wccodes = {g["wc"] for g in rows}; assycodes = {g["lookup"] for g in rows}   # lookup=도번(assy모드) or 자도번(mat모드)
-        workm = _batch(wccodes, "SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_WORK WHERE WORK_CODE IN ({ph})")
+        workm = _batch(wccodes, "SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP_TEST3.nx.v_work_place WHERE WORK_CODE IN ({ph})")
         custm = _batch(wccodes, "SELECT CUST_CODE, CUST_DESC FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE IN ({ph})")
         # 도번 마스터(작업처=assy의 work/incust, 품명, 규격)
         assym = _batch(assycodes, "SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(WORK_CODE,''), ISNULL(in_cust,''), ISNULL(item_spec,''), ISNULL(diam,0), ISNULL(thick,0), ISNULL(length,0) FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})")
         # assy 작업처 코드도 이름 필요 → 추가 조회
         awc = {str(v[2]).strip() for v in assym.values() if str(v[2]).strip()}
         aic = {str(v[3]).strip() for v in assym.values() if str(v[3]).strip()}
-        workm2 = _batch(awc, "SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_WORK WHERE WORK_CODE IN ({ph})")
+        workm2 = _batch(awc, "SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP_TEST3.nx.v_work_place WHERE WORK_CODE IN ({ph})")
         custm2 = _batch(aic, "SELECT CUST_CODE, CUST_DESC FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE IN ({ph})")
         # ★파트 마스터(PR_M_PROC_GAGONG) — 사내 납품은 여기 이름이 「05라인」·「06라인」이다.
         #   레거시 w_pr_outside_410 「작업처」 컬럼이 이 값을 쓴다(2026-08-27 실측).
         #   PR_M_WORK 에는 라인이 하나도 없어(P1=용접·P2=가공) 사내 라인이 표시되지 않았다.
         #     S11=05라인 · RAC=06라인 · S4=04라인 · S1=02라인 · P0002=11라인(가공) …
         _pgcodes = set(wccodes) | awc | aic
-        procm = _batch(_pgcodes, "SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE IN ({ph})")
+        procm = _batch(_pgcodes, "SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.v_part_master WHERE GAGONG_PROC_CODE IN ({ph})")
         def nm_of(code):
             c = str(code or "").strip()
             if c in procm and str(procm[c][1] or "").strip(): return str(procm[c][1]).strip()
@@ -823,10 +823,10 @@ def partner_planstatus(request: Request, from_ymd: str = Query(""), to_ymd: str 
                 JOIN nx.plan_item_dtl d ON d.WORK_ORDER{C}=pp.WORK_ORDER{C}
                      AND d.SPLIT_WORK_ORDER{C}=pp.SPLIT_WORK_ORDER{C} AND d.C_ITEM_CODE{C}=pp.ASSY_ITEM_CODE{C}
                 LEFT JOIN (SELECT WORK_ORDER, MAX(LINE_NO) LINE_NO, MAX(MODEL_NO) MODEL_NO FROM PARTNER_ERP_TEST3.nx.plan_dtl GROUP BY WORK_ORDER) pd ON pd.WORK_ORDER=pp.WORK_ORDER
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE{C}=pp.MAT_WORK_CENTER_CODE{C}
+                LEFT JOIN PARTNER_ERP_TEST3.nx.v_work_place w ON w.WORK_CODE{C}=pp.MAT_WORK_CENTER_CODE{C}
                 LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust cu ON cu.CUST_CODE{C}=pp.MAT_WORK_CENTER_CODE{C}
                 LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE{C}=pp.ASSY_ITEM_CODE{C}
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK wi ON wi.WORK_CODE{C}=RTRIM(i.work_code){C}
+                LEFT JOIN PARTNER_ERP_TEST3.nx.v_work_place wi ON wi.WORK_CODE{C}=RTRIM(i.work_code){C}
                 LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust ci ON ci.CUST_CODE{C}=RTRIM(i.in_cust){C}
                 -- ★도번(ASSY)의 공정 파트코드 → 파트 마스터 이름(「05라인」…)
                 --   ④ 파트별계획(plan_part_dtl)의 최상위행(bom_level=0)이 그 도번의 파트다.
@@ -834,7 +834,7 @@ def partner_planstatus(request: Request, from_ymd: str = Query(""), to_ymd: str 
                              FROM nx.plan_part_dtl
                             WHERE bom_level=0 AND ISNULL(gagong_proc_code,'')<>''
                             GROUP BY assy_item_code) ap ON ap.assy_item_code{C}=pp.ASSY_ITEM_CODE{C}
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE{C}=ap.pc{C}
+                LEFT JOIN PARTNER_ERP_TEST3.nx.v_part_master pg ON pg.GAGONG_PROC_CODE{C}=ap.pc{C}
                 WHERE {' AND '.join(w)}
                 GROUP BY pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE),
                   pp.WORK_ORDER, pp.SPLIT_WORK_ORDER, pp.ASSY_ITEM_CODE, i.item_name, i.item_spec, pd.LINE_NO, pd.MODEL_NO,
@@ -1119,7 +1119,7 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
         wcodes = sorted({c for c in wccodes if c})
         for i in range(0, len(wcodes), 900):
             ch = wcodes[i:i+900]; ph = ",".join("?"*len(ch))
-            cur.execute(f"SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_WORK WHERE WORK_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP_TEST3.nx.v_work_place WHERE WORK_CODE IN ({ph})", *ch)
             for rr in cur.fetchall(): wcnm[str(rr[0]).strip()] = rr[1]
             cur.execute(f"SELECT CUST_CODE, CUST_DESC FROM PARTNER_ERP_TEST3.nx.v_cm_m_cust WHERE CUST_CODE IN ({ph})", *ch)
             for rr in cur.fetchall(): wcnm.setdefault(str(rr[0]).strip(), rr[1])
@@ -1135,7 +1135,7 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
                                      WHERE bom_level=0 AND ISNULL(gagong_proc_code,'')<>''
                                        AND assy_item_code IN ({ph})
                                      GROUP BY assy_item_code) a
-                              JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g
+                              JOIN PARTNER_ERP_TEST3.nx.v_part_master g
                                 ON g.GAGONG_PROC_CODE=a.pc""", *ch)
             for rr in cur.fetchall():
                 _v = str(rr[1] or '').strip()
@@ -1432,10 +1432,10 @@ def _wd_horizon(d6a, gigan):
     try:
         cur.execute("""SELECT SUBSTRING(MAX(calendar_yymd),3,6) FROM
             (SELECT ROW_NUMBER() OVER (ORDER BY calendar_yymd) rn, calendar_yymd
-               FROM PARTNER_ERP_TEST3.nx.HR_M_CALENDAR a WITH(NOLOCK)
+               FROM PARTNER_ERP_TEST3.nx.v_cal_work a WITH(NOLOCK)
               WHERE work_team='A' AND calendar_yymd > ? AND time_type='A'
                 AND work_stats IN ('1','2','5','6')
-                AND EXISTS (SELECT 1 FROM PARTNER_ERP_TEST3.nx.pr_m_line_calendar b WITH(NOLOCK)
+                AND EXISTS (SELECT 1 FROM PARTNER_ERP_TEST3.nx.v_cal_line b WITH(NOLOCK)
                             WHERE b.calendar_ymd=SUBSTRING(a.calendar_yymd,3,6) AND b.work_stats<>'4')) t
             WHERE rn = ?""", '20' + d6a, n)
         r = cur.fetchone()
@@ -1779,7 +1779,7 @@ def partner_deliv420_invoice(request: Request, barcode: str = Query(...)):
                                      WHERE bom_level=0 AND ISNULL(gagong_proc_code,'')<>''
                                        AND assy_item_code IN ({ph})
                                      GROUP BY assy_item_code) a
-                              JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE=a.pc""", *ch)
+                              JOIN PARTNER_ERP_TEST3.nx.v_part_master g ON g.GAGONG_PROC_CODE=a.pc""", *ch)
             for rr in cur.fetchall():
                 _v = str(rr[1] or '').strip()
                 if _v: _wcm[str(rr[0]).strip()] = _v

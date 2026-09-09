@@ -40,7 +40,7 @@ def prodresult_list(from_ymd: str = Query(""), to_ymd: str = Query(""), swork: s
                     "sum_qty": sum(r["qty"] for r in rows), "sum_st": round(sum(r["st"] for r in rows) / 60.0, 1)}
         # gb == "1": 작업장별 일별 집계 (기본)
         cur.execute(f"""SELECT ISNULL(d.WORK_CODE,'') wc,
-              ISNULL((SELECT TOP 1 WORK_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_WORK WHERE WORK_CODE=d.WORK_CODE),'') wcnm,
+              ISNULL((SELECT TOP 1 WORK_DESC FROM PARTNER_ERP_TEST3.nx.v_work_place WHERE WORK_CODE=d.WORK_CODE),'') wcnm,
               d.PROD_YMD, ISNULL(d.PROD_TAG,'') tag,
               COUNT(DISTINCT d.ITEM_CODE) lot, SUM(d.PROD_QTY) qty,
               SUM(PARTNER_ERP_TEST3.dbo.f_stday_live(d.ITEM_CODE, d.PROD_YMD)*d.PROD_QTY)/60.0 st
@@ -60,7 +60,7 @@ def prodresult_filters():
     """생산실적현황 필터 드롭다운 소스 — 작업장코드(PR_M_WORK P1용접/P2가공)·라인(LINE_NO 실값)."""
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_WORK ORDER BY WORK_CODE")
+        cur.execute("SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP_TEST3.nx.v_work_place ORDER BY WORK_CODE")
         works = [{"code": str(r[0]).strip(), "name": str(r[1]).strip()} for r in cur.fetchall() if str(r[0]).strip()]
         cur.execute("SELECT DISTINCT LINE_NO FROM PARTNER_ERP_TEST3.nx.PR_T_PROD_DTL WHERE LINE_NO>'' AND PROD_YMD>='260101' ORDER BY LINE_NO")
         lines = [str(r[0]).strip() for r in cur.fetchall() if str(r[0]).strip()]
@@ -82,7 +82,7 @@ def _sticker_result(cur, from_ymd, to_ymd, part, item, worker, gb):
     if item.strip(): w.append("s.ITEM_CODE LIKE ?"); p.append(f"%{item.strip()}%")
     if worker.strip(): w.append("s.WORKER_CODE LIKE ?"); p.append(f"%{worker.strip()}%")
     cur.execute(f"""SELECT s.PROC_CODE,
-          ISNULL((SELECT TOP 1 GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE=s.PROC_CODE),'') partnm,
+          ISNULL((SELECT TOP 1 GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.v_part_master WHERE GAGONG_PROC_CODE=s.PROC_CODE),'') partnm,
           s.S_WORK_CODE, s.ITEM_CODE, ISNULL(s.PROD_TAG,'') tag, s.PROD_QTY,
           x.tot, s.WORKER_CODE, s.MACH_CODE,
           ISNULL((SELECT TOP 1 MACH_DESC FROM PARTNER_ERP_TEST3.nx.QA_M_MACHINE WHERE MACH_CODE=s.MACH_CODE),'') machnm,
@@ -159,7 +159,7 @@ def partresult_list(from_ymd: str = Query(""), to_ymd: str = Query(""), part: st
                     # 가공(CUTTING)=P0002(11라인가공): 파트=P0002·품목수=자도번(MAT_CODE)distinct·ST=f(ITEM_CODE,P0002). 레거시 07/29~31 정확일치
         params = pp + pc
         if gb == "2":   # 파트별 생산실적(도번) — 파트×도번×일자
-            cur.execute(f"""SELECT z.part, ISNULL((SELECT TOP 1 GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE=z.part),'') pnm,
+            cur.execute(f"""SELECT z.part, ISNULL((SELECT TOP 1 GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.v_part_master WHERE GAGONG_PROC_CODE=z.part),'') pnm,
                   z.item, ISNULL((SELECT TOP 1 item_name FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=z.item),'') inm, z.ymd, z.tag, z.qty, z.st
                 FROM (SELECT u.part, u.item, u.ymd, u.tag, SUM(u.qty) qty, SUM(u.stq)/60.0 st
                       FROM ({union}) u GROUP BY u.part, u.item, u.ymd, u.tag) z
@@ -171,7 +171,7 @@ def partresult_list(from_ymd: str = Query(""), to_ymd: str = Query(""), part: st
             return {"mode": "2", "rows": rows, "cnt": len(rows), "sum_qty": sum(r["qty"] for r in rows),
                     "sum_st": round(sum(r["st"] for r in rows) / 60.0, 1)}
         # gb == "1": 파트별 생산실적(집계)
-        cur.execute(f"""SELECT z.part, ISNULL((SELECT TOP 1 GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE=z.part),'') pnm,
+        cur.execute(f"""SELECT z.part, ISNULL((SELECT TOP 1 GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.v_part_master WHERE GAGONG_PROC_CODE=z.part),'') pnm,
               z.ymd, z.qty, z.st, z.items
             FROM (SELECT u.part, u.ymd, SUM(u.qty) qty, SUM(u.stq)/60.0 st, COUNT(DISTINCT u.item) items
                   FROM ({union}) u GROUP BY u.part, u.ymd) z
@@ -188,7 +188,7 @@ def partresult_filters():
     """파트별 생산실적 필터 드롭다운 소스 — 파트(PR_M_PROC_GAGONG 정본, 레거시 c1 gagong_proc_code)."""
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG ORDER BY GAGONG_PROC_CODE")
+        cur.execute("SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.v_part_master ORDER BY GAGONG_PROC_CODE")
         parts = [{"code": str(r[0]).strip(), "name": str(r[1]).strip()} for r in cur.fetchall() if str(r[0]).strip()]
         return {"parts": parts}
     finally:

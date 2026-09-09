@@ -12,7 +12,7 @@
 ★원천 (전부 nx — 라이브 무접근)
    · 소요   = nx.plan_part_mat   (제번×자도번×일자, part_plan_qty)
    · 계획   = nx.plan_part_dtl   (라인·LG INPUT(output_hm)·LOT수량)
-   · 근무일 = nx.HR_M_CALENDAR   (레거시와 동일: work_team='A', time_type='A',
+   · 근무일 = nx.v_cal_work   (레거시와 동일: work_team='A', time_type='A',
                                   work_stats IN ('1','2','5','6'))
    · 재고   = nx.PU_T_MAT_STOCK_WH(자재창고) / nx.PR_T_MAT_STOCK_WH(생산파트)
    실측 대조(그린산업 2005 · 기준일 260828): 레거시 첫 행 ADM72950717/EBE60659006/
@@ -37,7 +37,7 @@ def _workdays(cur, base, days):
     from datetime import datetime, timedelta
     n = max(1, min(int(days or 4), 31))
     cur.execute("""SELECT SUBSTRING(calendar_yymd,3,6), work_stats
-                     FROM nx.HR_M_CALENDAR WITH(NOLOCK)
+                     FROM nx.v_cal_work WITH(NOLOCK)
                     WHERE work_team='A' AND time_type='A'
                       AND calendar_yymd BETWEEN '20'+? AND '20'+?
                     ORDER BY calendar_yymd""",

@@ -162,7 +162,7 @@ def salesplan(from_ymd: str = Query(...), days: int = Query(7), gubun: str = Que
         try:
             cn2 = _conn(); c2 = cn2.cursor()
             try:
-                c2.execute("SELECT DETAIL_CODE, ISNULL(DETAIL_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE='PR003'")   # 분리: 레거시dbo→nx미러(데이터동일 검증)
+                c2.execute("SELECT DETAIL_CODE, ISNULL(DETAIL_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_code_detail WHERE KIND_CODE='PR003'")   # 분리: 레거시dbo→nx미러(데이터동일 검증)
                 for a, b in c2.fetchall(): lnm[str(a).strip()] = str(b).strip()
             finally: cn2.close()
         except Exception: pass
@@ -263,7 +263,7 @@ def salesplan_opts():
         lines = [{"code": u, "nm": ""} for u in used]
         # ② 마스터 PR003(코드+이름) — 위에 없는 것만 이어붙임
         cur.execute("""SELECT DETAIL_CODE, ISNULL(DETAIL_DESC,'')
-                         FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL
+                         FROM PARTNER_ERP_TEST3.nx.v_code_detail
                         WHERE KIND_CODE='PR003' ORDER BY DETAIL_CODE""")
         for a, b in cur.fetchall():
             code = str(a).strip()

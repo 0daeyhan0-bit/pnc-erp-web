@@ -44,7 +44,7 @@ def setstock_opts():
     try:
         cur.execute(f"""SELECT DISTINCT s.IN_CUST_CODE, ISNULL(c.CUST_DESC,''), ISNULL(c.CHARGE_USER_ID,'')
               FROM {LIVE}.PU_T_SET_GAGONG_STOCK s
-              LEFT JOIN {NX}.CM_M_CUST c ON c.CUST_CODE=s.IN_CUST_CODE
+              LEFT JOIN {NX}.v_cm_m_cust c ON c.CUST_CODE=s.IN_CUST_CODE
              WHERE ISNULL(s.IN_CUST_CODE,'')<>''
              ORDER BY ISNULL(c.CUST_DESC,''), s.IN_CUST_CODE""")
         custs = [{"code": r[0], "nm": r[1] or r[0], "charge": r[2]} for r in cur.fetchall()]
@@ -68,7 +68,7 @@ def setstock_list(cust: str = Query(""), item: str = Query(""), gubun: str = Que
               s.ITEM_CODE, ISNULL(i.item_name,''), s.STOCK_QTY,
               ISNULL(s.UPDATE_USER_ID,''), s.UPDATE_DATETIME
             FROM {LIVE}.PU_T_SET_GAGONG_STOCK s
-            LEFT JOIN {NX}.CM_M_CUST c ON c.CUST_CODE=s.IN_CUST_CODE
+            LEFT JOIN {NX}.v_cm_m_cust c ON c.CUST_CODE=s.IN_CUST_CODE
             LEFT JOIN {NX}.item i ON i.ITEM_CODE=s.ITEM_CODE
             WHERE {' AND '.join(w)}
             ORDER BY ISNULL(c.CUST_DESC,''), s.ITEM_CODE""", *p)

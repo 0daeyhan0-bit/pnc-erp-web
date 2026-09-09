@@ -97,7 +97,7 @@ def stock_warehouses():
     try:
         cur.execute("""SELECT RTRIM(g.GAGONG_PROC_CODE) wh, ISNULL(g.GAGONG_PROC_DESC,'') nm,
                    ISNULL(u.c,0) c
-              FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g
+              FROM PARTNER_ERP_TEST3.nx.v_part_master g
               LEFT JOIN (SELECT RTRIM(ISNULL(GAGONG_PROC_CODE,'')) wh, COUNT(*) c
                            FROM nx.stock_ledger WHERE STOCK_POINT='MAT'
                           GROUP BY RTRIM(ISNULL(GAGONG_PROC_CODE,''))) u
@@ -113,7 +113,7 @@ def stock_warehouses():
         wcs = []
         try:
             cur.execute("""SELECT RTRIM(GAGONG_PROC_CODE) code, ISNULL(GAGONG_PROC_DESC,'') nm
-                  FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG
+                  FROM PARTNER_ERP_TEST3.nx.v_part_master
                  WHERE RTRIM(GAGONG_PROC_CODE) NOT LIKE 'IS%' AND ISNULL(GAGONG_PROC_DESC,'')<>''""")
             wcs = [{"code": str(r[0]).strip(), "nm": str(r[1] or "").strip()} for r in cur.fetchall()]
             import re as _re
@@ -797,7 +797,7 @@ def matrecv_gagong_receive(payload: dict = Body(...)):
                 item, (upper or None), qty, (r.get("remarks") or "가공이동입고"), _usr)
             # ② 자재재고 증가(버킷 = 자재 · 파트창고코드 · 입고창고)
             cur.execute("""SELECT TOP 1 ISNULL(NULLIF(RTRIM(in_cust_code),''),'Z99990')
-                             FROM nx.PR_M_PROC_GAGONG WHERE RTRIM(GAGONG_PROC_CODE)=?""", wh)
+                             FROM nx.v_part_master WHERE RTRIM(GAGONG_PROC_CODE)=?""", wh)
             _row = cur.fetchone()
             _cc = (str(_row[0]).strip() if _row else "Z99990") or "Z99990"
             try:

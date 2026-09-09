@@ -5982,3 +5982,239 @@ SCREEN.coopmatplan=(c)=>{
        협력사계획현황(:3186)이 이미 같은 규칙이다 — 두 화면을 맞춘다. */
   (async()=>{ await loadWc(); draw(); })();
 };
+
+SCREEN.syscode=(c)=>{
+  let SYS=[], KINDS=[], selKind='', DTL={head:{},rows:[]};
+  let fSys='PR', fQ='';                 // 생산관리부터 — 우리가 제일 많이 쓴다
+  let editing=null;                     // 편집 중인 상세행(null=없음)
+
+  const api=async(u,o)=>{const r=await fetch(API+u,o); if(!r.ok) throw new Error(await r.text()); return r.json();};
+  const YN=v=>String(v||'').trim().toUpperCase()==='Y';
+
+  /* 하단 그리드 본문만 — 부분갱신용으로 분리 */
+  const dtlBody=()=>{
+    const L=(DTL.head&&DTL.head.labels)||{};
+    const ex=['char1','char2','char3','num1','flag1'].filter(k=>String(L[k]||'').trim());
+    const hist=YN(DTL.head&&DTL.head.hist);
+    if(!DTL.rows.length) return `<tr><td colspan="${5+(hist?1:0)+ex.length}" style="text-align:center;color:var(--muted);padding:18px">
+        ${selKind?'등록된 상세코드가 없습니다.':'위에서 코드군을 선택하세요.'}</td></tr>`;
+    return DTL.rows.map((r,i)=>`
+      <tr data-i="${i}" class="dtl-row">
+        <td style="text-align:center"><b>${esc(r.code)}</b></td>
+        <td>${esc(r.nm)}</td>
+        ${hist?`<td style="text-align:center">${esc(r.ymd)}</td>`:''}
+        <td style="text-align:right">${r.seq||0}</td>
+        <td style="text-align:center">${r.use==='1'?'✓':'<span style="color:#c33">중지</span>'}</td>
+        ${ex.map(k=>`<td>${esc(String(r[k]??''))}</td>`).join('')}
+        <td style="text-align:center;white-space:nowrap">
+          <button class="btn xs ghost dtl-edit" data-i="${i}">수정</button>
+          <button class="btn xs ghost dtl-del" data-i="${i}" style="color:#c33">삭제</button>
+        </td>
+      </tr>`).join('');
+  };
+
+  /* 하단 그리드 전체(헤더 포함) — 코드군이 바뀌면 컬럼 구성도 바뀐다 */
+  const dtlTable=()=>{
+    const L=(DTL.head&&DTL.head.labels)||{};
+    const ex=['char1','char2','char3','num1','flag1'].filter(k=>String(L[k]||'').trim());
+    const hist=YN(DTL.head&&DTL.head.hist);
+    return `
+      <table class="grid">
+        <thead><tr>
+          <th style="width:90px">상세코드</th>
+          <th>상세명칭</th>
+          ${hist?'<th style="width:96px">적용일자</th>':''}
+          <th style="width:64px">조회순서</th>
+          <th style="width:64px">사용</th>
+          ${ex.map(k=>`<th>${esc(L[k])}</th>`).join('')}
+          <th style="width:104px">편집</th>
+        </tr></thead>
+        <tbody id="sc-dbody">${dtlBody()}</tbody>
+      </table>`;
+  };
+
+  const kindRows=()=>KINDS.map(k=>`
+      <tr data-k="${esc(k.kind)}" class="kind-row${k.kind===selKind?' on':''}"
+          style="cursor:pointer${k.kind===selKind?';background:#e8f0ff':''}">
+        <td style="text-align:center"><b>${esc(k.kind)}</b></td>
+        <td>${esc(k.nm)}</td>
+        <td style="text-align:right">${k.size||''}</td>
+        <td style="text-align:center">${YN(k.hist)?'✓':''}</td>
+        <td style="text-align:right">${k.cnt}</td>
+      </tr>`).join('');
+
+  /* 상세 편집 폼 — 레거시엔 그리드 인라인이지만, 기타항목이 많아 폼으로 뺀다 */
+  const editForm=()=>{
+    if(!editing) return '';
+    const L=(DTL.head&&DTL.head.labels)||{};
+    const hist=YN(DTL.head&&DTL.head.hist);
+    const size=(DTL.head&&DTL.head.size)||0;
+    const e=editing;
+    const ex=['char1','char2','char3','num1','flag1'].filter(k=>String(L[k]||'').trim());
+    return `
+      <div style="border:1px solid var(--line);border-radius:6px;padding:10px;margin-top:8px;background:#fafbff">
+        <div style="font-weight:600;margin-bottom:8px">${e.orig?'상세코드 수정':'상세코드 추가'}
+          <span style="color:var(--muted);font-weight:400;font-size:12px">
+            ${esc(selKind)} ${esc((DTL.head&&DTL.head.nm)||'')}${size?` · 코드 ${size}자 이내`:''}</span></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <label>상세코드<br><input class="inp" id="f-code" value="${esc(e.code||'')}"
+            style="width:110px"${size?` maxlength="${size}"`:''}></label>
+          <label>상세명칭<br><input class="inp" id="f-nm" value="${esc(e.nm||'')}" style="width:220px"></label>
+          ${hist?`<label>적용일자<br><input class="inp" id="f-ymd" type="date" value="${ymd8ToDate(e.ymd)}" style="width:140px"></label>`:''}
+          <label>조회순서<br><input class="inp" id="f-seq" type="number" step="1" value="${e.seq||0}" style="width:80px"></label>
+          <label>사용여부<br><select class="inp" id="f-use" style="width:80px">
+            <option value="1"${e.use!=='0'?' selected':''}>사용</option>
+            <option value="0"${e.use==='0'?' selected':''}>중지</option></select></label>
+          ${ex.map(k=>`<label>${esc(L[k])}<br><input class="inp" id="f-${k}"
+             value="${esc(String(e[k]??''))}" style="width:130px"${k.startsWith('num')?' type="number" step="any"':''}></label>`).join('')}
+          <button class="btn" id="f-save" style="background:#1c47a0;color:#fff">저장</button>
+          <button class="btn ghost" id="f-cancel">취소</button>
+        </div>
+      </div>`;
+  };
+  const ymd8ToDate=s=>{s=String(s||'').trim(); return /^\d{8}$/.test(s)?`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`:'';};
+  const dateToYmd8=s=>String(s||'').replace(/-/g,'').slice(0,8);
+
+  const draw=()=>{
+    c.innerHTML=`
+      <div style="display:flex;flex-direction:column;height:100%">
+        <div style="flex:0 0 auto">
+          <div class="page-title">시스템코드관리</div>
+          <div class="page-sub">레거시 <b>System별 코드별 상세</b>와 같은 구조입니다 —
+            시스템 → 코드군 → 상세코드. 여기서 고친 값은 <b>품목·계획·키팅 등 코드를 쓰는 화면에 즉시 반영</b>됩니다.
+            <span style="color:var(--muted)">웹이 쓰는 41종만 등록돼 있습니다(인사·전자결재 등 레거시 전용 코드는 제외).</span></div>
+          <div class="toolbar" style="display:flex;gap:6px;flex-wrap:nowrap;align-items:center">
+            <span class="k">시스템</span>
+            <select class="inp" id="f-sys" style="width:130px;min-width:130px">
+              <option value="">전체</option>
+              ${SYS.map(s=>`<option value="${esc(s.code)}"${fSys===s.code?' selected':''}>${esc(s.nm)} (${s.cnt})</option>`).join('')}
+            </select>
+            <input class="inp" id="f-q" placeholder="코드/명칭" value="${esc(fQ)}" style="width:150px;min-width:150px">
+            <button class="btn" id="btn-search">조회</button>
+            <span style="flex:1"></span>
+            <button class="btn" id="btn-add" ${selKind?'':'disabled'}
+              style="${selKind?'background:#1c47a0;color:#fff':''}">상세코드 추가</button>
+          </div>
+        </div>
+
+        <div style="flex:1;min-height:0;display:flex;gap:12px;margin-top:8px">
+          <!-- 코드군 -->
+          <div style="flex:0 0 420px;display:flex;flex-direction:column;min-height:0">
+            <div class="sum-box" style="margin-bottom:6px"><span class="k">코드군</span> <b id="kcnt">${KINDS.length}</b> 종</div>
+            <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto">
+              <table class="grid">
+                <thead><tr>
+                  <th style="width:70px">CODE</th><th>MASTER 명칭</th>
+                  <th style="width:56px">자릿수</th><th style="width:56px">이력</th><th style="width:56px">건수</th>
+                </tr></thead>
+                <tbody id="sc-kbody">${kindRows()}</tbody>
+              </table>
+            </div>
+          </div>
+          <!-- 상세코드 -->
+          <div style="flex:1;display:flex;flex-direction:column;min-height:0">
+            <div class="sum-box" style="margin-bottom:6px" id="sc-dhead">
+              ${selKind?`<span class="k">${esc(selKind)}</span> <b>${esc((DTL.head&&DTL.head.nm)||'')}</b>
+                 <span style="color:var(--muted)">상세 ${DTL.rows.length}건</span>`
+                      :'<span style="color:var(--muted)">왼쪽에서 코드군을 선택하세요.</span>'}
+            </div>
+            <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto" id="sc-dwrap">${dtlTable()}</div>
+            <div id="sc-form" style="flex:0 0 auto">${editForm()}</div>
+          </div>
+        </div>
+      </div>`;
+    wire();
+  };
+
+  /* 하단만 다시 그린다 — 상단 스크롤·선택 유지 */
+  const redrawDetail=()=>{
+    const w=c.querySelector('#sc-dwrap'); if(w) w.innerHTML=dtlTable();
+    const h=c.querySelector('#sc-dhead');
+    if(h) h.innerHTML=selKind?`<span class="k">${esc(selKind)}</span> <b>${esc((DTL.head&&DTL.head.nm)||'')}</b>
+        <span style="color:var(--muted)">상세 ${DTL.rows.length}건</span>`:'';
+    const f=c.querySelector('#sc-form'); if(f) f.innerHTML=editForm();
+    const b=c.querySelector('#btn-add'); if(b){ b.disabled=!selKind; b.style.cssText=selKind?'background:#1c47a0;color:#fff':''; }
+    wireDetail();
+  };
+
+  const loadDetail=async(kind)=>{
+    selKind=kind; editing=null;
+    DTL=await api(`/api/syscode/details?kind=${encodeURIComponent(kind)}`);
+    redrawDetail();
+  };
+
+  const loadKinds=async()=>{
+    const r=await api(`/api/syscode/kinds?sys=${encodeURIComponent(fSys)}&q=${encodeURIComponent(fQ)}`);
+    KINDS=r.rows||[];
+    if(!KINDS.some(k=>k.kind===selKind)){ selKind=''; DTL={head:{},rows:[]}; }
+    draw();
+  };
+
+  const wireDetail=()=>{
+    c.querySelectorAll('.dtl-edit').forEach(b=>b.onclick=()=>{
+      const r=DTL.rows[+b.dataset.i]; if(!r) return;
+      editing=Object.assign({}, r, {orig:r.code, orig_ymd:r.ymd});
+      const f=c.querySelector('#sc-form'); if(f){ f.innerHTML=editForm(); wireForm(); }
+    });
+    c.querySelectorAll('.dtl-del').forEach(b=>b.onclick=async()=>{
+      const r=DTL.rows[+b.dataset.i]; if(!r) return;
+      if(!confirm(`상세코드 '${r.code} ${r.nm}' 를 삭제할까요?\n\n이 코드를 쓰는 데이터가 있으면 화면에 코드만 남습니다.`)) return;
+      const z=await api('/api/syscode/detail_delete',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({kind:selKind,code:r.code,ymd:r.ymd})});
+      if(!z.ok){ alert('삭제 실패: '+(z.detail||'')); return; }
+      await loadDetail(selKind); await loadKinds();
+    });
+    wireForm();
+  };
+
+  const wireForm=()=>{
+    const S=id=>c.querySelector(id);
+    const sv=S('#f-save'); if(!sv) return;
+    S('#f-cancel').onclick=()=>{ editing=null; const f=c.querySelector('#sc-form'); if(f) f.innerHTML=''; };
+    sv.onclick=async()=>{
+      const L=(DTL.head&&DTL.head.labels)||{};
+      const p={kind:selKind, user:(typeof STATE!=='undefined'&&STATE.currentUser?STATE.currentUser().nm:'웹'),
+               code:(S('#f-code').value||'').trim(), nm:(S('#f-nm').value||'').trim(),
+               seq:+(S('#f-seq').value||0), use:S('#f-use').value,
+               orig:editing.orig||'', orig_ymd:editing.orig_ymd||''};
+      if(S('#f-ymd')) p.ymd=dateToYmd8(S('#f-ymd').value);
+      ['char1','char2','char3','num1','flag1'].forEach(k=>{ const el=S('#f-'+k); if(el) p[k]=el.value; });
+      if(!p.code){ alert('상세코드를 입력하세요.'); return; }
+      const z=await api('/api/syscode/detail_save',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(p)});
+      if(!z.ok){ alert('저장 실패: '+(z.detail||'')); return; }
+      await loadDetail(selKind); await loadKinds();
+    };
+  };
+
+  const wire=()=>{
+    const S=id=>c.querySelector(id);
+    S('#f-sys').onchange=e=>{ fSys=e.target.value; loadKinds(); };
+    S('#f-q').onkeydown=e=>{ if(e.key==='Enter'){ fQ=e.target.value; loadKinds(); } };
+    S('#btn-search').onclick=()=>{ fQ=S('#f-q').value; loadKinds(); };
+    S('#btn-add').onclick=()=>{
+      if(!selKind) return;
+      const mx=DTL.rows.reduce((a,r)=>Math.max(a,r.seq||0),0);
+      editing={code:'',nm:'',seq:mx+1,use:'1',ymd:'',orig:'',orig_ymd:''};
+      const f=c.querySelector('#sc-form'); if(f){ f.innerHTML=editForm(); wireForm();
+        const el=c.querySelector('#f-code'); if(el) el.focus(); }
+    };
+    /* ★코드군 클릭 = 부분갱신(§3 마스터-디테일). draw() 를 부르면 좌측 스크롤이 첫행으로 리셋된다. */
+    c.querySelectorAll('.kind-row').forEach(tr=>tr.onclick=async()=>{
+      c.querySelectorAll('.kind-row').forEach(x=>{ x.classList.remove('on'); x.style.background=''; });
+      tr.classList.add('on'); tr.style.background='#e8f0ff';
+      await loadDetail(tr.dataset.k);
+    });
+    wireDetail();
+  };
+
+  (async()=>{
+    try{
+      const s=await api('/api/syscode/systems'); SYS=s.rows||[];
+      await loadKinds();
+    }catch(e){
+      c.innerHTML=`<div class="page-title">시스템코드관리</div>
+        <div style="color:#c33;padding:14px">불러오지 못했습니다: ${esc(String(e.message||e))}</div>`;
+    }
+  })();
+};

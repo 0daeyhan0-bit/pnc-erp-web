@@ -89,3 +89,17 @@ _migration/replay_pilot_state.json
 
 # TestBed 실행 로그는 매 실행마다 쌓인다 — 요약(TESTBED_FULLFLOW_*.md)만 추적한다.
 _schema/TESTBED_RESULT_*.txt
+
+# ─── 미러→클린 전환 백업·산출물 (2026-09-09) ───────────────────────────
+# 전환 스크립트가 실행 때마다 타임스탬프 폴더로 원본을 떠 둔다(롤백용).
+# **로컬 되돌리기 전용**이라 저장소에 올릴 것이 아니다 — 하루에도 수십 개가 쌓인다.
+#   되돌리기 근거는 (a) git 히스토리 (b) DB 백업테이블(nx.bk_*) 두 곳에 이미 있다.
+# ★도구(.py)·기록(.md)은 위 _migration 규칙대로 계속 추적한다 — 제외 대상은 '산출물'뿐.
+_schema/bk_*/
+_schema/sp_backup_*/
+_migration/bk/
+# 전환·점검 실행 로그와 CSV 덤프 (재실행하면 다시 나온다)
+_schema/_out_*.csv
+_schema/PRECHECK_*.txt
+_schema/RECOMPOSE_*.txt
+_schema/VERIFY*_*.txt

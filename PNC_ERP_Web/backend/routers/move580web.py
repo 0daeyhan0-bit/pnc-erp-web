@@ -363,7 +363,7 @@ CTE1(item_code, item_gagong_proc_code, mat_code, cum_use_qty, sagub_flag, SET_EX
            CAST('IS0001' AS varchar(10)), CAST('0' AS varchar(1)),
            CAST(AM.IN_CUST_CODE AS varchar(10)),
            CAST(IIF(AM.IN_CUST_CODE>'','',IIF(AM.WORK_CODE='P2','IS0001',
-               (SELECT TOP 1 GAGONG_PROC_CODE FROM {S}.PR_M_ITEM_PROC_GAGONG WITH (NOLOCK)
+               (SELECT TOP 1 GAGONG_PROC_CODE FROM {S}.nx.v_item_proc WITH (NOLOCK)
                  WHERE ITEM_CODE = T.ITEM_CODE AND PROC_SEQ = 1))) AS varchar(10)),
            CAST(AM.WORK_CODE AS varchar(10)), CAST(AM.ITEM_CLASS AS varchar(30))
       FROM PL T
@@ -379,7 +379,7 @@ CTE1(item_code, item_gagong_proc_code, mat_code, cum_use_qty, sagub_flag, SET_EX
            CAST(IIF(CB.VIR_ITEM_FLAG='1', CB.GOLE_IN_CUST_CODE, AM.IN_CUST_CODE) AS varchar(10)),
            CAST(IIF(CB.VIR_ITEM_FLAG='1', CB.GOLE_GAGONG_PROC_CODE,
                IIF(AM.IN_CUST_CODE>'','',
-                   (SELECT GAGONG_PROC_CODE FROM {S}.PR_M_ITEM_PROC_GAGONG WITH (NOLOCK)
+                   (SELECT GAGONG_PROC_CODE FROM {S}.nx.v_item_proc WITH (NOLOCK)
                      WHERE ITEM_CODE = B.ITEM_CODE AND PROC_SEQ = 1))) AS varchar(10)),
            CAST(M.WORK_CODE AS varchar(10)), CAST(M.ITEM_CLASS AS varchar(30))
       FROM CTE1 cb
@@ -388,7 +388,7 @@ CTE1(item_code, item_gagong_proc_code, mat_code, cum_use_qty, sagub_flag, SET_EX
       JOIN {S}.pr_m_item      M  WITH (NOLOCK) ON b.mat_code  = M.item_code
      WHERE ISNULL(b.except_flag,'0')='0'
        AND (B.VIR_ITEM_FLAG='1' OR M.IN_CUST_CODE>'' OR M.WORK_CODE='P2'
-            OR NOT EXISTS (SELECT * FROM {S}.PR_M_ITEM_PROC_GAGONG WITH (NOLOCK) WHERE ITEM_CODE = B.MAT_CODE))
+            OR NOT EXISTS (SELECT * FROM {S}.nx.v_item_proc WITH (NOLOCK) WHERE ITEM_CODE = B.MAT_CODE))
 ),
 CTE2(item_code, item_gagong_proc_code, mat_code, cum_use_qty, sagub_flag, SET_EXCEPT_FLAG,
      WH_GAGONG_PROC_CODE, vir_item_flag, GOLE_IN_CUST_CODE, GOLE_GAGONG_PROC_CODE, WORK_CODE, ITEM_CLASS) AS (
@@ -402,7 +402,7 @@ CTE2(item_code, item_gagong_proc_code, mat_code, cum_use_qty, sagub_flag, SET_EX
            CAST(b.vir_item_flag AS varchar(1)),
            CAST(AM.IN_CUST_CODE AS varchar(10)),
            CAST(IIF(AM.IN_CUST_CODE>'','',
-               (SELECT TOP 1 GAGONG_PROC_CODE FROM {S}.PR_M_ITEM_PROC_GAGONG WITH (NOLOCK)
+               (SELECT TOP 1 GAGONG_PROC_CODE FROM {S}.nx.v_item_proc WITH (NOLOCK)
                  WHERE ITEM_CODE = B.ITEM_CODE AND PROC_SEQ = 1)) AS varchar(10)),
            CAST(M.WORK_CODE AS varchar(10)), CAST(M.ITEM_CLASS AS varchar(30))
       FROM PL T
@@ -422,7 +422,7 @@ CTE2(item_code, item_gagong_proc_code, mat_code, cum_use_qty, sagub_flag, SET_EX
            CAST(IIF(CB.VIR_ITEM_FLAG='1', CB.GOLE_IN_CUST_CODE, AM.IN_CUST_CODE) AS varchar(10)),
            CAST(IIF(CB.VIR_ITEM_FLAG='1', CB.GOLE_GAGONG_PROC_CODE,
                IIF(AM.IN_CUST_CODE>'','',
-                   (SELECT GAGONG_PROC_CODE FROM {S}.PR_M_ITEM_PROC_GAGONG WITH (NOLOCK)
+                   (SELECT GAGONG_PROC_CODE FROM {S}.nx.v_item_proc WITH (NOLOCK)
                      WHERE ITEM_CODE = B.ITEM_CODE AND PROC_SEQ = 1))) AS varchar(10)),
            CAST(M.WORK_CODE AS varchar(10)), CAST(M.ITEM_CLASS AS varchar(30))
       FROM CTE2 cb
@@ -741,13 +741,13 @@ def aggregate(mrows, from_ymd, wh_desc, gole_proc_desc, gole_cust_desc,
 
 def _codemaps(cur, pu_part):
     """코드명 조회 — SP 최종 SELECT 의 상관 서브쿼리들."""
-    cur.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') FROM {S}.PR_M_PROC_GAGONG WITH (NOLOCK)")
+    cur.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') FROM {S}.v_part_master WITH (NOLOCK)")
     gp = {_s(r[0]): _s(r[1]) for r in cur.fetchall()}
-    cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM {S}.CM_M_CUST WITH (NOLOCK)")
+    cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM {S}.v_cm_m_cust WITH (NOLOCK)")
     gc = {_s(r[0]): _s(r[1]) for r in cur.fetchall()}
-    cur.execute(f"SELECT WORK_CODE, ISNULL(WORK_DESC,'') FROM {S}.PR_M_WORK WITH (NOLOCK)")
+    cur.execute(f"SELECT WORK_CODE, ISNULL(WORK_DESC,'') FROM {S}.v_work_place WITH (NOLOCK)")
     mw = {_s(r[0]): _s(r[1]) for r in cur.fetchall()}
-    cur.execute(f"""SELECT DETAIL_CODE, ISNULL(DETAIL_DESC,'') FROM {S}.CM_M_MASTER_DETAIL
+    cur.execute(f"""SELECT DETAIL_CODE, ISNULL(DETAIL_DESC,'') FROM {S}.v_code_detail
                      WITH (NOLOCK) WHERE KIND_CODE='PR008'""")
     ic = {_s(r[0]): _s(r[1]) for r in cur.fetchall()}
     return gp, gc, mw, ic, gp.get(_s(pu_part), "")
@@ -772,7 +772,7 @@ def compute(cur, from_ymd, to_ymd, work_code, pu_part="IS0001"):
         cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM {S}.pr_m_item WITH (NOLOCK) WHERE ITEM_CODE IN ({ph})", *ck)
         for r in cur.fetchall():
             idesc[_s(r[0])] = _s(r[1])
-    cur.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(PROD_RATE,0) FROM {S}.PR_M_PROC_GAGONG WITH (NOLOCK)")
+    cur.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(PROD_RATE,0) FROM {S}.v_part_master WITH (NOLOCK)")
     prate = {_s(r[0]): _f(r[1]) for r in cur.fetchall()}
 
     mrows = build_move_plan(cur, rows, ba, to_ymd, pu_part, idesc, prate)

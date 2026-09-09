@@ -41,7 +41,7 @@ def qc_opt(kind: str = Query("part"), q: str = Query("")):
     like = f"%{q.strip()}%"
     try:
         if kind == "part":
-            cur.execute("""SELECT TOP 50 GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG
+            cur.execute("""SELECT TOP 50 GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') FROM PARTNER_ERP_TEST3.nx.v_part_master
                 WHERE GAGONG_PROC_CODE LIKE ? OR GAGONG_PROC_DESC LIKE ? ORDER BY SORT_KEY, GAGONG_PROC_CODE""", like, like)
         elif kind == "mach":
             cur.execute("""SELECT TOP 50 MACH_CODE, ISNULL(MACH_DESC,'') FROM PARTNER_ERP_TEST3.nx.QA_M_MACHINE
@@ -102,7 +102,7 @@ def qc_error_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
                 CAST(e.SEQ AS INT) lseq,
                 0 f_attach, 0 f_plan1, 0 f_plan2   -- 레거시행은 웹첨부 대상 아님(nx 행에만 첨부 가능)
                 FROM PARTNER_ERP_TEST3.nx.QA_T_ERROR e LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=e.ITEM_CODE
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=e.PROC_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.v_part_master pg ON pg.GAGONG_PROC_CODE=e.PROC_CODE
                 LEFT JOIN PARTNER_ERP_TEST3.nx.QA_M_MACHINE m ON m.MACH_CODE=e.MACH_CODE
                 LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c ON c.CUST_CODE=e.WORK_CUST_CODE WHERE {wl}{dedup}""")
         if src in ("all", "nx"):
@@ -120,7 +120,7 @@ def qc_error_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
                 ISNULL(n.charge_name,'') charge, ISNULL(n.legacy_seq,0) lseq,
                 ISNULL(n.attach_doc_id,0) f_attach, ISNULL(n.plan1_doc_id,0) f_plan1, ISNULL(n.plan2_doc_id,0) f_plan2
                 FROM PARTNER_ERP_TEST3.nx.qc_error n LEFT JOIN PARTNER_ERP_TEST3.nx.item i2 ON i2.ITEM_CODE=n.item_code
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg2 ON pg2.GAGONG_PROC_CODE=n.proc_code
+                LEFT JOIN PARTNER_ERP_TEST3.nx.v_part_master pg2 ON pg2.GAGONG_PROC_CODE=n.proc_code
                 LEFT JOIN PARTNER_ERP_TEST3.nx.QA_M_MACHINE m2 ON m2.MACH_CODE=n.mach_code
                 LEFT JOIN PARTNER_ERP_TEST3.nx.v_cm_m_cust c2 ON c2.CUST_CODE=n.partner_code WHERE {wn}""")
         plist = []
